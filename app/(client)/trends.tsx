@@ -300,7 +300,7 @@ export default function Trends() {
    *  week". */
   const weekLine = logStatus === 'loading' ? 'Reading your training log…'
     : logStatus === 'partial' ? 'More logged than this screen can read at once, so the weekly figures would be short.'
-    : !logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
+    : !logKnown ? 'We couldn’t read your training log. This is not a week with nothing in it.'
     : thisWeek.days
     ? `${thisWeek.days} training day${thisWeek.days === 1 ? '' : 's'} this week`
     : 'Nothing logged this week yet.';
@@ -398,7 +398,7 @@ export default function Trends() {
                   sections on one screen, one telling the truth about the same
                   status and one not. */}
               {logKnown
-                ? 'No training volume logged yet — the trend charts as soon as you log a set.'
+                ? 'No training volume logged yet. The trend charts as soon as you log a set.'
                 : logStatus === 'loading' ? 'Reading your training log…'
                 : logStatus === 'partial' ? 'More logged sets than this screen can read at once, so there is no honest ten-week total to chart over them.'
                 : 'We couldn’t read your training log, so there is nothing to chart here yet. Your history is intact.'}
@@ -543,7 +543,7 @@ export default function Trends() {
                       something about. */}
                   {logKnown && readable.length < series.length ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                      The line breaks where a day had no set this rule could price — a set done at your own
+                      The line breaks where a day had no set this rule could price. A set done at your own
                       bodyweight needs a weight on record for that day. Those days are still on the axis.
                     </Text>
                   ) : null}
@@ -688,10 +688,10 @@ export default function Trends() {
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: verdicts.length ? sp.md : 0 }}>
               {logStatus === 'loading'
                 ? verdicts.length
-                  ? 'Still reading your training log — these are the lifts it was already holding, so your last session may not be in them yet.'
+                  ? 'Still reading your training log. These are the lifts it was already holding, so your last session may not be in them yet.'
                   : 'Reading your training log…'
                 : logStatus === 'partial'
-                ? 'More logged sets than this screen can read at once. The log comes back newest first, so each line below is drawn from a real last session — but a movement you last trained before the read stopped is not on the list at all, which makes this at least what you have been training rather than all of it.'
+                ? 'More logged sets than this screen can read at once. The log comes back newest first, so each line below is drawn from a real last session, but a movement you last trained before the read stopped is not on the list at all, which makes this at least what you have been training rather than all of it.'
                 : verdicts.length
                 ? 'We couldn’t read your training log, so the lines below come from what this phone was already holding and may not include your last session.'
                 : 'We couldn’t read your training log, so there is nothing to read lift by lift. This is not a record with nothing in it.'}
@@ -700,7 +700,7 @@ export default function Trends() {
           {verdicts.length === 0 ? (
             logKnown ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                Nothing here yet — this reads your last session of each lift, and it needs a set with a
+                Nothing here yet. This reads your last session of each lift, and it needs a set with a
                 weight on it to read.
               </Text>
             ) : null
@@ -755,7 +755,7 @@ export default function Trends() {
                   <Text style={{ ...ty.caption, color: t.ink3, }}>
                     Each line reads your most recent session of that lift and nothing before it, so it says where
                     that day landed rather than where the lift is heading. One session is not a direction and two
-                    are not either — the chart above is where a movement over time is drawn.
+                    are not either. The chart above is where a movement over time is drawn.
                   </Text>
                 </Expandable>
               </View>
@@ -769,7 +769,7 @@ export default function Trends() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               No reading for {noVerdict.slice(0, 4).map(movement).join(', ')}
               {noVerdict.length > 4 ? `, and ${noVerdict.length - 4} more` : ''}. This rule works from the
-              weight on the bar, and a set done at your own bodyweight or held for time does not carry one —
+              weight on the bar, and a set done at your own bodyweight or held for time does not carry one,
               so there is nothing here to read, which is not the same as nothing to worry about.
             </Text>
           ) : null}

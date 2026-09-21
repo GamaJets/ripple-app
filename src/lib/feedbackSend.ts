@@ -117,7 +117,7 @@ export function feedbackNote(fate: FeedbackFate): string | null {
   if (fate === 'undelivered') {
     return `${NOTHING_QUEUED}\n\n`
       + 'It never reached us, so there is nothing wrong with what you wrote. Your words are still in '
-      + 'the box — send again once you are back on a connection.';
+      + 'the box. Send again once you are back on a connection.';
   }
   return `${authGateMessage(fate)}\n\n${NOTHING_QUEUED} Your words are still in the box.`;
 }

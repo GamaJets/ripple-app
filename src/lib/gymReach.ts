@@ -111,7 +111,7 @@ export function buildSegments(
   const active = members.filter((m) => m.status === 'active');
   const doorNote = live
     ? ''
-    : ' The door log is silent or unread, so nobody can be placed here — this is not a gym where everyone is still coming in.';
+    : ' The door log is silent or unread, so nobody can be placed here. This is not a gym where everyone is still coming in.';
 
   const seenBand = (lo: number, hi: number | null) => (live
     ? active.filter((m) => m.lastSeenDays != null && m.lastSeenDays >= lo && (hi == null || m.lastSeenDays < hi))
@@ -126,7 +126,7 @@ export function buildSegments(
     },
     {
       id: 'lapsing',
-      label: `Slipping — ${LAPSING_DAYS} to ${UNSEEN_DAYS} days`,
+      label: `Slipping · ${LAPSING_DAYS} to ${UNSEEN_DAYS} days`,
       note: `Active members whose last visit was between ${LAPSING_DAYS} and ${UNSEEN_DAYS} days ago. Still members; the gap is new.${doorNote}`,
       members: seenBand(LAPSING_DAYS, UNSEEN_DAYS),
     },
@@ -139,7 +139,7 @@ export function buildSegments(
     {
       id: 'never-seen',
       label: 'Never through the door',
-      note: `Active members with no visit in the window at all — usually a new joiner nobody has got in yet, occasionally a desk that stopped scanning.${doorNote}`,
+      note: `Active members with no visit in the window at all, usually a new joiner nobody has got in yet, occasionally a desk that stopped scanning.${doorNote}`,
       members: live ? active.filter((m) => m.lastSeenDays == null) : [],
     },
     {
@@ -332,7 +332,7 @@ export function deliveryNote(r: ReachResult, intended: number): string {
     return 'Posted to the gym’s notice board. How many inboxes it reached could not be read, so that number is unknown rather than nil.';
   }
   if (r.delivered < intended) {
-    return `Posted, and delivered to ${r.delivered} of ${intended} inboxes. The difference is accounts the database would not write to — usually somebody who has left the gym. No push was sent; the console cannot send one.`;
+    return `Posted, and delivered to ${r.delivered} of ${intended} inboxes. The difference is accounts the database would not write to, usually somebody who has left the gym. No push was sent; the console cannot send one.`;
   }
-  return `Posted, and delivered to ${r.delivered} ${r.delivered === 1 ? 'inbox' : 'inboxes'}. No push was sent — the console cannot send one, so it will be read next time they open the app.`;
+  return `Posted, and delivered to ${r.delivered} ${r.delivered === 1 ? 'inbox' : 'inboxes'}. No push was sent. The console cannot send one, so it will be read next time they open the app.`;
 }

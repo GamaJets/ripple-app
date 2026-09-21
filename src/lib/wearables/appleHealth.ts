@@ -170,7 +170,7 @@ function sheetWasShown(k: any): Promise<void> {
         reject(new Error(
           'iOS did not show the Apple Health permission sheet, so nothing has been allowed and no '
           + 'reading can arrive. This is a problem with the build, not with your watch: the app is '
-          + 'missing its HealthKit entitlement or its Health usage descriptions. Please report it — '
+          + 'missing its HealthKit entitlement or its Health usage descriptions. Please report it: '
           + 'a rebuild is needed, and reconnecting will not help until then.',
         ));
         return;
@@ -363,7 +363,7 @@ function readSleepRows(options: any): Promise<{ ok: true; rows: any[] } | { ok: 
   return new Promise((resolve) => {
     const k = hk();
     if (!k || typeof k.getSleepSamples !== 'function') {
-      return resolve({ ok: false, missing: true, reason: 'This build’s Apple Health module has no sleep reader — a native rebuild adds it.' });
+      return resolve({ ok: false, missing: true, reason: 'This build’s Apple Health module has no sleep reader. A native rebuild adds it.' });
     }
     try {
       k.getSleepSamples(options, (err: any, res: any) => {
@@ -505,7 +505,7 @@ function unavailable(): string | null {
   return inExpoGo
     ? 'Apple Health cannot run inside Expo Go. Open Repple’s own build instead.'
     : 'This build of Repple was made before Apple Health was added, so it has no way to read it. '
-      + 'It needs a new build — an over-the-air update cannot add it, because Apple Health is part '
+      + 'It needs a new build. An over-the-air update cannot add it, because Apple Health is part '
       + 'of the app itself rather than something we can send. Your watch does not need anything: it '
       + 'syncs into the iPhone’s Health app and Repple reads it from there.';
 }
@@ -517,7 +517,7 @@ export const appleHealth: WearableProvider = {
 
   async connect() {
     if (Platform.OS !== 'ios') throw new Error('Apple Health is iPhone-only.');
-    if (!nativePresent()) throw new Error('Open the Repple dev build to connect Apple Health — it can’t read HealthKit inside Expo Go.');
+    if (!nativePresent()) throw new Error('Open the Repple dev build to connect Apple Health. It can’t read HealthKit inside Expo Go.');
     await requestAuth();
   },
 

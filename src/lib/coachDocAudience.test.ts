@@ -60,7 +60,7 @@ eq(shapeAudience([]).length, 0, 'and so does an empty read');
   const open = shapeAudience(rows.map((r) => ({ ...r, sent_at: null })));
   eq(isAddressed(open), false, 'no recipient rows means the document is open to the roster');
   eq(sentCount(open), 0, 'and nobody has been sent it');
-  eq(audienceLine(open), 'Everyone you coach can read this — all 3 of them.',
+  eq(audienceLine(open), 'Everyone you coach can read this, all 3 of them.',
     'an open document says so plainly, because that is what every pre-156 document is');
 
   const m = shapeAudience(rows);

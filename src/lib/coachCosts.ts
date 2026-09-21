@@ -103,7 +103,7 @@ export const COST_CATEGORIES: ReadonlyArray<{ id: CostCategory; label: string; n
   { id: 'education', label: 'Courses and CPD', note: 'A qualification, a course, a workshop, a book' },
   { id: 'equipment', label: 'Equipment', note: 'Weights, bands, a bench, anything you train people with' },
   { id: 'kit', label: 'Kit', note: 'Clothing you train in, shoes, a bag' },
-  { id: 'travel', label: 'Travel', note: 'Getting to clients — fuel, fares, parking' },
+  { id: 'travel', label: 'Travel', note: 'Getting to clients: fuel, fares, parking' },
   { id: 'professional', label: 'Professional Fees', note: 'An accountant, a solicitor, a registration body' },
   { id: 'other', label: 'Something Else', note: 'Anything the seven above do not cover' },
 ];
@@ -171,7 +171,7 @@ export function costBlockers(d: CostDraft): string[] {
   // problem with a different fix.
   const cur = (d.currency || '').trim();
   if (!cur) {
-    out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym — an owner sets it in the gym settings, or you set one on a package.');
+    out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym. An owner sets it in the gym settings, or you set one on a package.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so no amount can be recorded in it.');
   } else {
@@ -328,7 +328,7 @@ export const COSTS_ARE_NOT_TAX_ADVICE =
  * answer: nothing can detect it, so the screen says it.
  */
 export const COSTS_NOT_TWICE =
-  'Leave out your Repple plan and your ad spend. Both are already counted under what is going out — your plan from your own billing, your ad spend from what you record against a join code — and writing either down here would count it twice. Nothing can tell that two rows are the same money.';
+  'Leave out your Repple plan and your ad spend. Both are already counted under what is going out (your plan from your own billing, your ad spend from what you record against a join code), and writing either down here would count it twice. Nothing can tell that two rows are the same money.';
 
 /**
  * The sentence under an empty list, which depends entirely on the read.

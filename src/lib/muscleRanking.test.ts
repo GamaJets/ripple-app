@@ -148,11 +148,11 @@ const board = (extra: Record<string, unknown> = {}) =>
 
   eq(rankingLine(quads), '4 sets as the main muscle.', 'a prime mover reports its real sets');
   eq(hams.primaryEquivalentSets, 2, 'the hamstrings score two');
-  eq(rankingLine(hams), '4 sets assisting — nothing that trained it directly.',
+  eq(rankingLine(hams), '4 sets assisting. Nothing trained it directly.',
     'and the line reports the four sets they were in, not the two they scored');
   ok(!rankingLine(hams).includes('2 set'),
     'the score never reaches the sentence, because nobody did two sets of hamstrings');
-  eq(rankingLine(tri), '2 sets assisting — nothing that trained it directly.',
+  eq(rankingLine(tri), '2 sets assisting. Nothing trained it directly.',
     'a muscle that only ever assisted says so rather than showing a bare number');
 
   const mixed = muscleWorkBoard([

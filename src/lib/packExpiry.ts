@@ -94,7 +94,7 @@ export function readValidityDays(text: string | null | undefined): TypedValidity
 /** Said next to the field. The whole of why this is safe to add to a package
  *  that has already been selling for two years. */
 export const VALIDITY_NOT_RETROACTIVE =
-  'A validity applies to packs bought from now on. Anything a client is already holding keeps the terms it was sold under — adding a window here does not take credits off anybody, and changing it later does not reach a pack somebody has already paid for.';
+  'A validity applies to packs bought from now on. Anything a client is already holding keeps the terms it was sold under. Adding a window here does not take credits off anybody, and changing it later does not reach a pack somebody has already paid for.';
 
 /** Said next to the field when it is empty, so that "no expiry" reads as a
  *  choice rather than as a box somebody did not fill in. */
@@ -263,8 +263,8 @@ export function expiryLine(p: PackExpiry, left: number | null, today: string): s
       if (left != null && left <= 0) return null;
       const when = n === 1 ? 'today is the last day' : `${n} days left`;
       return left == null
-        ? `This pack runs out on ${day} — ${when}.`
-        : `${left} session${left === 1 ? '' : 's'} on this pack, and it runs out on ${day} — ${when}.`;
+        ? `This pack runs out on ${day} (${when}).`
+        : `${left} session${left === 1 ? '' : 's'} on this pack, and it runs out on ${day} (${when}).`;
     }
     case 'lapsed':
       // Still spendable until the nightly pass runs, and saying otherwise would
@@ -373,7 +373,7 @@ export function strandedNote(who: string | null | undefined, p: PackExpiry, left
   const parts: string[] = [];
   if (lost > 0) {
     parts.push(`${name} paid for ${lost} session${lost === 1 ? '' : 's'} they did not take${day ? `, and the pack ran out on ${day}` : ''}.`
-      + ' Extending it, selling them something else or leaving it are all yours to choose — but they will notice, and it is better coming from you.');
+      + ' Extending it, selling them something else or leaving it are all yours to choose, but they will notice, and it is better coming from you.');
   }
   if (back > 0) {
     // A separate event on a separate day from the one above, so both print
@@ -387,7 +387,7 @@ export function strandedNote(who: string | null | undefined, p: PackExpiry, left
     // pack with usage, and nothing on the client's side can pick it up again.
     parts.push(`${back} session${back === 1 ? '' : 's'} went back on to ${name === 'This client' ? 'their' : `${name}'s`} pack after it had already run out.`
       + ` A refund does not reopen a window, so ${back === 1 ? 'that credit is' : 'those credits are'} sitting where nothing can book`
-      + ` ${back === 1 ? 'it' : 'them'} — moving ${back === 1 ? 'it' : 'them'} on to a pack that is still open is yours to do, and only yours.`);
+      + ` ${back === 1 ? 'it' : 'them'}. Moving ${back === 1 ? 'it' : 'them'} on to a pack that is still open is yours to do, and only yours.`);
   }
   return parts.join(' ');
 }

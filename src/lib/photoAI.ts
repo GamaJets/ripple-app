@@ -196,7 +196,7 @@ export function mayAnalyzePhoto(consent: PhotoConsent, available: boolean): Phot
  */
 export const PHOTO_SENT: string[] = [
   'the photograph itself, in full',
-  'anything else in the frame — other people, their faces, the room',
+  'anything else in the frame: other people, their faces, the room',
 ];
 
 /** What does not go. Also rendered, for the same reason. */
@@ -221,7 +221,7 @@ export const PHOTO_DESTINATION =
  */
 
 export const MEAL_PHOTO_SENT: string[] = [
-  'the photograph itself, in full — the whole frame, not a crop of the plate',
+  'the photograph itself, in full: the whole frame, not a crop of the plate',
   'whoever else is at the table, their faces, and the room you are in',
 ];
 
@@ -233,7 +233,7 @@ export const MEAL_PHOTO_SENT: string[] = [
 export const MEAL_PHOTO_NOT_SENT: string[] = [
   'your name, your account or anything else about you',
   'your weight, your scans, your injuries or your check-in scores',
-  'your food log — the reader gets this one picture and nothing else about you',
+  'your food log (the reader gets this one picture and nothing else about you)',
 ];
 
 export const MEAL_PHOTO_DESTINATION =
@@ -282,7 +282,7 @@ export const PHOTO_ASK_TITLE: Record<PhotoSubject, string> = {
  */
 export const PHOTO_IF_YOU_DECLINE: Record<PhotoSubject, string> = {
   machine: 'If you say no, nothing is sent. You pick the machine from the list, which is how this screen worked before photos existed.',
-  meal: 'If you say no, nothing is sent anywhere. You still take the photo, it stays on this phone, and you type the calories and macros while you look at it — the meal is logged exactly the same.',
+  meal: 'If you say no, nothing is sent anywhere. You still take the photo, it stays on this phone, and you type the calories and macros while you look at it. The meal is logged exactly the same.',
 };
 
 export const PHOTO_SEND_LABEL: Record<PhotoSubject, string> = {
@@ -291,8 +291,8 @@ export const PHOTO_SEND_LABEL: Record<PhotoSubject, string> = {
 };
 
 export const PHOTO_DECLINE_LABEL: Record<PhotoSubject, string> = {
-  machine: 'No — I’ll Pick It Myself',
-  meal: 'No — I’ll Type It Myself',
+  machine: 'No, I’ll Pick It Myself',
+  meal: 'No, I’ll Type It Myself',
 };
 
 /** Spoken labels. A screen reader reads a button without the paragraph above
@@ -303,8 +303,8 @@ export const PHOTO_SEND_A11Y: Record<PhotoSubject, string> = {
 };
 
 export const PHOTO_DECLINE_A11Y: Record<PhotoSubject, string> = {
-  machine: 'Do not send photos to Anthropic — pick the machine from the list instead',
-  meal: 'Do not send photos to Anthropic — type the meal in myself instead',
+  machine: 'Do not send photos to Anthropic. Pick the machine from the list instead',
+  meal: 'Do not send photos to Anthropic. Type the meal in myself instead',
 };
 
 /**
@@ -323,7 +323,7 @@ export const PHOTO_REFUSED_TITLE: Record<PhotoSubject, string> = {
 
 export const PHOTO_REFUSED_NOTE: Record<PhotoSubject, string> = {
   machine: 'No photo left this phone. Pick the machine below and everything after that works the same.',
-  meal: 'Your photo has not left this phone and nothing was read from it, so nothing has been estimated. It is on screen to look at while you type — fill the boxes in and this meal counts exactly like any other.',
+  meal: 'Your photo has not left this phone and nothing was read from it, so nothing has been estimated. It is on screen to look at while you type. Fill the boxes in and this meal counts exactly like any other.',
 };
 
 /** Shown when the member has said yes but the reader gave nothing back. A
@@ -332,7 +332,7 @@ export const PHOTO_REFUSED_NOTE: Record<PhotoSubject, string> = {
  *  differently. */
 export const PHOTO_UNREAD_NOTE: Record<PhotoSubject, string> = {
   machine: 'Nothing could be identified from your photo. Pick the machine below.',
-  meal: 'Nothing could be read from your picture, so nothing has been estimated from it. Enter the calories and macros and they go into your log. The picture itself is not kept — it is here to check against while you type.',
+  meal: 'Nothing could be read from your picture, so nothing has been estimated from it. Enter the calories and macros and they go into your log. The picture itself is not kept. It is here to check against while you type.',
 };
 
 /**
@@ -347,5 +347,5 @@ export const PHOTO_UNREAD_NOTE: Record<PhotoSubject, string> = {
  */
 export const PHOTO_OFF_NOTE: Record<PhotoSubject, string> = {
   machine: 'This build has no machine reader, so no photo was sent. Scan the code or pick the machine from the list.',
-  meal: 'This build cannot read a photo, so nothing was sent anywhere and nothing has been estimated. Your picture is on screen to look at — type the calories and macros in and this meal is logged exactly the same.',
+  meal: 'This build cannot read a photo, so nothing was sent anywhere and nothing has been estimated. Your picture is on screen to look at. Type the calories and macros in and this meal is logged exactly the same.',
 };

@@ -365,7 +365,7 @@ export function issuerCaveat(status: LoadStatus): string | null {
   if (status === 'partial') {
     return 'Issuer details: more was on record than could be read in one request. What is printed is real and it may not be all of it.';
   }
-  return 'Issuer details: the name of the person issuing this could not be read when the document was made. The From line is EMPTY BECAUSE OF A FAILED READ — do not treat the missing name as the name being absent from the record.';
+  return 'Issuer details: the name of the person issuing this could not be read when the document was made. The From line is EMPTY BECAUSE OF A FAILED READ. Do not treat the missing name as the name being absent from the record.';
 }
 
 /** Every caveat this document has to carry. Empty means everything read. */
@@ -485,7 +485,7 @@ export const INVOICE_DUE_NOT_A_TERM =
  * Friday marks it by issuing a 'received' invoice, not by this app noticing.
  */
 export const AGEING_IS_YOUR_OWN_RECORD =
-  'This list is built from the due dates you typed and this phone’s clock. Nothing here has been checked against a bank or a card processor, and nobody tells this app when a client pays you — an invoice stays on this list until you say otherwise.';
+  'This list is built from the due dates you typed and this phone’s clock. Nothing here has been checked against a bank or a card processor, and nobody tells this app when a client pays you. An invoice stays on this list until you say otherwise.';
 
 /**
  * Where one invoice stands against its own due date.
@@ -790,7 +790,7 @@ export function ageingBook(rows: readonly CoachInvoice[], status: LoadStatus, to
   // chasing, which goes on no document and is worded as theirs everywhere it
   // appears. See `CHASE_FROM_IS_NOT_A_DUE_DATE`.
   const undatedNote = status === 'ready' && undated.length
-    ? `${undated.length} invoice${undated.length === 1 ? '' : 's'} you are still asking for ${undated.length === 1 ? 'has' : 'have'} no due date on ${undated.length === 1 ? 'it' : 'them'}, so ${undated.length === 1 ? 'it is' : 'they are'} in no figure above and on no list of what is late. The due date on a document cannot be changed after it is issued — but you can set a day to start chasing each of these from, which is your own note and appears on nothing you send.`
+    ? `${undated.length} invoice${undated.length === 1 ? '' : 's'} you are still asking for ${undated.length === 1 ? 'has' : 'have'} no due date on ${undated.length === 1 ? 'it' : 'them'}, so ${undated.length === 1 ? 'it is' : 'they are'} in no figure above and on no list of what is late. The due date on a document cannot be changed after it is issued, but you can set a day to start chasing each of these from, which is your own note and appears on nothing you send.`
     : null;
 
   return { overdue, upcoming, undated, outstanding, withheld, undatedNote };
@@ -843,7 +843,7 @@ export const INVOICE_SETTLEMENT_IS_YOUR_WORD =
  */
 export function settleBlocker(inv: CoachInvoice): string | null {
   if (inv.voidedAt) return 'This one is voided, so there is nothing to settle. A voided document is not a charge that stands.';
-  if (inv.settledOn) return `You already recorded this one as settled on ${invoiceDayLabel(inv.settledOn)}. A settlement is written once — if the money went back out, that is a refund or a chargeback and it happened on its own day.`;
+  if (inv.settledOn) return `You already recorded this one as settled on ${invoiceDayLabel(inv.settledOn)}. A settlement is written once. If the money went back out, that is a refund or a chargeback and it happened on its own day.`;
   if (inv.kind === 'received') return 'This one already states the money was received, so there is nothing to record. Settling it as well would put the same payment on one document twice, on two dates.';
   return null;
 }
@@ -876,7 +876,7 @@ export function settleBlocker(inv: CoachInvoice): string | null {
  * a paper ledger has always handled this.
  */
 export function voidBlocker(inv: CoachInvoice): string | null {
-  if (inv.voidedAt) return 'This one is already voided. A number is cancelled once and never uncancelled — somebody has been told it was.';
+  if (inv.voidedAt) return 'This one is already voided. A number is cancelled once and never uncancelled: somebody has been told it was.';
   if (inv.settledOn) {
     return `You recorded this one as settled on ${invoiceDayLabel(inv.settledOn)}, and a document cannot say both that it was paid and that it was cancelled. `
       + 'A settlement is written once, so if that was the wrong invoice the way to correct it is a new document for the difference, not a void on this one.';
@@ -919,7 +919,7 @@ export function settleDayBlocker(inv: CoachInvoice, settledOn: string, today: st
  * to it, and the client never saw it.
  */
 export const CHASE_FROM_IS_NOT_A_DUE_DATE =
-  'A day you set to chase from is your own note about your own list. It is not printed on the invoice, it was never sent to anybody, and nothing about it is a term your client has agreed to — this app has not told them a date and cannot. It exists so an invoice with no due date on it can be on a list at all, instead of sitting outside every figure for ever.';
+  'A day you set to chase from is your own note about your own list. It is not printed on the invoice, it was never sent to anybody, and nothing about it is a term your client has agreed to. This app has not told them a date and cannot. It exists so an invoice with no due date on it can be on a list at all, instead of sitting outside every figure for ever.';
 
 /**
  * Whether a chase date can be set on this invoice, and the reason when it
@@ -1035,7 +1035,7 @@ export function readTaxRate(text: string | null | undefined): TypedRate {
   const raw = String(text ?? '').trim().replace(/\s/g, '').replace(/%$/, '');
   if (!raw) return { ok: true, pct: null };
   if (!/^\d{1,3}([.,]\d{1,3})?$/.test(raw)) {
-    return { ok: false, reason: 'A tax rate is a percentage — 20, or 12.5. Type the number on its own, with no per-cent sign and no currency.' };
+    return { ok: false, reason: 'A tax rate is a percentage: 20, or 12.5. Type the number on its own, with no per-cent sign and no currency.' };
   }
   const n = Number(raw.replace(',', '.'));
   if (!Number.isFinite(n)) {
@@ -1136,7 +1136,7 @@ export function invoiceBlockers(d: InvoiceDraft): string[] {
   // currency" is a different problem with a different fix.
   const cur = (d.currency || '').trim();
   if (!cur) {
-    out.push('No currency has been set, so there is nothing to price this in. Repple is white-labelled and there is no default that is right for every gym — an owner sets it in the gym settings, or you set one on a package.');
+    out.push('No currency has been set, so there is nothing to price this in. Repple is white-labelled and there is no default that is right for every gym. An owner sets it in the gym settings, or you set one on a package.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so it cannot be printed on an invoice.');
   } else {
@@ -1251,7 +1251,7 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
   T.push('', 'FROM AND TO');
   if (!readIssuer) {
     H.push('<p class="none"><b>Not read.</b> The issuer’s name could not be read from the server when this document was made, so nothing is printed here. This is not a statement that the record has no name in it.</p>');
-    T.push('From: NOT READ — the issuer’s name could not be read. This is not a statement that the record has no name in it.');
+    T.push('From: NOT READ. The issuer’s name could not be read. This is not a statement that the record has no name in it.');
   } else if (!issuerName) {
     H.push('<p class="none">The issuer has not recorded a name on their account.</p>');
     T.push('From: the issuer has not recorded a name on their account.');
@@ -1385,7 +1385,7 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
     ? `VOIDED. Invoice ${no}, issued ${invoiceDayLabel(inv.issuedOn)}${brand ? ' through ' + brand : ''}.`
     : complete
       ? `Invoice ${no}, issued ${invoiceDayLabel(inv.issuedOn)}${brand ? ' through ' + brand : ''}.`
-      : `Invoice ${no} — PARTS OF THIS DOCUMENT COULD NOT BE READ, see above${brand ? '. Issued through ' + brand : ''}.`;
+      : `Invoice ${no}. PARTS OF THIS DOCUMENT COULD NOT BE READ, see above${brand ? '. Issued through ' + brand : ''}.`;
   H.push(`<p class="foot">${escapeHtml(foot)}</p>`);
   T.push('', foot);
 
@@ -1401,7 +1401,7 @@ export function coachInvoiceDoc(input: CoachInvoiceInput): CoachInvoiceDoc {
  * because it is already in somebody else's inbox.
  */
 export function invoiceShareBlurb(doc: CoachInvoiceDoc, inv: CoachInvoice): string {
-  const base = `Invoice ${invoiceNumber(inv.seq)} for ${inv.billTo}. It states no tax and it is not a payment receipt — both are said on the document itself.`;
+  const base = `Invoice ${invoiceNumber(inv.seq)} for ${inv.billTo}. It states no tax and it is not a payment receipt. Both are said on the document itself.`;
   const parts = [base];
   if (inv.voidedAt) {
     parts.push('THIS ONE IS VOIDED. The document says so across its top. Send it only if you mean to tell them it was cancelled.');

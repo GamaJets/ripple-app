@@ -140,7 +140,7 @@ export default function Nudges() {
   const setAside = (item: Nudge) => {
     Alert.alert(
       `Set ${item.name ?? 'This Client'} Aside?`,
-      `They will not be suggested again for ${item.mutedDaysIfDismissed} days. They stay on your Clients tab throughout — this only stops the prompt.`,
+      `They will not be suggested again for ${item.mutedDaysIfDismissed} days. They stay on your Clients tab throughout. This only stops the prompt.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -266,7 +266,7 @@ export default function Nudges() {
         ) : n.status === 'error' ? (
           <Section>
             <Notice tone={t.crit} kicker="Unreadable" title="Nothing Is Suggested, Because Nothing Was Read"
-              note="This is not a quiet week. The training records did not come back, so no client can honestly be called quiet — pull back and open this again once you are connected.">
+              note="This is not a quiet week. The training records did not come back, so no client can honestly be called quiet. Pull back and open this again once you are connected.">
               <View style={{ marginTop: sp.md }}>
                 <Ghost label="Try Again" onPress={() => { void n.reload(); }} />
               </View>
@@ -287,7 +287,7 @@ export default function Nudges() {
               <Section>
                 <Notice tone={t.warn} kicker="Not Assessed"
                   title={`${board.withheld.length} on Your Book Could Not Be Assessed`}
-                  note="They are not below, and they are not fine — nothing could be read about them. This list is not your whole book.">
+                  note="They are not below, and they are not fine. Nothing could be read about them. This list is not your whole book.">
                   <View style={{ marginTop: sp.md }}>
                     {board.withheld.map((w) => (
                       <Flag key={w.clientId} tone={t.warn} style={{ marginTop: sp.sm }}>
@@ -411,7 +411,7 @@ export default function Nudges() {
                           <Ghost label="Read for This Week" onPress={n.dismissWatchDigest} />
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                             This closes until next week. Nobody here is removed from your book and nothing changes for
-                            them — it is this section that goes quiet, not them.
+                            them. It is this section that goes quiet, not them.
                           </Text>
                         </View>
                       ) : null}
@@ -543,7 +543,7 @@ export default function Nudges() {
                 ?? 'That message is saved on this phone and has not been sent yet. It goes as soon as you are back online.';
               Alert.alert('Waiting to Send', r.ok
                 ? waiting
-                : `${waiting} It could not be written to your record of who you have contacted, so they may be suggested again on another device — not on this one.`);
+                : `${waiting} It could not be written to your record of who you have contacted, so they may be suggested again on another device, though not on this one.`);
               return body;
             }}
           />
@@ -657,7 +657,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
-        <PageHead title={nudge.name ?? 'Client'} subtitle="Draft — nothing sent yet" onBack={onClose} backLabel="Close Without Sending" />
+        <PageHead title={nudge.name ?? 'Client'} subtitle="Draft · nothing sent yet" onBack={onClose} backLabel="Close Without Sending" />
 
         <Section>
           <Text style={{ ...ty.label, color: t.ink2 }}>{nudge.observed}</Text>
@@ -688,7 +688,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
             <View style={{ marginTop: sp.md }}>
               <Flag tone={t.warn}>
                 {'As written this says something the app cannot know: ' + claims.join('; ')
-                  + '. Yours to send if you know it — the app would not have written it.'}
+                  + '. Yours to send if you know it. The app would not have written it.'}
               </Flag>
             </View>
           ) : null}
@@ -702,7 +702,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             Once sent, {nudge.name ?? 'they'} will not be suggested again for{' '}
-            {nudge.mutedDaysIfSent} days — paced from how often they used to train, not from a
+            {nudge.mutedDaysIfSent} days, paced from how often they used to train, not from a
             fixed number.
           </Text>
         </Section>

@@ -120,7 +120,7 @@ export function paidNote(t: PaidTotal, last?: string): string | undefined {
     case 'unstated':
       return `${t.count} payment${t.count === 1 ? '' : 's'} on record ${t.count === 1 ? 'states' : 'state'} no amount or no currency, so a total cannot be written`;
     case 'many':
-      return `paid in ${t.currencies.join(' and ')} — two currencies are not one total, so the figure is on each payment below instead`;
+      return `paid in ${t.currencies.join(' and ')}. Two currencies are not one total, so the figure is on each payment below instead`;
     case 'one':
       return t.short > 0
         ? `${t.short} further payment${t.short === 1 ? '' : 's'} states no amount or no currency and ${t.short === 1 ? 'is' : 'are'} not in this figure`

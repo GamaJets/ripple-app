@@ -158,7 +158,7 @@ export function readHold(text: string): HoldRead {
   }
   if (secs <= 0) return { ok: false, reason: 'A hold has to be at least one second.' };
   if (secs > MAX_HOLD_SECONDS) {
-    return { ok: false, reason: `That is over two hours. Type the hold in seconds — 45 for forty-five seconds — or as minutes and seconds like 1:30.` };
+    return { ok: false, reason: `That is over two hours. Type the hold in seconds (45 for forty-five seconds) or as minutes and seconds like 1:30.` };
   }
   return { ok: true, secs };
 }

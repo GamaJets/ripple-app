@@ -398,7 +398,7 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {c.status === 'loading'
  ? 'Reading your measurements…'
  : c.status === 'error'
- ? 'We could not read your weight and body fat, so these are not worked out. They are still on your record — we just cannot see them right now.'
+ ? 'We could not read your weight and body fat, so these are not worked out. They are still on your record. We just cannot see them right now.'
  : 'These are worked out from your weight and body fat, and there is nothing on record yet to work them out from.'}
  </Text>
  {c.status === 'ready' ? (

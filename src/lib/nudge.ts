@@ -338,7 +338,7 @@ const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? o
  */
 export function draftMessage(name: string | null | undefined, d: Drift): string {
   const who = greetingName(name);
-  const hi = who ? `Hi ${who} — ` : '';
+  const hi = who ? `Hi ${who}, ` : '';
 
   // Silent for a countable stretch: say the number and the date, because a
   // client who has been logging elsewhere can correct both.
@@ -378,7 +378,7 @@ export function draftMessage(name: string | null | undefined, d: Drift): string 
   const rate = d.baselinePerWeek != null && d.recentPerWeek != null
     ? ` It's been ${d.recentPerWeek} a week lately where it used to be ${d.baselinePerWeek}.`
     : '';
-  return `${hi}Just checking in on how training's fitting in at the moment.${rate} `
+  return `${hi}${hi ? 'just' : 'Just'} checking in on how training's fitting in at the moment.${rate} `
     + `Anything you'd want to change about the plan?`;
 }
 
@@ -465,12 +465,12 @@ export function explainDrift(
   lines.push(
     lastSeen
       ? `Last thing on record: ${SOURCE_LABEL[lastSeen.kind].replace(/s$/, '')} on ${readableDay(lastSeen.day)}`
-        + (d.quietDays != null ? ` — ${plural(d.quietDays, 'day')} ago.` : '.')
+        + (d.quietDays != null ? `, ${plural(d.quietDays, 'day')} ago.` : '.')
       : `Nothing on record at all, from any source.`,
   );
   lines.push(
     `${readableDay(window.recentFrom)} to ${readableDay(window.today)}: `
-    + (recentDays.length ? `${plural(recentDays.length, 'active day')} — ${recentDays.map((r) => readableDay(r.day)).join(', ')}.`
+    + (recentDays.length ? `${plural(recentDays.length, 'active day')}: ${recentDays.map((r) => readableDay(r.day)).join(', ')}.`
       : 'no active days.'),
   );
   lines.push(
@@ -479,7 +479,7 @@ export function explainDrift(
       ? 'not on your book yet, so there is no baseline to compare against.'
       : baselineDays.length
         ? `${plural(baselineDays.length, 'active day')} over ${d.baselineSpanDays} days`
-          + (d.baselinePerWeek != null ? ` — ${d.baselinePerWeek} a week.` : ', which is too few to call a pattern.')
+          + (d.baselinePerWeek != null ? `, ${d.baselinePerWeek} a week.` : ', which is too few to call a pattern.')
         : 'no active days, so there is no pattern to have broken.'),
   );
   lines.push(
@@ -499,7 +499,7 @@ export type WithheldWhy = 'no-account' | 'read-failed' | 'read-partial';
 
 export const WITHHELD_NOTE: Record<WithheldWhy, string> = {
   'no-account':
-    'Added by hand, with no Repple account — there is nothing to read and no thread to write in.',
+    'Added by hand, with no Repple account. There is nothing to read and no thread to write in.',
   'read-failed':
     'Their training record could not be read, so nothing can be said about it. Not the same as quiet.',
   'read-partial':
@@ -806,8 +806,8 @@ export function watchDigestNote(rows: readonly WatchRow[]): string {
     return 'Nobody assessed has slipped without breaking their pattern this week.';
   }
   return `${plural(rows.length, 'client')} on your book ${rows.length === 1 ? 'is' : 'are'} doing less than they were, `
-    + 'and not by enough to be called quiet. There is nothing drafted for them and nothing to act on today — '
-    + 'this is the week where a word costs least.';
+    + 'and not by enough to be called quiet. There is nothing drafted for them and nothing to act on today. '
+    + 'This is the week where a word costs least.';
 }
 
 /**
@@ -823,7 +823,7 @@ export function boardNote(b: NudgeBoard | null): string {
   parts.push(b.nudges.length
     ? `${plural(b.nudges.length, 'client')} worth a message.`
     : b.assessed
-      ? 'Nobody to chase — everybody assessed is holding their pattern or has been contacted.'
+      ? 'Nobody to chase. Everybody assessed is holding their pattern or has been contacted.'
       : 'Nobody could be assessed.');
   if (b.muted.length) parts.push(`${b.muted.length} set aside.`);
   if (b.withheld.length) {

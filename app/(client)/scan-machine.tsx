@@ -150,7 +150,7 @@ export default function ScanMachine() {
     const v = (visionAvailable() && b64) ? await analyzeMachine(b64, 'image/jpeg') : null;
     setReading(false);
     setScanned('photo'); setRawCode(''); setRecalled(false); // photo id — no serial to remember
-    if (!v) { setExercise(''); setGroup(''); setCardio(false); setNeedsPick(true); Alert.alert('Could Not Identify', 'I could not read the machine from that photo — pick it from the list below.'); return; }
+    if (!v) { setExercise(''); setGroup(''); setCardio(false); setNeedsPick(true); Alert.alert('Could Not Identify', 'I could not read the machine from that photo. Pick it from the list below.'); return; }
     const d = identifyMachine(v.name);
     if (d) { applyDef(d); }
     else { setExercise(v.name); setGroup(v.muscleGroup || ''); setCardio(v.isCardio); setNeedsPick(true); tapLight(); }
@@ -222,7 +222,7 @@ export default function ScanMachine() {
       Alert.alert(
         timedSet ? 'Add the Hold' : 'Add the Reps',
         timedSet
-          ? 'Type how long you held it — 45, or 1:30 — then tap Add Set.'
+          ? 'Type how long you held it (45, or 1:30), then tap Add Set.'
           : 'Type how many repetitions you did, then tap Add Set. Nothing has been added yet.',
       );
       return;
@@ -307,7 +307,7 @@ export default function ScanMachine() {
     // Remember this machine's setup so the next scan of the same code auto-fills.
     if (rawCode) rememberMachine(rawCode, { name: named, group, cardio, unit });
     if (out === 'unsent') {
-      Alert.alert('Saved on This Phone', named + ' has not reached your workout log yet — there is no connection here. Nothing is lost: it is saved on this phone and goes up on its own the next time you have signal.', [{ text: 'OK' }]);
+      Alert.alert('Saved on This Phone', named + ' has not reached your workout log yet. There is no connection here. Nothing is lost: it is saved on this phone and goes up on its own the next time you have signal.', [{ text: 'OK' }]);
       return;
     }
     if (out === 'refused') {
@@ -414,7 +414,7 @@ export default function ScanMachine() {
                     {/* 'No' is recorded, not merely dismissed: a dismissal asks
                         again on the next tap and that is how a question becomes
                         a nag. The machine is still pickable from the list. */}
-                    <Ghost label="No — I'll Pick It Myself" onPress={() => { photoAI.answer('no'); setAskPhoto(false); setManual(true); setNeedsPick(true); setExercise(''); }} />
+                    <Ghost label="No, I'll Pick It Myself" onPress={() => { photoAI.answer('no'); setAskPhoto(false); setManual(true); setNeedsPick(true); setExercise(''); }} />
                   </View>
                 </Notice>
               ) : (
@@ -433,11 +433,11 @@ export default function ScanMachine() {
                 <Text style={{ ...ty.micro, color: t.ink3 }}>{recalled ? 'Remembered' : needsPick ? 'Pick the Machine' : 'Machine Identified'}</Text>
               </View>
               {recalled ? (
-                <Text style={{ ...ty.caption, color: t.ink3 }}>You set this machine up before — recalled automatically. Edit if you like.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>You set this machine up before, so it was recalled automatically. Edit if you like.</Text>
               ) : needsPick && rawCode && looksLikeSerial(rawCode) ? (
-                <Text style={{ ...ty.caption, color: t.ink3 }}>The machine's code (<Text style={{ color: t.ink2 }}>{rawCode.slice(0, 18)}</Text>) is just its serial — choose the exercise below. We'll remember it next time.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>The machine's code (<Text style={{ color: t.ink2 }}>{rawCode.slice(0, 18)}</Text>) is just its serial. Choose the exercise below. We'll remember it next time.</Text>
               ) : (
-                <Text style={{ ...ty.caption, color: t.ink3 }}>Exercise — edit if it's not quite right.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Exercise: edit if it's not quite right.</Text>
               )}
               <TextInput value={exercise} onChangeText={setExercise} placeholder="Exercise name" placeholderTextColor={t.ink3}
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginTop: sp.md, textTransform: 'capitalize' }} />
@@ -525,7 +525,7 @@ export default function ScanMachine() {
                   ))}
                 </View>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  Calories come from the machine's console or your Apple Watch. Leave it blank and we'll work it out from your average watts{watts.trim() && kcalNow != null ? ' (≈ ' + num(kcalNow) + ' kcal)' : ''} — with neither, the session logs without a calorie figure.
+                  Calories come from the machine's console or your Apple Watch. Leave it blank and we'll work it out from your average watts{watts.trim() && kcalNow != null ? ' (≈ ' + num(kcalNow) + ' kcal)' : ''}. With neither, the session logs without a calorie figure.
                 </Text>
               </Section>
             ) : (
@@ -617,7 +617,7 @@ export default function ScanMachine() {
                     {strengthKcal != null ? (
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: sp.sm }}>≈ {num(strengthKcal)} kcal, estimated from your total volume.</Text>
                     ) : (
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>No load on these sets, so there is nothing to estimate calories from — the session logs without a figure.</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>No load on these sets, so there is nothing to estimate calories from, so the session logs without a figure.</Text>
                     )}
                   </View>
                 ) : null}

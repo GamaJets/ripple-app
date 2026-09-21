@@ -915,6 +915,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         const who = uidFromAuth(whoRes);
         if (who.fate !== null) {
           if (who.fate === 'unreadable') {
+            // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
             reportError('clientData.hydrate.auth', new Error('auth read unreadable — who is signed in could not be established'));
             setScansStatus('error'); setProfileStatus('error');
             return;

@@ -61,7 +61,7 @@ import { isWhole, type LoadStatus } from '../ui/loadStatus';
  */
 export const CLOSE_IS_NOT_A_PHONE_ACT =
   'This is the month as it reads right now. Closing it is done on the web console, and only there: a close files a '
-  + 'permanent snapshot of these figures and then locks the month — no payment, invoice or cost dated inside it can be '
+  + 'permanent snapshot of these figures and then locks the month. No payment, invoice or cost dated inside it can be '
   + 'recorded by anybody until an owner reopens it with a written reason. That is a decision taken with the whole sheet '
   + 'in front of you.';
 
@@ -76,7 +76,7 @@ export const CLOSE_UNREAD_NOTE =
  * list under an unfinished read is the absence of an answer.
  */
 export const CLOSE_FIGURES_UNREAD_NOTE =
-  'The month’s own records are not all in hand, so there is no verdict — not a clean one and not a blocked one. '
+  'The month’s own records are not all in hand, so there is no verdict: not a clean one and not a blocked one. '
   + 'Whatever is already filed for this month is unaffected.';
 
 /**
@@ -91,7 +91,7 @@ export const FILING_UNKNOWN_NOTE =
 
 /** A filed month whose live rows have moved since. Movement, never an error. */
 export const DRIFT_IS_NOT_AN_ERROR =
-  'A filed month whose figures have since moved is ordinary — a refund recorded later correctly changes what an '
+  'A filed month whose figures have since moved is ordinary. A refund recorded later correctly changes what an '
   + 'earlier month’s ledger says. It is not a mistake and nothing needs undoing. It is the thing anybody holding the '
   + 'filed figure has to be told about.';
 
@@ -346,7 +346,7 @@ function headlineFor(c: MonthClose | null, label: string, filing: Filing): strin
   const open = filing.state === 'open';
   if (!c) {
     return open
-      ? `${label} has not been signed off, and its records are not all in hand — so there is no verdict yet.`
+      ? `${label} has not been signed off, and its records are not all in hand, so there is no verdict yet.`
       : `${label}’s records are not all in hand, so there is no verdict yet.`;
   }
   if (c.state === 'blocked') {

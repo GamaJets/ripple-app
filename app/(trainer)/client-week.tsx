@@ -548,7 +548,7 @@ export default function ClientWeek() {
             {r.status === 'error' ? (
               <Section>
                 <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-                  note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+                  note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
 
@@ -587,7 +587,7 @@ export default function ClientWeek() {
                 ) : board.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their planned days could not be read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has marked nothing — that is a different answer, and this screen cannot tell you which one you are looking at until the read succeeds.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has marked nothing. That is a different answer, and this screen cannot tell you which one you are looking at until the read succeeds.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
@@ -596,7 +596,7 @@ export default function ClientWeek() {
                       The read came back and {who} has marked no days between{' '}
                       {dayHeading(window?.fromISO ?? '')} and {dayHeading(window?.toISO ?? '')}.
                       That is about them rather than
-                      about the connection — most clients never open the planner, so an empty
+                      about the connection. Most clients never open the planner, so an empty
                       fortnight is the ordinary answer and not a problem to solve.
                     </Text>
                   </Section>
@@ -663,7 +663,7 @@ export default function ClientWeek() {
                       <Expandable title="What Ahead Covers">
                       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                         Today and the next {DAYS_AHEAD - 1} days. Far enough out to hold the whole of
-                        next week, which is where a deload or a week away needs catching — after it
+                        next week, which is where a deload or a week away needs catching. After it
                         starts is too late to reprogram it.
                       </Text>
                       </Expandable>
@@ -673,7 +673,7 @@ export default function ClientWeek() {
                         // which is why this may say they use the planner.
                         <Text style={{ ...ty.body, color: t.ink2 }}>
                           Nothing marked from today on. {who} did mark days in the week just gone,
-                          so they do use the planner — this fortnight is simply empty.
+                          so they do use the planner. This fortnight is simply empty.
                         </Text>
                       )}
                     </Section>
@@ -819,7 +819,7 @@ export default function ClientWeek() {
                 {shownWeek && shownWeek.at.count > 1 && board.state !== 'unreadable' ? (
                   <Section>
                     <Flag tone={t.ink3}>
-                      Compared against {shownWeek.label.toLowerCase()}, which is the week {who} is on —
+                      Compared against {shownWeek.label.toLowerCase()}, which is the week {who} is on:
                       week {shownWeek.at.index + 1} of {shownWeek.at.count}
                       {shownWeek.at.reason === 'no-date' ? ', because no start date is set on this block' : ''}
                       {shownWeek.at.reason === 'unreadable' ? ', because the start date stored on this block cannot be read' : ''}
@@ -854,7 +854,7 @@ export default function ClientWeek() {
         {/* What this page is, said once and below the record: the board opens
             on the week, not on a paragraph. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          The days a client has marked ahead of time — training, rest, a deload, or a note about
+          The days a client has marked ahead of time: training, rest, a deload, or a note about
           being away. Every line here is what they intend, never a record of what they did, and
           none of it is yours to change.
         </Text>

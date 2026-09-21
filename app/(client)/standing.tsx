@@ -295,7 +295,7 @@ export default function StandingAppointments() {
     if (!res.ok) {
       Alert.alert(
         'Still Standing',
-        `${seriesLabel(s)} ${withWhom} is still running — that did not save, so nothing has changed, no session has been removed and your coach has not been told.\n\n${res.error}`,
+        `${seriesLabel(s)} ${withWhom} is still running. That did not save, so nothing has changed, no session has been removed and your coach has not been told.\n\n${res.error}`,
         [{ text: 'OK' }],
       );
       return;
@@ -317,10 +317,10 @@ export default function StandingAppointments() {
       // rather than swallowed: a fee that appeared without anybody deciding to
       // charge one is the member's money and theirs to query.
       + (r.charged
-        ? 'The server reported a charge against this, which it should never do — ask your coach about it before you pay anything.'
+        ? 'The server reported a charge against this, which it should never do. Ask your coach about it before you pay anything.'
         : 'Nothing was charged for any of them, however close they were.')
       + (s.nextAt
-        ? `\n\nYour next session — ${dayLabel(s.nextAt)} at ${timeLabel(s.nextAt)} — is still booked, on purpose. If you can't make that one either, cancel it on its own and your coach's notice policy prices that session alone.`
+        ? `\n\nYour next session, ${dayLabel(s.nextAt)} at ${timeLabel(s.nextAt)}, is still booked on purpose. If you can't make that one either, cancel it on its own and your coach's notice policy prices that session alone.`
         : ''),
       [{ text: 'Done' }],
     );
@@ -608,7 +608,7 @@ export default function StandingAppointments() {
         // app/(client)/classes.tsx already replaced this exact sentence with it.
         Alert.alert(
           'Not Cancelled',
-          `Your ${dayLabel(one.startsAt)} ${timeLabel(one.startsAt)} session is still booked — that did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
+          `Your ${dayLabel(one.startsAt)} ${timeLabel(one.startsAt)} session is still booked. That did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
           [{ text: 'OK' }],
         );
         return;
@@ -621,7 +621,7 @@ export default function StandingAppointments() {
     };
     // Said again on the confirm itself, because this is the tap that can cost
     // money and the sheet behind it is about to disappear.
-    const stays = ' Your standing appointment keeps running — the week after is still booked.';
+    const stays = ' Your standing appointment keeps running. The week after is still booked.';
     if (warn.late) {
       Alert.alert('Cancelling Late', `${warn.line}${stays} Continue?`, [
         { text: 'Keep It', style: 'cancel' },
@@ -676,17 +676,17 @@ export default function StandingAppointments() {
               because t.warn as text fails AA on the light palettes. */}
           {seriesStatus === 'error' ? (
             <Flag tone={t.warn}>
-              Your standing appointments could not be read, so none can be listed. This is a connection problem, not a statement that you have none — any weekly slot you have agreed is still running and its sessions are still booked on your calendar and your coach’s. Nothing here has been ended.
+              Your standing appointments could not be read, so none can be listed. This is a connection problem, not a statement that you have none. Any weekly slot you have agreed is still running and its sessions are still booked on your calendar and your coach’s. Nothing here has been ended.
             </Flag>
           ) : seriesStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your standing appointments…</Text>
           ) : standing.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {seriesStatus === 'partial'
-                ? 'Nothing came back, but only part of the list loaded — so this is not a statement that you have none. Pull down to refresh.'
+                ? 'Nothing came back, but only part of the list loaded, so this is not a statement that you have none. Pull down to refresh.'
                 : endedCount
                   ? `Nothing is standing right now. The ${endedCount === 1 ? 'one that has ended is' : `${endedCount} that have ended are`} not listed here.`
-                  : 'You have no standing appointment. Ask your coach for one below and, if they agree, the same hour is booked for you every week — neither of you has to book it again.'}
+                  : 'You have no standing appointment. Ask your coach for one below and, if they agree, the same hour is booked for you every week. Neither of you has to book it again.'}
             </Text>
           ) : (<>
             {/* ── your week, as a picture ───────────────────────────────────
@@ -828,7 +828,7 @@ export default function StandingAppointments() {
         <Expandable title="How This Works" note={`Booked about ${Math.round(SERIES_HORIZON_DAYS / 7)} weeks ahead · a credit only as each is delivered`}>
           <Text style={{ ...ty.label, color: t.ink2 }}>
             Your coach agrees the slot once. Sessions are then booked for you about {Math.round(SERIES_HORIZON_DAYS / 7)} weeks
-            ahead and keep going from there on their own — they appear on your calendar like any other booking, and you
+            ahead and keep going from there on their own. They appear on your calendar like any other booking, and you
             cancel one the same way you cancel anything else.
           </Text>
           {/* Why eight weeks of Tuesdays do not silently empty a ten-session
@@ -878,7 +878,7 @@ export default function StandingAppointments() {
                 <View style={{ paddingVertical: sp.md }}>
                   <Flag tone={t.warn}>
                     {!endFor.nextAt
-                      ? 'There is no next session on the books to cancel — either it has not been written out yet, or it has already been cancelled. Ending the arrangement below still works, and still costs nothing.'
+                      ? 'There is no next session on the books to cancel. Either it has not been written out yet, or it has already been cancelled. Ending the arrangement below still works, and still costs nothing.'
                       : 'That session could not be read, so there is nothing here to price or to cancel. Ending the arrangement below still works, and still costs nothing.'}
                   </Flag>
                 </View>
@@ -933,9 +933,9 @@ export default function StandingAppointments() {
                       ) : (
                         <Flag tone={t.warn}>
                           {!endFor.nextAt
-                            ? 'There is no next session on the books to cancel — either it has not been written out yet, or it has already been cancelled.'
+                            ? 'There is no next session on the books to cancel. Either it has not been written out yet, or it has already been cancelled.'
                             : sessionsStatus === 'error'
-                              ? 'Your calendar could not be read, so that session cannot be found to cancel. This is a connection problem — the session is still booked and you are still expected. Try again when you have signal.'
+                              ? 'Your calendar could not be read, so that session cannot be found to cancel. This is a connection problem. The session is still booked and you are still expected. Try again when you have signal.'
                               : 'That session is not among the ones this screen has loaded. Open it on your calendar and cancel it from there.'}
                         </Flag>
                       )}
@@ -1069,7 +1069,7 @@ export default function StandingAppointments() {
             {/* Said first and in the app's own words for a one-off ask, because
                 it is the half somebody is most likely to misread: they are
                 asking, and until their coach answers nothing is held. */}
-            <Notice kicker="WHAT THIS DOES" title="It Asks — It Doesn’t Book" note={NOT_A_BOOKING} />
+            <Notice kicker="WHAT THIS DOES" title="It Asks, It Doesn’t Book" note={NOT_A_BOOKING} />
 
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>DAY OF THE WEEK</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
@@ -1169,7 +1169,7 @@ export default function StandingAppointments() {
                 {`You are asking for every ${weekdayName(askDow)} at ${fmtClock(askHour, askMinute)}, for ${askLength} minutes. `}
                 {askWhenLabel(askSlotOn(Date.now()).startsAt)
                   ? `The first one would be ${askWhenLabel(askSlotOn(Date.now()).startsAt)}.`
-                  : 'The first date could not be worked out on this phone — pick the day again.'}
+                  : 'The first date could not be worked out on this phone. Pick the day again.'}
               </Text>
             ) : (
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>

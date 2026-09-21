@@ -140,7 +140,7 @@ export function macroGate(o: {
     return {
       ok: false,
       reason: 'unread',
-      why: 'Your goal, diet and activity level could not be read, so no target is worked out. That is a read that failed rather than questions you have not answered — pull down to try again.',
+      why: 'Your goal, diet and activity level could not be read, so no target is worked out. That is a read that failed rather than questions you have not answered. Pull down to try again.',
     };
   }
   if (!o.measured) {

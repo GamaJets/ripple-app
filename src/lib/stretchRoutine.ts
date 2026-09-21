@@ -237,7 +237,7 @@ export const STRETCH_ROUTINES: readonly StretchRoutine[] = [
   {
     id: 'full-body',
     title: 'Full Body Flow',
-    note: 'Six moving sequences rather than held positions — every one of these is demonstrated as an animation.',
+    note: 'Six moving sequences rather than held positions. Every one of these is demonstrated as an animation.',
     steps: [
       step('cat-cow', 'Cat-Cow', 40, 1, true),
       step('standing-forward-fold-to-half-lift', 'Standing Forward Fold to Half Lift', 40, 1, true),
@@ -472,6 +472,7 @@ export function routineProblems(routines: readonly StretchRoutine[] = STRETCH_RO
   const problems: string[] = [];
   const seenRoutines = new Set<string>();
   for (const r of routines) {
+    // dash-ok: developer self-check message, read only by its test, which rebuilds this exact wording.
     if (seenRoutines.has(r.id)) problems.push(`two routines share the id "${r.id}" — routineById would only ever open one of them`);
     seenRoutines.add(r.id);
     if (!r.title.trim()) problems.push(`routine "${r.id}" has no title`);
@@ -479,6 +480,7 @@ export function routineProblems(routines: readonly StretchRoutine[] = STRETCH_RO
     if (!r.steps.length) problems.push(`routine "${r.id}" has no stretches in it`);
     const seenSteps = new Set<string>();
     for (const s of r.steps) {
+      // dash-ok: developer self-check message, read only by its test, which rebuilds this exact wording.
       if (seenSteps.has(s.id)) problems.push(`"${r.id}" holds ${s.id} twice — the runner would ask for the same position two stages apart with no reason on screen`);
       seenSteps.add(s.id);
       if (!/^[a-z0-9-]+$/.test(s.id)) problems.push(`"${s.id}" in "${r.id}" is not a catalogue slug, so no row would resolve for it`);

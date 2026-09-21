@@ -129,7 +129,7 @@ export function releaseLine(
   if (verdict === 'loading') return `Reading whether ${who} has signed the liability release.`;
   if (verdict === 'unreadable') {
     return `Whether ${who} has signed the liability release could not be read. That is a read that failed, `
-      + 'not a record of them having signed nothing — do not take it either way.';
+      + 'not a record of them having signed nothing. Do not take it either way.';
   }
   if (verdict === 'truncated') {
     return `Only part of ${who}'s release record came back, and the current version was not in the part that did. `

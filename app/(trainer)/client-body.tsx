@@ -212,7 +212,7 @@ type CompositionScanRow = BodyScanRow & { metrics?: ScanMetrics | null };
  */
 const COMPOSITION_CAVEAT =
   'The mark beside each change follows the direction that metric is ' +
-  'conventionally read in — visceral fat down, InBody score up — and not this ' +
+  'conventionally read in (visceral fat down, InBody score up) and not this ' +
   'client\u2019s own goal, which the sheet does not record. It is the same mark ' +
   'they see on their own screen. Fat and lean mass are the pair to hold it ' +
   'against: somebody deliberately building will move both the way this table ' +
@@ -659,10 +659,10 @@ export default function ClientBody() {
           ) : readings.length > 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
               {readings.length === 1
-                ? 'One reading is drawn as the reading it is — a figure and a date — rather than as a trend through a single point.'
+                ? 'One reading is drawn as the reading it is (a figure and a date) rather than as a trend through a single point.'
                 : inRange.length === 0
                   ? `Nothing in the last ${rangeWord}. Widen the range to see the trend.`
-                  : `One reading in the last ${rangeWord} — widen the range to see the trend.`}
+                  : `One reading in the last ${rangeWord}. Widen the range to see the trend.`}
             </Text>
           ) : null}
 
@@ -734,7 +734,7 @@ export default function ClientBody() {
                 </>
               ) : (
                 <Text style={{ ...ty.caption, color: t.ink3 }}>
-                  Their newest weight, body fat and muscle are not off one scan, so there is no single body to divide — no bar rather than a mixed one.
+                  Their newest weight, body fat and muscle are not off one scan, so there is no single body to divide, so there is no bar rather than a mixed one.
                 </Text>
               )}
             </Section>
@@ -949,7 +949,7 @@ export default function ClientBody() {
             {r.status === 'error' ? (
               <Section>
                 <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-                  note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+                  note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
 
@@ -1000,7 +1000,7 @@ export default function ClientBody() {
                 <Rule />
                 <Section>
                   <Notice kicker="No Account" title={`${fullName || 'This Client'} Has No Repple Account`}
-                    note={`You added ${who} to your book by hand, so there is no account for a scan, a weigh-in, a tape measurement or a night's sleep to belong to. Nothing of theirs was asked for and nothing was refused — this is not an empty body-composition record and it is not a failed read. Invite them from your client list and this screen fills in from the day they accept.`} />
+                    note={`You added ${who} to your book by hand, so there is no account for a scan, a weigh-in, a tape measurement or a night's sleep to belong to. Nothing of theirs was asked for and nothing was refused. This is not an empty body-composition record and it is not a failed read. Invite them from your client list and this screen fills in from the day they accept.`} />
                 </Section>
               </View>
             ) : picked ? (
@@ -1012,7 +1012,7 @@ export default function ClientBody() {
                 ) : board.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their Scans Could Not Be Read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${voice.they} ${voice.have} never been scanned — that is a different fact and a different conversation.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${voice.they} ${voice.have} never been scanned. That is a different fact and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
@@ -1025,7 +1025,7 @@ export default function ClientBody() {
                       {voice.they} {voice.have}n&rsquo;t recorded a usable InBody scan.
                       {history && history.skipped > 0
                         ? ' Rows did come back; none of them carried a dated figure this build can read.'
-                        : ' The read came back and it was empty, so this is about them rather than about the connection — which makes it worth raising.'}
+                        : ' The read came back and it was empty, so this is about them rather than about the connection, which makes it worth raising.'}
                       {' '}Their own app records a scan from a photo of the sheet.
                     </Text>
                   </Section>
@@ -1067,7 +1067,7 @@ export default function ClientBody() {
                           purpose before they query it with the client. */}
                       {compTrends.length > 0 ? (
                         <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                          As their InBody printed it — kilograms, litres and its own
+                          As their InBody printed it: kilograms, litres and its own
                           scores. The figures above are in your unit.
                         </Text>
                       ) : null}
@@ -1080,7 +1080,7 @@ export default function ClientBody() {
                         // February would be told they have never had one.
                         <Text style={{ ...ty.body, color: t.ink2 }}>
                           {isWhole(scanStatus)
-                            ? `Their scans carry a weight, a body fat and — sometimes — a muscle figure, and none of them carries the full breakdown: no visceral fat, no InBody score, no BMR, no fat or lean mass, no limb-by-limb lean, no water, protein or minerals. Those fields are written when a scan is read from a photograph of the printout, so a figure typed in by hand leaves this part of the record empty. It is not a gap in what ${voice.they} ${voice.have} done — the three series above are ${voice.their} scans, in full.`
+                            ? `Their scans carry a weight, a body fat and sometimes a muscle figure, and none of them carries the full breakdown: no visceral fat, no InBody score, no BMR, no fat or lean mass, no limb-by-limb lean, no water, protein or minerals. Those fields are written when a scan is read from a photograph of the printout, so a figure typed in by hand leaves this part of the record empty. It is not a gap in what ${voice.they} ${voice.have} done. The three series above are ${voice.their} scans, in full.`
                             : `The breakdown is withheld because this read came back at the row limit, and the scans that did not arrive are the oldest. An empty table here would say ${voice.their} sheets carry nothing, which is not something a partial read can know. Pull down to read again.`}
                         </Text>
                       ) : (
@@ -1134,8 +1134,8 @@ export default function ClientBody() {
                             </View>
                           ))}
                           <Text style={{ ...ty.micro, color: t.ink3 }}>
-                            Left in the units the InBody sheet itself printed — kilograms beside
-                            litres, kcal, points and a visceral-fat level — and not converted into
+                            Left in the units the InBody sheet itself printed (kilograms beside
+                            litres, kcal, points and a visceral-fat level) and not converted into
                             the weight unit you read the three series above in. The segmental lean
                             figures are carried to a hundredth of a kilogram, a grain whole pounds
                             cannot represent at all, and converting them would need a second and
@@ -1270,14 +1270,14 @@ export default function ClientBody() {
                 ) : tape.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their Tape Measurements Could Not Be Read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${voice.they} ${voice.have} never measured — everything above came from different reads and is unaffected either way.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${voice.they} ${voice.have} never measured. Everything above came from different reads and is unaffected either way.`} />
                   </Section>
                 ) : tape.state === 'none' ? (
                   <Section>
                     <SectionHead title="Tape" note="none recorded" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {voice.they} {voice.have}n&rsquo;t logged a tape measurement. The read came back
-                      and it was empty, so this is about them rather than about the connection —
+                      and it was empty, so this is about them rather than about the connection,
                       and it is the one record that moves when the scale doesn&rsquo;t.
                     </Text>
                   </Section>
@@ -1292,7 +1292,7 @@ export default function ClientBody() {
                         naming it as never measured would pick the wrong one. */}
                     {isWhole(measStatus) && unmeasuredSites(tape.sites).length > 0 ? (
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
-                        Nothing on record for {unmeasuredSites(tape.sites).join(', ').toLowerCase()} — the
+                        Nothing on record for {unmeasuredSites(tape.sites).join(', ').toLowerCase()}. The
                         client&rsquo;s own screen offers those boxes and they have been left empty.
                       </Text>
                     ) : null}
@@ -1466,9 +1466,9 @@ export default function ClientBody() {
         )}
 
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          Every InBody scan a client has recorded — the three series with the date of each
+          Every InBody scan a client has recorded: the three series with the date of each
           reading, the full composition breakdown off the sheet, and their tape measurements. You
-          can read these; you can&rsquo;t change them — a scan is theirs to take and theirs to
+          can read these; you can&rsquo;t change them. A scan is theirs to take and theirs to
           enter.
         </Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

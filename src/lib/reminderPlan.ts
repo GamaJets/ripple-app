@@ -76,7 +76,7 @@ export const FIXED_LABEL: Record<FixedKind, { title: string; body: string; route
   },
   weighin: {
     title: 'Weigh-in',
-    body: 'Step on the scale and log it — one reading a week is enough to see a trend.',
+    body: 'Step on the scale and log it. One reading a week is enough to see a trend.',
     route: '/(client)/scans',
   },
   photo: {
@@ -222,7 +222,7 @@ export function plannedReminders(saved: SavedReminders): PlannedReminder[] {
       out.push({
         key: `hydration-${h}`,
         title: 'Time to hydrate',
-        body: 'Sip some water — small and often keeps you on target.',
+        body: 'Sip some water. Small and often keeps you on target.',
         route: '/(client)/recovery',
         days: [...saved.hydrationDays],
         hour: h,

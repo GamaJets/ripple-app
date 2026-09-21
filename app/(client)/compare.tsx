@@ -294,7 +294,7 @@ export default function Compare() {
             {photosErr ? (
               <View>
                 <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                  {photosErr} Nothing has been deleted — this screen only failed to read the list, so it cannot tell you what is there.
+                  {photosErr} Nothing has been deleted. This screen only failed to read the list, so it cannot tell you what is there.
                 </Text>
                 <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try Again" onPress={loadPhotos} /></View>
               </View>
@@ -307,7 +307,7 @@ export default function Compare() {
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {photos.length === 0
                 ? 'No progress photos yet. Add them on the Progress tab and they will appear here to compare.'
-                : 'One photo so far. A comparison needs two — add another on the Progress tab, on a different day, and this screen fills in.'}
+                : 'One photo so far. A comparison needs two. Add another on the Progress tab, on a different day, and this screen fills in.'}
             </Text>
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
               <Ghost label="Go to Progress" onPress={() => router.push('/(client)/scans')} />
@@ -454,7 +454,7 @@ export default function Compare() {
                         <Ghost icon="share" label="Share These Figures" onPress={sendFigures} />
                       </View>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                        Sends the dates and the readings above as text. The photos are not attached — they stay private to your account
+                        Sends the dates and the readings above as text. The photos are not attached; they stay private to your account
                         {coach ? `, and sending one to ${coach.name || 'your coach'} is a separate choice you make per photo on the Progress tab.` : '.'}
                       </Text>
                     </View>
@@ -477,7 +477,7 @@ export default function Compare() {
               {sharesErr ? (
                 <View style={{ marginBottom: sp.md }}>
                   <Flag tone={t.warn}>
-                    {sharesErr} Nothing has changed either way — this screen just could not read the list, so it will not tell you these are private.
+                    {sharesErr} Nothing has changed either way. This screen just could not read the list, so it will not tell you these are private.
                   </Flag>
                   <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
                     <Ghost label="Try Again" onPress={() => { void loadShares(); }} />

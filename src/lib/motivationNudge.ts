@@ -141,7 +141,7 @@ export function motivationNudges(i: NudgeInput): MotivationNudge[] {
       // States the record, never the person. The rule src/lib/nudge.ts makes
       // mechanical for the coach's side: "nothing logged for eleven days" is
       // about the log, "losing motivation" is a diagnosis we cannot make.
-      body: `Nothing logged for ${days} days. A short session counts — it is the coming back that matters.`,
+      body: `Nothing logged for ${days} days. A short session counts. It is the coming back that matters.`,
       route: '/(client)/workouts',
       at: eveningOf(i.now, i.eveningHour),
     }];

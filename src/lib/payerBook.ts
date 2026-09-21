@@ -304,7 +304,7 @@ export const PAYER_IS_CARD_ONLY =
 /** The same sentence the takings figure above it carries, in the one place a
  *  coach is looking at a single person rather than at a month. */
 export const PAYER_IS_GROSS =
-  'Gross — what each client was charged, before Stripe’s fee and the platform fee. Anything refunded is stated beside it and has not been taken off.';
+  'Gross: what each client was charged, before Stripe’s fee and the platform fee. Anything refunded is stated beside it and has not been taken off.';
 
 /** Where the whole figure lives, named rather than implied. */
 export const PAYER_WHOLE_FIGURE_IS_ELSEWHERE =

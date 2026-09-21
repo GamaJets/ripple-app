@@ -183,11 +183,11 @@ export function passBlocker(
 ): string | null {
   const named = p.passTypeName ? `“${p.passTypeName}”` : 'That pass';
   if (p.covers === null) {
-    return `${named} could not be matched to a pass type, so nothing here knows whether it pays for coming in or for an hour with a coach. It is not taken — an unknown coverage is never spent. Reload; if the type was deleted, reissue the pass.`;
+    return `${named} could not be matched to a pass type, so nothing here knows whether it pays for coming in or for an hour with a coach. It is not taken: an unknown coverage is never spent. Reload; if the type was deleted, reissue the pass.`;
   }
   if (p.covers !== opts.spendOn) {
     return opts.spendOn === 'visit'
-      ? `${named} is a personal-training pass. It pays for an hour with a coach, not for coming in — taking it here would spend an hour the member has paid for and the coach is still owed. Check them in on their membership, or sell them a day pass.`
+      ? `${named} is a personal-training pass. It pays for an hour with a coach, not for coming in. Taking it here would spend an hour the member has paid for and the coach is still owed. Check them in on their membership, or sell them a day pass.`
       : `${named} is good for the door and classes, not for personal training. A one-to-one has to draw on a PT pass or be settled directly.`;
   }
   if (remainingUses(p) === 0) {
@@ -457,12 +457,12 @@ export function passTypeBlocker(t: {
   validDays?: number | null;
   covers?: string | null;
 }): string | null {
-  if (!(t.name ?? '').trim()) return 'Give the pass a name — it is what the desk picks from.';
+  if (!(t.name ?? '').trim()) return 'Give the pass a name. It is what the desk picks from.';
   if (t.priceCents == null || !Number.isFinite(t.priceCents)) {
     return 'What does it cost? A pass with no price recorded is not a free pass.';
   }
   if (!Number.isInteger(t.priceCents) || t.priceCents < 0) {
-    return 'That price cannot be sold — it has to be a whole amount and not less than nothing.';
+    return 'That price cannot be sold. It has to be a whole amount and not less than nothing.';
   }
   if (!(t.currency ?? '').trim()) {
     return 'A price with no currency is not a price. Set the gym’s currency first.';
@@ -471,7 +471,7 @@ export function passTypeBlocker(t: {
     return 'How many visits is it worth? A pass has to be good for at least one.';
   }
   if (t.validDays != null && (!Number.isInteger(t.validDays) || t.validDays < 1)) {
-    return 'How many days does it last? Leave it blank for a pass that does not expire — 0 is not the same thing.';
+    return 'How many days does it last? Leave it blank for a pass that does not expire. 0 is not the same thing.';
   }
   // Refused rather than repaired. A word this build does not know would be
   // written into a column that decides whether a credit can pay for an hour of
@@ -792,7 +792,7 @@ export async function redeemPass(
   if (vErr) {
     throw new Error(
       `The visit was taken off the pass, but the door log did not record it: ${vErr.message ?? 'the write was refused'}. `
-      + 'Do not take the pass again — that would spend a second visit. Add the arrival by hand from Check someone in.',
+      + 'Do not take the pass again. That would spend a second visit. Add the arrival by hand from Check someone in.',
     );
   }
 }
@@ -844,7 +844,7 @@ export async function fetchRedemptions(sb: Queryable, passId: string): Promise<R
  */
 export function redemptionUndoBlocker(r: Pick<Redemption, 'sessionId'>): string | null {
   if (r.sessionId) {
-    return 'This credit was not spent at the door — it paid for a one-to-one, and the session still says so. Putting it back from here would leave the session claiming it was paid from this pass while the visit is back on the card. Undo it on Sessions instead, by taking the outcome off that session: the database returns the credit and clears the session in one step.';
+    return 'This credit was not spent at the door. It paid for a one-to-one, and the session still says so. Putting it back from here would leave the session claiming it was paid from this pass while the visit is back on the card. Undo it on Sessions instead, by taking the outcome off that session: the database returns the credit and clears the session in one step.';
   }
   return null;
 }

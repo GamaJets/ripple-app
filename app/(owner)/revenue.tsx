@@ -426,12 +426,12 @@ export default function OwnerRevenue() {
           const note = takings === undefined
             ? 'Reading what your gym was paid…'
             : takings === null
-            ? 'Your payments could not be read — this is not a month in which the gym took nothing.'
+            ? 'Your payments could not be read. This is not a month in which the gym took nothing.'
             : till?.empty
-            ? 'No payment has been recorded in 30 days. That is not the same as no income — it is the same as nobody having entered one.'
+            ? 'No payment has been recorded in 30 days. That is not the same as no income. It is the same as nobody having entered one.'
             : till && till.currency == null
-            ? `${till.count} payments, in more than one currency — so there is no one total to state.`
-            : `${till?.count} payment${till?.count === 1 ? '' : 's'} recorded — memberships, classes, packs and the desk, whatever somebody entered`;
+            ? `${till.count} payments, in more than one currency, so there is no one total to state.`
+            : `${till?.count} payment${till?.count === 1 ? '' : 's'} recorded: memberships, classes, packs and the desk, whatever somebody entered`;
           return (
             /* The night hero, built here rather than with the kit's `HeroCard`
                because its title wraps and this one must not: a money figure is
@@ -493,8 +493,8 @@ export default function OwnerRevenue() {
                   delta: gap.unfulfilled.count === 0
                     ? 'none this window'
                     : gap.unfulfilled.gap === 'unstated'
-                    ? `${num(gap.unfulfilled.count)} orders, in more than one currency — so there is no one total`
-                    : `${num(gap.unfulfilled.count)} order${gap.unfulfilled.count === 1 ? '' : 's'} — the member paid and holds nothing`,
+                    ? `${num(gap.unfulfilled.count)} orders, in more than one currency, so there is no one total`
+                    : `${num(gap.unfulfilled.count)} order${gap.unfulfilled.count === 1 ? '' : 's'}: the member paid and holds nothing`,
                 },
                 {
                   label: 'Delivered · Not Recorded',
@@ -502,8 +502,8 @@ export default function OwnerRevenue() {
                   delta: gap.unledgered.count === 0
                     ? 'none this window'
                     : gap.unledgered.gap === 'unstated'
-                    ? `${num(gap.unledgered.count)} orders, in more than one currency — so there is no one total`
-                    : `${num(gap.unledgered.count)} sale${gap.unledgered.count === 1 ? '' : 's'} — usually a month closed as it landed`,
+                    ? `${num(gap.unledgered.count)} orders, in more than one currency, so there is no one total`
+                    : `${num(gap.unledgered.count)} sale${gap.unledgered.count === 1 ? '' : 's'}, usually a month closed as it landed`,
                 },
               ]} />
               {/* An order counted and not summed is the one way this block
@@ -609,9 +609,9 @@ export default function OwnerRevenue() {
                a month it did not belong to. */
             <Spark data={series} labels={labels} area tone="blue" />
           ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet. A snapshot is recorded each month, and the trend appears from the second one.</Text>
           )}
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>One real snapshot per month — months before you started are left blank.</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>One real snapshot per month. Months before you started are left blank.</Text>
         </Section>
 
 
@@ -633,7 +633,7 @@ export default function OwnerRevenue() {
               <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {num(forecast[5])}</Text>
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Projected from {n} months of your own history — a guide, not a guarantee.
+              Projected from {n} months of your own history: a guide, not a guarantee.
             </Text>
           </>) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
@@ -654,7 +654,7 @@ export default function OwnerRevenue() {
             // Before this branch an empty `byTrainer` — which is what a refused
             // read leaves behind — printed a flat statement about the gym's
             // last thirty days.
-            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so what they delivered is not known — this is not a month with no sessions in it.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so what they delivered is not known. This is not a month with no sessions in it.</Text>
           ) : byTrainer.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No sessions delivered in the last 30 days.</Text>
           ) : byTrainer.map((p) => {
@@ -695,7 +695,7 @@ export default function OwnerRevenue() {
             <SectionHead title="Revenue at Risk" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {loading ? 'Reading your roster…'
-                : trainersUnread ? 'Your trainers could not be read, so none of them could be scored — nobody has been cleared here.'
+                : trainersUnread ? 'Your trainers could not be read, so none of them could be scored. Nobody has been cleared here.'
                 : roll.trainers === 0 ? 'No trainers at your gym yet.'
                 : 'No trainers flagged watch or high risk.'}
             </Text>

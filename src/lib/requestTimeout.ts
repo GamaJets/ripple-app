@@ -331,7 +331,7 @@ export interface RequestTimeout extends Error {
  */
 export function requestTimeoutError(url: string, method: string, ceilingMs: number): RequestTimeout {
   const err = new Error(
-    `No reply within ${Math.round(ceilingMs / 1000)}s for ${String(method || 'GET').toUpperCase()} ${redact(url)} — request timed out.`,
+    `No reply within ${Math.round(ceilingMs / 1000)}s for ${String(method || 'GET').toUpperCase()} ${redact(url)}. Request timed out.`,
   ) as RequestTimeout;
   err.name = 'TimeoutError';
   err.requestTimedOut = true;

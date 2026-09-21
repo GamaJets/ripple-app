@@ -792,7 +792,7 @@ export default function Profile() {
               to the figures it decides. */}
           {cd.saveFailed ? (
             <Flag tone={t.crit} style={{ marginBottom: sp.md }}>
-              Your last profile change has not reached the server, so what is on this screen may not be what your coach sees. It keeps retrying — open Edit and save again if it does not clear.
+              Your last profile change has not reached the server, so what is on this screen may not be what your coach sees. It keeps retrying. Open Edit and save again if it does not clear.
             </Flag>
           ) : null}
           <SectionHead title="Daily Target" note={macros ? 'Meals' : undefined} onPress={() => router.push('/(client)/nutrition')} />

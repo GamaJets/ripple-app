@@ -481,8 +481,8 @@ export default function TrainerLibrary() {
         {!clipCountable ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {status === 'loading' ? 'Reading the catalogue…'
-              : status === 'error' ? 'The catalogue could not be read — the figures are unknown, not zero.'
-                : status === 'partial' ? 'More movements than fit in one read — a subtotal is not shown.'
+              : status === 'error' ? 'The catalogue could not be read. The figures are unknown, not zero.'
+                : status === 'partial' ? 'More movements than fit in one read, so a subtotal is not shown.'
                   : 'Blank until the catalogue and your clip library are both read in full.'}
           </Text>
         ) : strandedOnPhone > 0 ? (
@@ -492,8 +492,8 @@ export default function TrainerLibrary() {
           // agreeing with a coach who believes they have already done it.
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {strandedOnPhone === 1
-              ? '1 Not Filmed movement has a clip on this phone only — no client can watch it. Add it again from Videos.'
-              : `${num(strandedOnPhone)} Not Filmed movements have clips on this phone only — no client can watch them. Add them again from Videos.`}
+              ? '1 Not Filmed movement has a clip on this phone only. No client can watch it. Add it again from Videos.'
+              : `${num(strandedOnPhone)} Not Filmed movements have clips on this phone only. No client can watch them. Add them again from Videos.`}
           </Text>
         ) : null}
 
@@ -561,7 +561,7 @@ export default function TrainerLibrary() {
             explanation they can act on. */}
         {mineOnly ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            From your saved programs — the three starters are not counted.
+            From your saved programs. The three starters are not counted.
           </Text>
         ) : null}
 
@@ -599,7 +599,7 @@ export default function TrainerLibrary() {
           {status !== 'error' && !clipsKnown ? (
             vidStatus === 'error' ? (
               <Notice tone={t.warn} kicker="Your Clips" title="Your Clip Library Could Not Be Read"
-                note="The movements below are real. What is missing is whether you have filmed each one — so that column is blank rather than telling you that you have not.">
+                note="The movements below are real. What is missing is whether you have filmed each one, so that column is blank rather than telling you that you have not.">
                 <View style={{ marginTop: sp.lg }}>
                   <Ghost label="Try Again" a11yLabel="Try reading your clip library again" onPress={() => { reloadVideos(); }} />
                 </View>
@@ -628,7 +628,7 @@ export default function TrainerLibrary() {
             // it, and a coach shown an empty list would conclude there is
             // nothing to program.
             <Notice tone={t.warn} kicker="Catalogue" title="The Exercise List Could Not Be Read"
-              note="This is our end, not yours — the movements are still there. Nothing below this line is a statement about what you can program.">
+              note="This is our end, not yours. The movements are still there. Nothing below this line is a statement about what you can program.">
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Try Again" onPress={() => { reload(); }} />
               </View>
@@ -770,7 +770,7 @@ export default function TrainerLibrary() {
         <Expandable title="What These Count" note={countable ? `${num(rows.length)} movements in the catalogue` : undefined}>
           <Text style={{ ...ty.caption, color: t.ink3 }}>
             Your Clips, Academy Clips and Not Filmed count movements a coaching clip reaches, not whether a movement
-            can be demonstrated — nearly every exercise here already shows your client how it is done. Not Filmed
+            can be demonstrated. Nearly every exercise here already shows your client how it is done. Not Filmed
             means nothing your clients can watch has been recorded for it; record yours on the Videos screen and
             yours is what they see. Every movement can go into a program, and your clients see the same list.
           </Text>

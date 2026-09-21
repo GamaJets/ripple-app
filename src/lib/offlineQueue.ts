@@ -267,7 +267,7 @@ export function unsentCount(ids: readonly string[], isUnsent: (id: string) => bo
  */
 export function unsentNote(n: number, noun: string, nounPlural = `${noun}s`): string | null {
   if (n <= 0) return null;
-  return `${n} ${n === 1 ? noun : nounPlural} saved on this phone and not sent yet — ${n === 1 ? 'it goes' : 'they go'} up next time you have signal.`;
+  return `${n} ${n === 1 ? noun : nounPlural} saved on this phone and not sent yet. ${n === 1 ? 'It goes' : 'They go'} up next time you have signal.`;
 }
 
 /* ── When the queue actually gets sent ─────────────────────────────────────

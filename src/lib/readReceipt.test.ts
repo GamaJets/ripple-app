@@ -75,11 +75,11 @@ eq(deliveryLine(bubble({ mine: false }), T2, { them: 'your coach', time: '09:41'
   'the other person’s bubble is a bare time, as before');
 // Delegated, not restated. If `unsentNote` is reworded these move with it.
 eq(deliveryLine(bubble({ stage: 'send' }), null, { them: 'your coach', time: '09:41' }),
-  'Not sent — your coach cannot see this', 'the failure sentence comes from unsentNote');
+  'Not sent, so your coach cannot see this', 'the failure sentence comes from unsentNote');
 eq(deliveryLine(bubble({ stage: 'queued' }), null, { them: 'they', time: '09:41' }),
-  'Waiting to send — they cannot see this yet', 'and so does the queued one');
+  'Waiting to send, so they cannot see this yet', 'and so does the queued one');
 eq(deliveryLine(bubble({ stage: 'upload', kind: 'video' }), null, { them: 'they', time: '09:41' }),
-  'Not sent — the video did not upload, so they cannot see it', 'and the one that names the half that failed');
+  'Not sent: the video did not upload, so they cannot see it', 'and the one that names the half that failed');
 
 /* ── scrolled to the end ─────────────────────────────────────────────────── */
 

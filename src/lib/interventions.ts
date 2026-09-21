@@ -159,7 +159,7 @@ export function triedLine(c: Contact, now: number = Date.now()): string {
   const who = contactBy(c);
   const when = d == null ? 'at an unreadable time' : d === 0 ? 'today' : `${d} day${d === 1 ? '' : 's'} ago`;
   const by = who ? ` by ${who}` : '';
-  return `${CHANNEL_LABEL[c.channel]}${by}, ${when} — ${OUTCOME_LABEL[c.outcome].toLowerCase()}.`;
+  return `${CHANNEL_LABEL[c.channel]}${by}, ${when}: ${OUTCOME_LABEL[c.outcome].toLowerCase()}.`;
 }
 
 /* ── pacing, from the member's own pattern ─────────────────────────────────── */
@@ -565,7 +565,7 @@ export function assessFollowUp(input: FollowUpInput, now: number = Date.now()): 
     const short = Math.ceil((readFrom - baselineFrom) / DAY);
     return blank(
       'outside-the-read',
-      `This contact is older than the attendance history read here — it needs ${short} more day${short === 1 ? '' : 's'} of record before it to say what their pattern was. Not judged, rather than judged on a short baseline.`,
+      `This contact is older than the attendance history read here. It needs ${short} more day${short === 1 ? '' : 's'} of record before it to say what their pattern was. Not judged, rather than judged on a short baseline.`,
       noPace,
     );
   }
@@ -592,8 +592,8 @@ export function assessFollowUp(input: FollowUpInput, now: number = Date.now()): 
         // member with seven active days in the fortnight before the contact was
         // told "nothing recorded in the 56 days before this contact", which is
         // false about their record. The verdict is right; the sentence was not.
-        ? `Nothing recorded in the ${Math.round(baselineSpan)} days up to ${Math.round(windows.recentDays)} days before this contact, so there is no pattern to compare anything against. Not "no effect" — no measurement.`
-        : `Only ${baselineActive} active day${baselineActive === 1 ? '' : 's'} before this contact — no settled pattern to judge a change against.`,
+        ? `Nothing recorded in the ${Math.round(baselineSpan)} days up to ${Math.round(windows.recentDays)} days before this contact, so there is no pattern to compare anything against. Not "no effect", but no measurement.`
+        : `Only ${baselineActive} active day${baselineActive === 1 ? '' : 's'} before this contact, so no settled pattern to judge a change against.`,
       pace,
       { baselinePerWeek: null },
     );
@@ -622,7 +622,7 @@ export function assessFollowUp(input: FollowUpInput, now: number = Date.now()): 
     const d = Math.max(0, Math.floor((nextAt - at) / DAY));
     return blank(
       'recontacted',
-      `Somebody contacted them again after ${d} day${d === 1 ? '' : 's'}, inside the ${judgeAfter} days this one needed. Whatever happened next followed both, and the record cannot say which — so neither is credited.`,
+      `Somebody contacted them again after ${d} day${d === 1 ? '' : 's'}, inside the ${judgeAfter} days this one needed. Whatever happened next followed both, and the record cannot say which, so neither is credited.`,
       pace,
       partial,
     );
@@ -705,7 +705,7 @@ function followUpReason(
  * folding those rows away would make the loop look more conclusive than it is.
  */
 export const WHY_NO_RATE =
-  'No percentage is shown, and there is not one to show. Everybody here was contacted because they were drifting, so there is no comparable group who were left alone — and members furthest below their own average tend to drift back toward it regardless, which would flatter any figure taken from this table alone. These are counts of what FOLLOWED each contact, in sequence. None of them is evidence that the contact caused it.';
+  'No percentage is shown, and there is not one to show. Everybody here was contacted because they were drifting, so there is no comparable group who were left alone, and members furthest below their own average tend to drift back toward it regardless, which would flatter any figure taken from this table alone. These are counts of what FOLLOWED each contact, in sequence. None of them is evidence that the contact caused it.';
 
 export interface FollowUpTally {
   /** Every contact considered. */

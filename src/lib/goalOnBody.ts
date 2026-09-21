@@ -115,7 +115,7 @@ export function goalOnBody(
     unit,
     remaining: gap,
     reached: false,
-    note: `${plain(gap, 1)} ${unit} to go — target ${plain(target, 1)} ${unit}`,
+    note: `${plain(gap, 1)} ${unit} to go · target ${plain(target, 1)} ${unit}`,
   };
 }
 

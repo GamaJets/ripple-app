@@ -82,7 +82,7 @@ export default function Notices() {
             <Notice tone={t.crit} kicker="Not Read" title="We couldn’t read your notices"
               note={rows.length
                 ? 'What is below is what we had before the read failed. There may be a newer notice that is not on this list.'
-                : 'This is not an empty noticeboard — it is one we could not open. Try again, or ask at the desk.'}>
+                : 'This is not an empty noticeboard. It is one we could not open. Try again, or ask at the desk.'}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={reload} />
               </View>

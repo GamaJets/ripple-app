@@ -150,9 +150,9 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
         // Which record proves it. "The door says so" and "somebody ticked the
         // register" are different kinds of evidence, and a coach querying this
         // at reception needs to know which one to ask about.
-        label: o.register && o.door ? 'Here — register and door'
-          : o.register ? 'Here — marked on the register'
-          : 'Here — logged at the door',
+        label: o.register && o.door ? 'Here · register and door'
+          : o.register ? 'Here · marked on the register'
+          : 'Here · logged at the door',
         tone: 'good',
       };
     case 'unmarked':
@@ -203,7 +203,7 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
       // a coach actually needs, because the late word is the one with a charge
       // behind it.
       return {
-        label: 'Cancelled — they gave the seat up. It is not recorded as a late cancellation.',
+        label: 'Cancelled. They gave the seat up. It is not recorded as a late cancellation.',
         tone: 'quiet',
       };
     case 'late_cancelled':
@@ -216,13 +216,13 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
       // in src/lib/classSeat.ts. A coach who needs the amount opens the
       // cancellation, where src/lib/classCancel.ts words it from the row.
       return {
-        label: 'Cancelled late — they gave the seat up inside your gym’s notice period.',
+        label: 'Cancelled late. They gave the seat up inside your gym’s notice period.',
         tone: 'quiet',
       };
     case 'upcoming':
-      return { label: 'Booked — still to come', tone: 'ahead' };
+      return { label: 'Booked · still to come', tone: 'ahead' };
     case 'waitlisted':
-      return { label: 'On the waitlist — they never had a place to turn up to', tone: 'quiet' };
+      return { label: 'On the waitlist. They never had a place to turn up to', tone: 'quiet' };
     case 'unknown':
       return { label: 'This class could not be read, so we cannot say whether it has even run', tone: 'quiet' };
   }
@@ -418,7 +418,7 @@ export default function ClientAttendanceScreen() {
         {r.status === 'error' ? (
           <Section>
             <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-              note="This is not an empty book. Nobody is listed below because the list did not come back — go back and open this again once you are connected." />
+              note="This is not an empty book. Nobody is listed below because the list did not come back. Go back and open this again once you are connected." />
           </Section>
         ) : null}
 
@@ -452,7 +452,7 @@ export default function ClientAttendanceScreen() {
             <Rule />
             <Section>
               <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
-                note={`You added ${client?.name?.trim().split(/\s+/)[0] || 'them'} to your book by hand, so they have never been a member your gym could record. There is no register with their name on it and no door log to fold together — that is not an empty attendance record and not a failed read. Invite them from your client list and this screen starts from the day they join.`} />
+                note={`You added ${client?.name?.trim().split(/\s+/)[0] || 'them'} to your book by hand, so they have never been a member your gym could record. There is no register with their name on it and no door log to fold together. That is not an empty attendance record and not a failed read. Invite them from your client list and this screen starts from the day they join.`} />
             </Section>
             {client ? (
               <Section>
@@ -480,7 +480,7 @@ export default function ClientAttendanceScreen() {
                 <Notice tone={t.crit} kicker="Not Read" title="Their Attendance Could Not Be Read"
                   note={a.events.length
                     ? 'What is below is what we had before the read failed. It is not confirmed current, and there may be visits missing from it.'
-                    : 'This is NOT a record of them never coming in — it is a record we could not open.'}>
+                    : 'This is NOT a record of them never coming in. It is a record we could not open.'}>
                   <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void a.reload(); }} /></View>
                 </Notice>
               </Section>
@@ -525,7 +525,7 @@ export default function ClientAttendanceScreen() {
                         ? (a.rhythm.firstDay
                           ? `Your record of them starts ${shortDay(a.rhythm.firstDay)}. There is not yet a finished week inside it to average, so no rate is shown.`
                           : 'Nothing recorded yet, so there is no average. A zero here would be a claim, not a blank.')
-                        : `Averaged over the ${a.rhythm.countedWeeks} finished week${a.rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(a.rhythm.firstDay as string)}. This week is left out — it is not over.`}
+                        : `Averaged over the ${a.rhythm.countedWeeks} finished week${a.rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(a.rhythm.firstDay as string)}. This week is left out because it is not over.`}
                   </Text>
 
                   {/* The kit's bars, one per week. An uncovered week is a
@@ -549,7 +549,7 @@ export default function ClientAttendanceScreen() {
                   </Text>
                   <Expandable title="About These Weeks">
                     <Text style={{ ...ty.caption, color: t.ink3 }}>
-                      {`Days they were recorded at a gym, week by week, over the last ${RHYTHM_WEEKS} weeks. A week with no bar at all is a week before your record of them starts — not a week they stayed away.`}
+                      {`Days they were recorded at a gym, week by week, over the last ${RHYTHM_WEEKS} weeks. A week with no bar at all is a week before your record of them starts, not a week they stayed away.`}
                     </Text>
                   </Expandable>
                 </>
@@ -579,7 +579,7 @@ export default function ClientAttendanceScreen() {
 
               {!a.classesComplete && a.events.length ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-                  Some of these are classes this app could not open — usually a gym they are no longer
+                  Some of these are classes this app could not open, usually a gym they are no longer
                   with. The attendance is still real; only the class details are missing.
                 </Text>
               ) : null}
@@ -593,7 +593,7 @@ export default function ClientAttendanceScreen() {
                 a.status === 'ready' && hasGym === true ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>
                     Your gym has nothing on record for them. That can simply mean it does not scan
-                    people at the door and their classes have not been marked off — plenty of gyms
+                    people at the door and their classes have not been marked off. Plenty of gyms
                     record neither. It is not a record of them staying away, and it is not a reason
                     to ring them about one.
                   </Text>
@@ -618,7 +618,7 @@ export default function ClientAttendanceScreen() {
                       <View style={{ paddingVertical: sp.md }}>
                         <Text style={{ ...ty.body, color: t.ink }}>A Class We Could Not Read</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                          Booked {dayLabel(e.booking?.bookedAt ?? null)} — the booking date, not the class date.
+                          Booked {dayLabel(e.booking?.bookedAt ?? null)}. This is the booking date, not the class date.
                         </Text>
                       </View>
                     </View>
@@ -650,7 +650,7 @@ export default function ClientAttendanceScreen() {
         {/* What this page is, said once and below the record: the board opens
             on the figure, not on a paragraph. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          Their classes and every time your gym recorded them coming through the door — the register
+          Their classes and every time your gym recorded them coming through the door: the register
           and the door log, folded together so one visit is one line. A class with nothing marked
           against it means nobody took the register. It is not a missed session, and nothing here
           counts it as one.

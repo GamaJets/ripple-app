@@ -117,7 +117,7 @@ export function enquiryConversion(rows: readonly LeadRow[], status: LoadStatus):
     return {
       kind: 'withheld',
       // Not "none of them joined". The question was never put to the database.
-      why: 'Your enquiries cannot be checked against your clients on this version, so this figure is not being guessed at. Your enquiries themselves are unaffected — they are listed above.',
+      why: 'Your enquiries cannot be checked against your clients on this version, so this figure is not being guessed at. Your enquiries themselves are unaffected; they are listed above.',
     };
   }
   return {
@@ -211,7 +211,7 @@ export const WITHHELD_CONVERSIONS: readonly WithheldFigure[] = [
   },
   {
     figure: 'How many enquiries did not convert',
-    why: 'An enquiry with no match is not an enquiry that came to nothing. They may have joined on another code, signed up with a different email address, or been added by you by hand — so the ones that are not matched are unknown, not lost.',
+    why: 'An enquiry with no match is not an enquiry that came to nothing. They may have joined on another code, signed up with a different email address, or been added by you by hand, so the ones that are not matched are unknown, not lost.',
   },
   {
     figure: 'A conversion rate for this month, or this week',

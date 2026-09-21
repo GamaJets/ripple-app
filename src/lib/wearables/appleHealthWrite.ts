@@ -362,7 +362,7 @@ export function planSession(g: SessionGroup): PlannedWorkout | SkippedSession {
   if (!dur) {
     return {
       key: g.key, t: g.t, exercises, code: 'no-duration',
-      reason: 'No length recorded. Apple Health needs a start and an end, and nothing here measured one — enter how long this session ran and it can be written.',
+      reason: 'No length recorded. Apple Health needs a start and an end, and nothing here measured one. Enter how long this session ran and it can be written.',
     };
   }
   const act = sessionActivity(g.entries);
@@ -456,7 +456,7 @@ export function summariseResult(r: WriteResult): string {
   } else if (r.failed.length === 0) {
     parts.push(`Wrote ${r.written.length} ${r.written.length === 1 ? 'session' : 'sessions'} to Apple Health.`);
   } else {
-    parts.push(`Wrote ${r.written.length} of ${attempted} sessions to Apple Health — ${r.failed.length} failed.`);
+    parts.push(`Wrote ${r.written.length} of ${attempted} sessions to Apple Health; ${r.failed.length} failed.`);
   }
   if (r.alreadyWritten > 0) parts.push(`${r.alreadyWritten} already there.`);
   if (r.skipped.length > 0) {
@@ -575,13 +575,13 @@ function healthKitHere(): boolean {
 export function writeUnavailableReason(): string | null {
   const rn = lazy('react-native');
   if (!rn) return 'Apple Health is only available in the Repple app.';
-  if (rn.Platform?.OS !== 'ios') return 'Writing to Apple Health is iPhone-only — Health does not exist on this platform.';
+  if (rn.Platform?.OS !== 'ios') return 'Writing to Apple Health is iPhone-only. Health does not exist on this platform.';
   if (!healthKitHere()) {
     return 'Needs the Repple app build. HealthKit is native code and is not present in Expo Go or the iOS Simulator without it.';
   }
   if (!nativeHk()) return 'The Apple Health module in this build cannot save workouts. A newer build is needed.';
   if (!ledgerAvailable()) {
-    return 'Repple cannot remember what it has already written on this device, so it will not write — the risk is duplicate workouts you would have to delete by hand.';
+    return 'Repple cannot remember what it has already written on this device, so it will not write. The risk is duplicate workouts you would have to delete by hand.';
   }
   return null;
 }

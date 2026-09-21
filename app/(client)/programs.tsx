@@ -232,7 +232,7 @@ export default function Programs() {
           <Section>
             <Text style={{ ...ty.label, color: t.ink3 }}>
               This program lists no days. That is a gap in the program itself and not something that
-              failed to load — there is nothing here to follow yet.
+              failed to load. There is nothing here to follow yet.
             </Text>
           </Section>
         ) : x.days.map((d, di) => {
@@ -325,7 +325,7 @@ export default function Programs() {
     <>
       <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
         Complete plans anyone can follow. They are not written for you and nobody is coaching you through
-        them — your coach's program, if you have one, is on your Train tab.
+        them. Your coach's program, if you have one, is on your Train tab.
       </Text>
 
       {goals.length > 1 ? (
@@ -383,7 +383,7 @@ export default function Programs() {
           </View>
         ) : status === 'error' ? (
           <Notice tone={t.warn} kicker="Programs" title="The program library could not be read"
-            note="This is our end, not yours — the programs are still there. Pull down to try again once you have signal." />
+            note="This is our end, not yours. The programs are still there. Pull down to try again once you have signal." />
         ) : signedOut ? (
           <Notice tone={t.warn} kicker="Programs" title="Sign in to see the programs"
             note="These are only available once you are signed in, so this screen was not allowed to look them up. Nothing has been removed." />

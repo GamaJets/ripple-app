@@ -224,7 +224,7 @@ export default function TrainerCredentials() {
     setReplying(true);
     const ok = await replyToReview(replyTo.id, replyText);
     setReplying(false);
-    if (!ok) { Alert.alert('Not Posted', 'Your reply was not saved. Nothing has changed on your profile — try again in a moment.'); return; }
+    if (!ok) { Alert.alert('Not Posted', 'Your reply was not saved. Nothing has changed on your profile. Try again in a moment.'); return; }
     setReplyTo(null);
     setReplyText('');
     setAttempt((n) => n + 1);
@@ -318,7 +318,7 @@ export default function TrainerCredentials() {
                same qualification a second time, and a coach checking whether
                their insurance is on their profile would be told it is not. */
             <Notice tone={t.warn} kicker="Credentials" title="We couldn’t load your credentials"
-              note="This is our end. Don’t read it as your profile being empty — until it loads we can’t tell you what is on it.">
+              note="This is our end. Don’t read it as your profile being empty. Until it loads we can’t tell you what is on it.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setAttempt((n) => n + 1)} />
               </View>
@@ -436,7 +436,7 @@ export default function TrainerCredentials() {
             </Notice>
           ) : listState === 'none' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nobody has reviewed you yet. Only people you have actually coached — now or in the past —
+              Nobody has reviewed you yet. Only people you have actually coached, now or in the past,
               can, so this fills up slowly and on its own.
             </Text>
           ) : reviews.map((r, i) => {
@@ -557,13 +557,13 @@ export default function TrainerCredentials() {
                   style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 12, ...ty.body, color: t.ink }}
                 />
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginBottom: sp.md }}>
-                  Shown on your profile. It is what lets a client look you up on the register themselves —
+                  Shown on your profile. It is what lets a client look you up on the register themselves,
                   which is worth more than anything we could put next to it.
                 </Text>
               </>) : (
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
                   Policy numbers are not published. Nobody outside your insurer can check one, and it
-                  identifies a live policy — the insurer and the renewal date are what a client needs.
+                  identifies a live policy. The insurer and the renewal date are what a client needs.
                 </Text>
               )}
 
@@ -651,7 +651,7 @@ export default function TrainerCredentials() {
                 />
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
                   Clearing the box removes your reply. If this client rewrites their review later, your reply
-                  goes with it — it answered what they wrote before.
+                  goes with it, because it answered what they wrote before.
                 </Text>
                 <Cta label={replying ? 'Posting…' : 'Post Reply'} wide disabled={replying}
                   onPress={() => { void sendReply(); }} />
@@ -710,7 +710,7 @@ function ReviewAsks() {
         <SectionHead title="Worth Asking" />
         <Flag tone={t.warn}>
           Your clients could not be read just now, so nobody is suggested here. That is a read that failed, not
-          a book with nobody worth asking in it — nothing has been sent either way.
+          a book with nobody worth asking in it. Nothing has been sent either way.
         </Flag>
       </Section>
     );
@@ -728,7 +728,7 @@ function ReviewAsks() {
       {asks.askedUnread ? (
         <View style={{ marginTop: sp.md }}>
           <Flag tone={t.warn}>
-            Who you have already asked could not be read on this phone, so nobody is suggested — this is not a book
+            Who you have already asked could not be read on this phone, so nobody is suggested. This is not a book
             with nobody worth asking in it. Nothing has been sent either way.
           </Flag>
         </View>
@@ -828,7 +828,7 @@ function AskSheet({ row, onClose, onSent }: {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} onPress={onClose} a11yLabel="Close without sending" />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — Nothing Sent Yet</Text>
+            <Text style={{ ...ty.micro, color: t.ink3 }}>Draft · Nothing Sent Yet</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{row.name ?? 'Client'}</Text>
           </View>
         </View>
@@ -852,7 +852,7 @@ function AskSheet({ row, onClose, onSent }: {
           />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             This goes to {row.name ?? 'them'} from you, in your ordinary chat thread. It is not sent until you press
-            Send, and what they write goes up exactly as they write it — at every rating.
+            Send, and what they write goes up exactly as they write it, at every rating.
           </Text>
         </Section>
 

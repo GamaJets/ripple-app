@@ -190,7 +190,7 @@ export function labourShare(
   }
   if (costState === 'error') {
     return withheld('rota_unread',
-      'This week’s rota could not be read, so what the floor costs is unknown — not nothing.');
+      'This week’s rota could not be read, so what the floor costs is unknown, not nothing.');
   }
   if (costState === 'partial') {
     return withheld('rota_partial',
@@ -206,7 +206,7 @@ export function labourShare(
   }
   if (!cost) {
     return withheld('rota_unread',
-      'This week’s rota could not be read, so what the floor costs is unknown — not nothing.');
+      'This week’s rota could not be read, so what the floor costs is unknown, not nothing.');
   }
   if (!takings) {
     return withheld('takings_unread',
@@ -220,7 +220,7 @@ export function labourShare(
   }
   if (cost.cents == null) {
     return withheld('no_rota_cost', cost.unpriced > 0
-      ? `Nothing on this week’s rota carries a rate, so what it costs is unknown. ${cost.unpriced} shift${cost.unpriced === 1 ? '' : 's'} ${cost.unpriced === 1 ? 'is' : 'are'} rostered and unpriced — which is not the same as rostered and free.`
+      ? `Nothing on this week’s rota carries a rate, so what it costs is unknown. ${cost.unpriced} shift${cost.unpriced === 1 ? '' : 's'} ${cost.unpriced === 1 ? 'is' : 'are'} rostered and unpriced, which is not the same as rostered and free.`
       : 'There is nothing live on this week’s rota to cost.');
   }
   const costCur = code(cost.currency);
@@ -241,14 +241,14 @@ export function labourShare(
   }
   if (takings.cents <= 0) {
     return withheld('no_takings', takings.cents === 0
-      ? 'Nothing was recorded coming in over this window, so there is no figure for the wage bill to be a share of. That is not the same as the gym taking nothing — it is the same as nobody having entered a payment.'
+      ? 'Nothing was recorded coming in over this window, so there is no figure for the wage bill to be a share of. That is not the same as the gym taking nothing. It is the same as nobody having entered a payment.'
       : 'What was recorded over this window nets below zero once reversals are taken off, so there is no takings figure for the wage bill to be a share of.');
   }
 
   // ── and the one place the two meet ──────────────────────────────────────
   if (costCur !== tillCur) {
     return withheld('currency_mismatch',
-      `This week’s shifts are priced in ${costCur} and the money recorded coming in is ${tillCur}. Repple holds no exchange rate, and a percentage of one currency over another is not a smaller or larger share — it is not a share at all.`);
+      `This week’s shifts are priced in ${costCur} and the money recorded coming in is ${tillCur}. Repple holds no exchange rate, and a percentage of one currency over another is not a smaller or larger share. It is not a share at all.`);
   }
 
   const atLeast = cost.unpriced > 0;

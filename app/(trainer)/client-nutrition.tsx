@@ -650,7 +650,7 @@ export default function ClientNutrition() {
             {r.status === 'error' ? (
               <Section>
                 <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-                  note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+                  note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
 
@@ -705,7 +705,7 @@ export default function ClientNutrition() {
               <View>
                 <Section>
                   <Notice kicker="No Account" title={`${client?.name ?? 'This client'} has no Repple account`}
-                    note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to carry a diet, an allergen list or a calorie target — and nowhere for a plan you write here to be delivered to. Nothing of theirs was asked for and nothing was refused. Invite them from your client list and this screen works properly from the day they accept.`} />
+                    note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to carry a diet, an allergen list or a calorie target, and nowhere for a plan you write here to be delivered to. Nothing of theirs was asked for and nothing was refused. Invite them from your client list and this screen works properly from the day they accept.`} />
                 </Section>
               </View>
             ) : picked ? (
@@ -730,7 +730,7 @@ export default function ClientNutrition() {
                   <Section>
                     <Flag tone={t.warn}>
                       {scansUnread
-                        ? `Their scans could not be read, so this screen does not know what ${who} weighs. Any weight shown below is one they typed themselves, and their own Meals tab scales to their newest scan — so the two can be different bodies. The week can be read; it should not be sent on this, and an empty scan record here is not a claim that they have never been scanned.`
+                        ? `Their scans could not be read, so this screen does not know what ${who} weighs. Any weight shown below is one they typed themselves, and their own Meals tab scales to their newest scan, so the two can be different bodies. The week can be read; it should not be sent on this, and an empty scan record here is not a claim that they have never been scanned.`
                         : weighUnread
                           ? `Their check-ins could not be read, so the weight trend this week is planned against is missing entirely. What is charted below is scans alone. The week can be read; it should not be sent on this, and an empty chart here is not a claim that ${who} has stopped weighing in.`
                           : weighShort
@@ -959,7 +959,7 @@ export default function ClientNutrition() {
                           </View>
                           <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
                             Sending replaces the week they are following. They can still swap any meal on
-                            their own phone — their swap wins over yours for that slot, and yours comes
+                            their own phone. Their swap wins over yours for that slot, and yours comes
                             back when they clear it. What they log stays theirs; nothing here writes to
                             their food diary.
                           </Text>
@@ -1056,7 +1056,7 @@ export default function ClientNutrition() {
                         ) : (
                           <Text style={{ ...ty.body, color: t.ink2 }}>
                             {who} has recorded nothing they avoid. The read came back and it was empty,
-                            so this is about them rather than about the connection — worth asking anyway
+                            so this is about them rather than about the connection. It is worth asking anyway
                             before you write a week around it.
                           </Text>
                         )}
@@ -1210,7 +1210,7 @@ export default function ClientNutrition() {
                           <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{m.n}</Text>
                           {pinnedHere ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the Plan</Text> : null}
                           <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
-                            {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} — at {m.servings}× serving
+                            {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} · at {m.servings}× serving
                           </Text>
                           {/* The library's own filter let this through and
                               Repple's re-check did not. On the ROW somebody
@@ -1277,7 +1277,7 @@ export default function ClientNutrition() {
                     <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{g.n}</Text>
                     {inPlan ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the Plan</Text> : null}
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
-                      {num(g.k)} kcal · P{num(g.p)} · C{num(g.c)} · F{num(g.f)} — per serving, before
+                      {num(g.k)} kcal · P{num(g.p)} · C{num(g.c)} · F{num(g.f)} · per serving, before
                       their day is scaled to target
                     </Text>
                   </View>

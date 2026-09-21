@@ -88,7 +88,7 @@ export function consequences(now: GymSettingsNow, next: GymSettingsNext): string
     out.push(
       `Change this gym’s currency from ${now.currency} to ${nextCcy}?\n\n`
       + 'Nothing already recorded is re-denominated. Every payment, plan and pass keeps the '
-      + `currency it was written in, so this gym’s ledger will hold both — and any total that `
+      + `currency it was written in, so this gym’s ledger will hold both, and any total that `
       + 'spans the two is withheld rather than added up, for good.',
     );
   }
@@ -117,7 +117,7 @@ export function consequences(now: GymSettingsNow, next: GymSettingsNext): string
       `Change this gym’s session fee from ${feeLabel(now.sessionFee)} to ${feeLabel(nextFee)}?\n\n`
       + 'A session that was priced when it was marked keeps that price, and so does a coach on a '
       + 'rate of their own. Everything else is priced at whatever this says at the moment the '
-      + 'figure is read — so months already worked and not yet settled will be worth a different '
+      + 'figure is read, so months already worked and not yet settled will be worth a different '
       + 'amount afterwards. Settlements already written hold their own figure.',
     );
   }
@@ -134,7 +134,7 @@ export function consequences(now: GymSettingsNow, next: GymSettingsNext): string
   if (now.timezone && nextZone && nextZone !== now.timezone) {
     out.push(
       `Change this gym’s timezone from ${now.timezone} to ${nextZone}?\n\n`
-      + 'No stored figure changes — every time in this database is an instant. What moves is '
+      + 'No stored figure changes: every time in this database is an instant. What moves is '
       + 'which day and which hour a screen files it under, for what has already happened as '
       + 'well as for what has not. A week you have already reconciled may come out to a '
       + 'different total.',
@@ -144,7 +144,7 @@ export function consequences(now: GymSettingsNow, next: GymSettingsNext): string
     out.push(
       `Clear this gym’s timezone? It is ${now.timezone} now.\n\n`
       + 'The dates do not go blank. They go back to whichever device is reading them, with '
-      + 'nothing on any screen saying so — two people in two countries would then see this '
+      + 'nothing on any screen saying so. Two people in two countries would then see this '
       + 'gym’s Saturday differently and neither would be told.',
     );
   }
@@ -157,7 +157,7 @@ export function consequences(now: GymSettingsNow, next: GymSettingsNext): string
       + `“${PAY_POLICY_LABEL[next.policy]}”.\n\n`
       + 'This is not only about sessions from here on. Every month that has been worked and not '
       + 'yet settled is recounted against the new answer the next time anybody opens Payroll, '
-      + 'Close or their own earnings — a coach reading what they are owed for last month may '
+      + 'Close or their own earnings. A coach reading what they are owed for last month may '
       + 'see a different figure afterwards. Settlements already written hold theirs.',
     );
   }

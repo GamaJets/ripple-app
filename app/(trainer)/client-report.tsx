@@ -543,7 +543,7 @@ export default function ClientReport() {
             <Rule />
             <Section>
               <Notice kicker="No Account" title={`${fullName || 'This client'} has no Repple account`}
-                note={`You added ${who} to your book by hand, so there is no account for sessions, training, scans or measurements to belong to — and so there is nothing to put on a page. That is not a record that could not be read, and a document saying it could not be read would be wrong on every line. Invite them from your client list and this becomes a real report from the day they join.`} />
+                note={`You added ${who} to your book by hand, so there is no account for sessions, training, scans or measurements to belong to, and so there is nothing to put on a page. That is not a record that could not be read, and a document saying it could not be read would be wrong on every line. Invite them from your client list and this becomes a real report from the day they join.`} />
             </Section>
             <View style={{ marginTop: layout.section, flexDirection: 'row' }}>
               <Ghost label="Someone Else" onPress={() => { setPicked(null); setNote(''); }} />
@@ -594,12 +594,12 @@ export default function ClientReport() {
                   : reads.client.status === 'loading' ? '…' : String(injuries.length)} />
               {tally.unrecorded != null && tally.unrecorded > 0 ? (
                 <Flag style={{ marginTop: sp.sm }}>
-                  A session with no outcome recorded is one nobody marked either way. The document counts those separately and does not treat them as missed — and it states no attendance percentage, because a percentage over them would not measure anything.
+                  A session with no outcome recorded is one nobody marked either way. The document counts those separately and does not treat them as missed. It states no attendance percentage, because a percentage over them would not measure anything.
                 </Flag>
               ) : null}
               {overall === 'error' ? (
                 <Flag style={{ marginTop: sp.sm }}>
-                  Part of this could not be read. The document will say so on its own front page rather than looking complete — but you may prefer to open this again in a moment.
+                  Part of this could not be read. The document will say so on its own front page rather than looking complete, but you may prefer to open this again in a moment.
                 </Flag>
               ) : null}
               {overall === 'partial' ? (
@@ -619,7 +619,7 @@ export default function ClientReport() {
                 accessibilityLabel="Your own note for the report"
                 style={[inp, { minHeight: 110, textAlignVertical: 'top' }]} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                This is the only opinion on the page. Everything else is a figure, a date, or a line saying something could not be read — the document states that outright, so nothing you write is mistaken for the app’s own verdict.
+                This is the only opinion on the page. Everything else is a figure, a date, or a line saying something could not be read. The document states that outright, so nothing you write is mistaken for the app’s own verdict.
               </Text>
             </Section>
 
@@ -642,7 +642,7 @@ export default function ClientReport() {
           <Notice
             kicker="What This Is"
             title="Everything on record, on one page"
-            note="Sessions, logged training, scans, tape measurements and anything they have disclosed. It carries no rating, no percentage and no assessment — only what was entered, and by whom. Anything that could not be read says so on the page."
+            note="Sessions, logged training, scans, tape measurements and anything they have disclosed. It carries no rating, no percentage and no assessment: only what was entered, and by whom. Anything that could not be read says so on the page."
           />
         </View>
       </ScrollView>
@@ -684,8 +684,8 @@ export default function ClientReport() {
                 <View style={{ paddingHorizontal: layout.gutter, marginTop: sp.sm }}>
                   <Flag>
                     {preview.caveats.length} part{preview.caveats.length === 1 ? '' : 's'} of this could not be read
-                    and the document says so where the figures would have been. Sending it is not wrong — an
-                    honest gap is better than a missing page — but it is worth trying again first.
+                    and the document says so where the figures would have been. Sending it is not wrong (an
+                    honest gap is better than a missing page), but it is worth trying again first.
                   </Flag>
                 </View>
               ) : null}

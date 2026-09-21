@@ -503,7 +503,7 @@ export default function CoachChat() {
                     ? `${firstName || 'This client'} was added to your book by hand and has no Repple account, so there is no thread here and nothing you write would reach them. This is not an unanswered conversation. Invite them from your client list and this opens properly from the day they join.`
                     : status === 'error'
                       ? 'We could not load this conversation, so we cannot say whether there are messages in it.'
-                      : `No messages yet — say hi${firstName ? ' to ' + firstName : ''}.`}
+                      : `No messages yet. Say hi${firstName ? ' to ' + firstName : ''}.`}
               </Text>
             </View>
           ) : null}

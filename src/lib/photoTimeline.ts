@@ -227,7 +227,7 @@ export function pairOf<T extends TimelinePhoto>(
 export function pairNote<T extends TimelinePhoto>(pair: PhotoPair<T> | null): string | null {
   if (!pair) return null;
   const d = pair.apartDays;
-  if (d == null) return 'These two cannot be placed against each other — one of the dates will not read.';
+  if (d == null) return 'These two cannot be placed against each other. One of the dates will not read.';
   if (d === 0) return 'Both taken on the same day.';
   if (d === 1) return 'One day apart.';
   if (d < 14) return `${d} days apart.`;

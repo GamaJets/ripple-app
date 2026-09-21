@@ -197,7 +197,7 @@ export function EndReasonSheet({
             <Ghost label="Skip and Record Nothing" onPress={() => onDone(null, null)} />
           </View>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Skipping records nothing at all, which is a different answer from a reason — one of those is a
+            Skipping records nothing at all, which is a different answer from a reason. One of those is a
             question nobody answered and the other is a question that was.
           </Text>
         </Section>

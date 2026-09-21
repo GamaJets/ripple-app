@@ -301,7 +301,7 @@ export default function TrainerLeads() {
     Linking.openURL(url).catch(() => {
       Alert.alert(
         'Could Not Open That',
-        'Your phone would not open an app for this. The details are on the screen behind this — copy them out by hand.',
+        'Your phone would not open an app for this. The details are on the screen behind this. Copy them out by hand.',
       );
     });
   };
@@ -325,7 +325,7 @@ export default function TrainerLeads() {
     if (!url) {
       Alert.alert(
         'Nothing to Open It With',
-        'What they left is neither an email address nor a phone number, so there is no app to hand this to. The details are on the screen behind this — copy them out by hand.',
+        'What they left is neither an email address nor a phone number, so there is no app to hand this to. The details are on the screen behind this. Copy them out by hand.',
       );
       return;
     }
@@ -397,7 +397,7 @@ export default function TrainerLeads() {
           <View style={{ marginTop: sp.sm }}>
             <Flag tone={t.good}>
               Somebody with this email address joined you on this code{lead.joinedAt ? ` on ${when(lead.joinedAt)}` : ''}.
-              That is a match on the address and the code, not a guess — it is the only evidence this app has that a
+              That is a match on the address and the code, not a guess. It is the only evidence this app has that a
               channel produced a client rather than a click.
             </Flag>
           </View>
@@ -451,7 +451,7 @@ export default function TrainerLeads() {
           <View style={{ marginTop: sp.md }}>
             <Flag tone={t.warn}>
               What you recorded about following people up could not be read, so nothing is listed below. This is not an
-              enquiry nobody has touched — check before you ring them again.
+              enquiry nobody has touched. Check before you ring them again.
             </Flag>
           </View>
         ) : notes.length ? (
@@ -614,7 +614,7 @@ export default function TrainerLeads() {
           ) : book.status === 'error' && book.rows.length === 0 ? (
             <View style={{ marginTop: sp.lg }}>
               <Flag tone={t.crit}>
-                Nothing is listed because the read did not come back — not because nobody has been in touch. Close this
+                Nothing is listed because the read did not come back, not because nobody has been in touch. Close this
                 and open it again once you have a connection.
               </Flag>
               <View style={{ marginTop: sp.lg }}>
@@ -632,7 +632,7 @@ export default function TrainerLeads() {
                 <View style={{ marginTop: sp.lg }}>
                   <Flag tone={t.warn}>
                     Your codes could not be read, so nothing below is put against a campaign and no figure on this
-                    screen is a count. The enquiries themselves came back and are listed — they are the ones this read
+                    screen is a count. The enquiries themselves came back and are listed. They are the ones this read
                     saw, and they are real people.
                   </Flag>
                   <View style={{ marginTop: sp.lg }}>
@@ -784,7 +784,7 @@ export default function TrainerLeads() {
             An enquiry is matched to an account only when the email address and the code are both exactly the same, so
             a match is evidence and the absence of one is not. Somebody who joined on a different code, signed up with
             another address, or was added by you by hand looks the same here as somebody who never came back. Marking an
-            enquiry closed says you are finished with it — it does not say how it ended.
+            enquiry closed says you are finished with it. It does not say how it ended.
           </Text>
           <View style={{ marginTop: sp.lg }}>
             <Ghost label="What Your Ads Cost" onPress={() => router.push('/(trainer)/ad-spend')} />
@@ -848,7 +848,7 @@ export default function TrainerLeads() {
             <Text style={{ ...ty.head, color: t.ink }}>What You Did About {writing?.name ?? 'this enquiry'}</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
               Repple sent nothing and will send nothing. Write down what you actually did, so the next time you open this
-              you know where it got to — and so you do not ring the same person twice.
+              you know where it got to, and so you do not ring the same person twice.
             </Text>
             <TextInput
               value={draft}
@@ -863,7 +863,7 @@ export default function TrainerLeads() {
               }}
             />
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              This is kept for good and cannot be edited afterwards — a note about a moment that can be rewritten later
+              This is kept for good and cannot be edited afterwards. A note about a moment that can be rewritten later
               records nothing. It goes away only if you remove the enquiry itself.
             </Text>
             <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>

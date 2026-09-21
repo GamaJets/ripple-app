@@ -192,7 +192,7 @@ export function payoutSummary(rows: readonly CoachPayout[], status: LoadStatus):
  * different periods on Stripe's own schedule.
  */
 export const PAYOUT_IS_NOT_A_SALE =
-  'A payout is your Stripe balance reaching your bank, not the proceeds of one sale. It is many charges at once, less what Stripe and Repple took and anything refunded, on Stripe’s own schedule — so it does not line up with any figure above it and the two are deliberately never subtracted from each other.';
+  'A payout is your Stripe balance reaching your bank, not the proceeds of one sale. It is many charges at once, less what Stripe and Repple took and anything refunded, on Stripe’s own schedule, so it does not line up with any figure above it and the two are deliberately never subtracted from each other.';
 
 /**
  * That Stripe remains the record.

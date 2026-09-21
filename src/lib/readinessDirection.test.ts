@@ -87,7 +87,7 @@ const at = (y: number, m: number, d: number, h = 9, mi = 0) => new Date(y, m - 1
   eq(d?.delta, null, 'and it carries NO delta — an unknown that renders as 0 is an invented figure');
   ok(!!d && !d.detail.includes('no change'), `an absent yesterday must not read as no change — got ${d?.detail}`);
   eq(d?.detail,
-    'no readiness on record for yesterday, so there is no direction to show — it does not mean nothing changed',
+    'no readiness on record for yesterday, so there is no direction to show, which does not mean nothing changed',
     'the no-record sentence');
   eq(d?.caveat, null, 'nothing failed, so nothing is flagged on the number');
   eq(d?.against, day(at(2026, 9, 13)), 'it still names the day it looked for');
@@ -206,7 +206,7 @@ const at = (y: number, m: number, d: number, h = 9, mi = 0) => new Date(y, m - 1
   eq(stale?.state, 'no-record', 'the newest score we hold being older than yesterday is no record FOR yesterday');
   eq(stale?.delta, null, 'a four-day-old score is not yesterday and is not subtracted');
   eq(stale?.detail,
-    'no readiness on record for yesterday — the most recent day you have is older than that',
+    'no readiness on record for yesterday; the most recent day you have is older than that',
     'and it says which, rather than reading as "you have never had one"');
 
   const ahead = readinessDirection(

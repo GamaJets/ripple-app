@@ -140,7 +140,7 @@ eq(rosterSearchLine({ status: 'ready', query: 'sarah', matched: 2, searched: 40 
 // and concluded the client was not on their book.
 
 eq(rosterPickerLine({ status: 'ready', shown: 20, known: 84 }),
-  'Showing 20 of your 84 clients — type a name to find the rest.',
+  'Showing 20 of your 84 clients. Type a name to find the rest.',
   'a whole read may state the size of the book');
 
 {

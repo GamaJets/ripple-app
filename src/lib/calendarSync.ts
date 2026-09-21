@@ -338,7 +338,7 @@ export const LINK_NOTES: Record<LinkState, string> = {
   // and has just removed Repple's access in their Google account. That coach
   // now reaches this state at all, which they did not before: the edge function
   // clears the dead token rather than leaving the row claiming to work.
-  'needs-reconnect': 'Repple can no longer renew this connection to Google — either Google never gave it permission to, or that permission has since been removed in your Google account. Nothing is being read or written until you connect again.',
+  'needs-reconnect': 'Repple can no longer renew this connection to Google. Either Google never gave it permission to, or that permission has since been removed in your Google account. Nothing is being read or written until you connect again.',
   connected: 'Connected. Repple reads when you are busy on your main Google calendar, and writes nothing back.',
   'two-way': 'Connected. Repple reads when you are busy, and puts the sessions clients book into a separate calendar of its own.',
 };
@@ -694,7 +694,7 @@ export function pushSummaryLine(r: PushResult): string {
   // contributes no phrase and would otherwise land in it — and that arm is a
   // positive claim that Google's diary already matches Repple's.
   if (unread.length === 3) {
-    return 'Your schedule was sent, and Google did not say what it changed — so this cannot tell you whether anything was added, updated or removed. Open your Google calendar to see. Only events Repple put there are ever touched.';
+    return 'Your schedule was sent, and Google did not say what it changed, so this cannot tell you whether anything was added, updated or removed. Open your Google calendar to see. Only events Repple put there are ever touched.';
   }
   if (unread.length > 0) {
     const head = parts.length

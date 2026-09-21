@@ -215,7 +215,7 @@ export default function OwnerLibrary() {
     // A read we were not allowed to make is not an empty catalogue, and the
     // difference matters most to the person this screen is selling to.
     if (signedOut) {
-      return 'The catalogue could not be read on this session — that is a sign-in that has not '
+      return 'The catalogue could not be read on this session. That is a sign-in that has not '
         + 'restored, not a catalogue with nothing in it. Nothing below is a statement about what '
         + 'the platform covers.';
     }
@@ -240,9 +240,9 @@ export default function OwnerLibrary() {
           const figure = countable ? String(rows.length) : '—';
           const note =
             status === 'loading' ? 'Reading the catalogue…'
-            : status === 'error' ? 'The catalogue could not be read, so this is unknown — not zero.'
+            : status === 'error' ? 'The catalogue could not be read, so this is unknown, not zero.'
             : status === 'partial' ? 'More movements than fit in one read. The figure would be a subtotal, so it is not shown.'
-            : signedOut ? 'Not read on this session — this is a sign-in that has not restored, not an empty catalogue.'
+            : signedOut ? 'Not read on this session. This is a sign-in that has not restored, not an empty catalogue.'
             : rows.length === 0 ? 'The catalogue came back empty.'
             : 'Every one is available to your members and to your coaches, at no extra cost.';
           return (
@@ -319,7 +319,7 @@ export default function OwnerLibrary() {
             // and an owner sizing up the platform must not be shown an empty
             // list as though that were the product.
             <Notice tone={t.warn} kicker="Catalogue" title="The Exercise List Could Not Be Read"
-              note="This is our end, not yours — the movements are still there. Nothing below this line is a statement about what the platform covers.">
+              note="This is our end, not yours. The movements are still there. Nothing below this line is a statement about what the platform covers.">
               <View style={{ marginTop: sp.lg }}>
                 <Ghost label="Try Again" onPress={() => { reload(); }} />
               </View>

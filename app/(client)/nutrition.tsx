@@ -133,7 +133,7 @@ const GOAL_LABEL: Record<Goal, string> = { fatloss: 'Fat loss', tone: 'Tone', mu
 // have to keep reading correctly when day types can be planned a week ahead,
 // which is the direction this is going.
 const DAY_TYPES = [
-  { key: 'training', label: 'Training Day', blurb: 'A day you train — a gym session or a hard effort. Fuel goes up so there is something to train on.' },
+  { key: 'training', label: 'Training Day', blurb: 'A day you train: a gym session or a hard effort. Fuel goes up so there is something to train on.' },
   { key: 'off', label: 'Standard', blurb: 'A normal day with no session: work, walking, ordinary movement. This is the baseline target.' },
   { key: 'rest', label: 'Rest Day', blurb: 'A full day off training. Fuel comes down, because there is no session to feed.' },
 ] as const;
@@ -202,11 +202,11 @@ function targetBasis(plan: EnergyPlan, goalLabel: string, wu: WeightUnit): strin
   if (plan.kind === 'enum') {
     switch (plan.reason) {
       case 'no-goal':
-        return `Based on your general goal (${goalLabel}). Set a target weight and a date under Goals and this is built from those instead — a date is what turns a target into a daily number.`;
+        return `Based on your general goal (${goalLabel}). Set a target weight and a date under Goals and this is built from those instead. A date is what turns a target into a daily number.`;
       case 'not-weight':
-        return `Based on your general goal (${goalLabel}). Your goals aren’t about bodyweight, and calories can’t be worked back from those honestly — add a target weight under Goals to drive this.`;
+        return `Based on your general goal (${goalLabel}). Your goals aren’t about bodyweight, and calories can’t be worked back from those honestly. Add a target weight under Goals to drive this.`;
       case 'no-target-date':
-        return `You’ve set a target weight, but no date. Two people losing the same 6 kg — one by spring, one by next year — don’t eat the same, so this stays on your general goal (${goalLabel}) until there’s a date under Goals.`;
+        return `You’ve set a target weight, but no date. Two people losing the same 6 kg (one by spring, one by next year) don’t eat the same, so this stays on your general goal (${goalLabel}) until there’s a date under Goals.`;
       case 'no-readings':
         return `You’ve set a target weight, but there’s no weigh-in to measure from yet. Add one and this is built from your goal; for now it’s your general goal (${goalLabel}).`;
       case 'date-passed':
@@ -215,7 +215,7 @@ function targetBasis(plan: EnergyPlan, goalLabel: string, wu: WeightUnit): strin
         // figure: there is no number beside it to look wrong.
         return `Your goal’s date has gone by, so there’s no time left to spread the remaining weight over. Set a new date under Goals. Until then this is your general goal (${goalLabel}).`;
       case 'date-too-soon':
-        return `Your goal’s date is less than a week away — too soon to tell you whether a plan is working before it arrives. This is your general goal (${goalLabel}) instead.`;
+        return `Your goal’s date is less than a week away, too soon to tell you whether a plan is working before it arrives. This is your general goal (${goalLabel}) instead.`;
       case 'reached':
         return `You’ve reached your target weight. Mark it done or set the next one under Goals; this is your general goal (${goalLabel}) in the meantime.`;
       case 'no-maintenance':
@@ -264,7 +264,7 @@ const openLink = (where: string, url: string) => { Linking.openURL(url).catch((e
  *  library — and a read that has not landed leaves the plan's own meal standing
  *  in, which is a meal they are not going to cook. */
 const UNREAD_SHOPPING_WARNING =
-  'One or more of your planned recipes could not be read, so your plan’s own meal is standing in for it — its ingredients are not on this list and its figures are not in these totals.';
+  'One or more of your planned recipes could not be read, so your plan’s own meal is standing in for it. Its ingredients are not on this list and its figures are not in these totals.';
 /** The heading unmeasured ingredients go under. They are shopping and belong
  *  on the list; they have no quantity, and inventing one is worse than none. */
 const UNMEASURED_HEAD = 'To Taste & As Needed';
@@ -457,7 +457,7 @@ export default function Nutrition() {
     }
     notifySuccess();
     if (out === 'unsent') {
-      Alert.alert('Logged — Waiting to Send', `${m.n} is counted toward today and kept on this phone. It goes up when you have signal.`);
+      Alert.alert('Logged, Waiting to Send', `${m.n} is counted toward today and kept on this phone. It goes up when you have signal.`);
     }
   };
   const [showGrocery, setShowGrocery] = useState(false);
@@ -738,7 +738,7 @@ export default function Nutrition() {
         setPendingVia('photo');
         setPendingPhoto(asset.uri);
         setPendingTitle('Check and Log');
-        setPendingNote('Read from your photo — check every figure before logging it. The picture itself is not kept: it is here to read the meal from and to check against, and the numbers are what go into your log.');
+        setPendingNote('Read from your photo. Check every figure before logging it. The picture itself is not kept: it is here to read the meal from and to check against, and the numbers are what go into your log.');
         setPending({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, basis: null });
         return;
       }
@@ -786,7 +786,7 @@ export default function Nutrition() {
       setPendingVia('manual');
       setPendingPhoto(null);
       setPendingTitle('Check This One');
-      setPendingNote(`Read from what you typed. Some of the figures did not come back, so they are blank rather than nought — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
+      setPendingNote(`Read from what you typed. Some of the figures did not come back, so they are blank rather than nought. Fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
       setPending(gaps[0]);
       setQueue(gaps.slice(1));
     }
@@ -810,7 +810,7 @@ export default function Nutrition() {
       if (refused > 0) {
         Alert.alert('Partly Logged', `${outs.length - refused} of ${outs.length} went on today's record. ${refused} could not be saved and ${refused === 1 ? 'is' : 'are'} not counted.`);
       } else if (unsent > 0) {
-        Alert.alert('Logged — Waiting to Send', `${unsent === outs.length ? 'They are' : `${unsent} of them are`} counted toward today and kept on this phone until you have signal.`);
+        Alert.alert('Logged, Waiting to Send', `${unsent === outs.length ? 'They are' : `${unsent} of them are`} counted toward today and kept on this phone until you have signal.`);
       }
     }
     else if (!gaps.length) {
@@ -1249,7 +1249,7 @@ export default function Nutrition() {
     DEPTS.filter((d) => groc.byDept[d]?.length).forEach((d) => {
       lines.push(d.toUpperCase());
       html += '<h3>' + d + '</h3><ul>';
-      groc.byDept[d]!.forEach((it) => { const q = it.qty + (it.unit ? ' ' + it.unit : ''); lines.push('- ' + it.item + ' — ' + q); html += '<li>' + it.item + ' — ' + q + '</li>'; });
+      groc.byDept[d]!.forEach((it) => { const q = it.qty + (it.unit ? ' ' + it.unit : ''); lines.push('- ' + it.item + ': ' + q); html += '<li>' + it.item + ': ' + q + '</li>'; });
       html += '</ul>'; lines.push('');
     });
     // Named, never quantified: a recipe asked for salt to taste, and "0 g salt"
@@ -1260,7 +1260,7 @@ export default function Nutrition() {
       groc.unmeasured.forEach((it) => { lines.push('- ' + it); html += '<li>' + it + '</li>'; });
       html += '</ul>'; lines.push('');
     }
-    if (recipeWeek) { lines.push(RECIPE_DISCLAIMER, `${RECIPE_ATTRIBUTION.text} — ${RECIPE_ATTRIBUTION.url}`); html += `<p>${RECIPE_DISCLAIMER}</p><p><a href="${RECIPE_ATTRIBUTION.url}">${RECIPE_ATTRIBUTION.text}</a></p>`; }
+    if (recipeWeek) { lines.push(RECIPE_DISCLAIMER, `${RECIPE_ATTRIBUTION.text}: ${RECIPE_ATTRIBUTION.url}`); html += `<p>${RECIPE_DISCLAIMER}</p><p><a href="${RECIPE_ATTRIBUTION.url}">${RECIPE_ATTRIBUTION.text}</a></p>`; }
     await shareDoc(html, lines.join('\n'), 'Grocery List');
   };
   // The rows below are labelled by DATE (`fmtDay`), because they are days
@@ -1278,7 +1278,7 @@ export default function Nutrition() {
     // planned recipe could not be read and the plan's own meal is in the table
     // in its place.
     const note = [
-      recipeInPlan ? `${RECIPE_DISCLAIMER} ${RECIPE_ATTRIBUTION.text} — ${RECIPE_ATTRIBUTION.url}` : null,
+      recipeInPlan ? `${RECIPE_DISCLAIMER} ${RECIPE_ATTRIBUTION.text}: ${RECIPE_ATTRIBUTION.url}` : null,
       todayWaiting.length ? UNREAD_SHOPPING_WARNING : null,
     ].filter(Boolean).join(' ');
     const { html, text } = mealPlanDoc(c.name, target.kcal, rows, labels, appName, t.brand, note || undefined);
@@ -1395,7 +1395,7 @@ export default function Nutrition() {
                 reason the plan is withheld, so each stays on the page — cut
                 to the one line that says what was not read and what to do. */}
             <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.md }}>{adjustUnknown
-              ? 'Your coach’s adjustment to your targets could not be read, so no plan is shown — generic figures are not your coach’s plan. Check back in a moment.'
+              ? 'Your coach’s adjustment to your targets could not be read, so no plan is shown. Generic figures are not your coach’s plan. Check back in a moment.'
               : !hasBody
               ? (looking
                 ? 'Reading your latest measurements…'
@@ -1404,7 +1404,7 @@ export default function Nutrition() {
                   : 'Your targets and meal plan are scaled to your body, so they need a weight and body fat.')
               : c.profileStatus === 'loading'
               ? 'Reading your diet and the foods you asked to avoid…'
-              : 'Your diet and the foods you avoid could not be read, so no plan is shown — meals built without your exclusions would be the wrong food. Pull down to try again.'}</Text>
+              : 'Your diet and the foods you avoid could not be read, so no plan is shown. Meals built without your exclusions would be the wrong food. Pull down to try again.'}</Text>
             {/* No button on the error path. "Add Your Measurements" is the
                 wrong thing to offer somebody whose measurements exist and
                 could not be fetched — it invites them to type in a duplicate
@@ -1688,7 +1688,7 @@ export default function Nutrition() {
             {dayWhole ? caloriesNote(cal)
               : fl.status === 'loading' ? 'Reading today’s food log…'
               : fl.status === 'partial' ? 'More is logged today than can be read in one go, so what is left is unknown.'
-              : 'Today’s food log could not be read, so what is left is unknown — not your whole allowance.'}
+              : 'Today’s food log could not be read, so what is left is unknown. It is not your whole allowance.'}
           </Text>
           {/* Where the targets above came from, in one line beside them — a
               target with no source reads as a rule nobody set. Three sources
@@ -1714,7 +1714,7 @@ export default function Nutrition() {
             use, so a member who reads both is told one thing. */}
         {burnStale ? (
           <Flag tone={t.warn} style={{ marginTop: 14 }}>
-            Calories burned is the last figure we had — your device could not be reached. Pull down to try again.
+            Calories burned is the last figure we had. Your device could not be reached. Pull down to try again.
           </Flag>
         ) : null}
 
@@ -2032,7 +2032,7 @@ export default function Nutrition() {
                   this says is which day, and that the shopping followed it. */}
               {recipeInPlan ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  Planned for {fmtDay(today.key)} — the days ahead, the Grocery List and the shared plan are built from it. Another day keeps your plan’s own meal until you choose one there, and a recipe you planned for every {WEEK_DAY_NAMES[today.weekday] ?? 'week'} stands behind it.
+                  Planned for {fmtDay(today.key)}. The days ahead, the Grocery List and the shared plan are built from it. Another day keeps your plan’s own meal until you choose one there, and a recipe you planned for every {WEEK_DAY_NAMES[today.weekday] ?? 'week'} stands behind it.
                 </Text>
               ) : null}
               {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
@@ -2091,7 +2091,7 @@ export default function Nutrition() {
               </Pressable>
             </View>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-              <TextInput value={nl} onChangeText={setNl} placeholder='Describe it — "chicken burrito & a coke"' placeholderTextColor={t.ink3}
+              <TextInput value={nl} onChangeText={setNl} placeholder='Describe it, e.g. "chicken burrito & a coke"' placeholderTextColor={t.ink3}
                 accessibilityLabel="Describe what you ate"
                 onSubmitEditing={describeLog} returnKeyType="done"
                 style={{ ...ty.body, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
@@ -2149,8 +2149,8 @@ export default function Nutrition() {
                   case nobody can get to is the cheap half of the trade;
                   app/(client)/foodlog.tsx splits the same three already. */}
               {fl.status === 'loading' ? 'Reading today’s food log…'
-                : fl.status === 'error' ? 'Today’s food log could not be read — not a day with nothing in it.'
-                : fl.status === 'partial' ? 'More is logged today than can be listed in one go — not a day with nothing in it.'
+                : fl.status === 'error' ? 'Today’s food log could not be read. This is not a day with nothing in it.'
+                : fl.status === 'partial' ? 'More is logged today than can be listed in one go. This is not a day with nothing in it.'
                 : 'Nothing logged today.'}
             </Text>
           )}
@@ -2340,7 +2340,7 @@ export default function Nutrition() {
               step goal. */}
           {c.saveFailed ? (
             <Flag tone={t.crit} style={{ marginTop: sp.lg }}>
-              Your last diet or exclusion change has not saved, so this plan may not reflect it — do not treat a meal as safe on the strength of it. It keeps retrying.
+              Your last diet or exclusion change has not saved, so this plan may not reflect it. Do not treat a meal as safe on the strength of it. It keeps retrying.
             </Flag>
           ) : null}
         </Section>
@@ -2640,7 +2640,7 @@ export default function Nutrition() {
                 somebody actually shops from, with the way to shorten it. */}
             {days.length > 7 ? (
               <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
-                This is {spanLabel} of food. Buy the fresh things a few days at a time — choose This Week above the meals for one week’s list.
+                This is {spanLabel} of food. Buy the fresh things a few days at a time. Choose This Week above the meals for one week’s list.
               </Flag>
             ) : null}
             {/* The list is built from the week, and the week can contain the
@@ -2651,7 +2651,7 @@ export default function Nutrition() {
             {gapNote ? <Flag tone={t.crit} style={{ marginBottom: sp.md }}>{gapNote}</Flag> : null}
             {weekAllergens.length ? (
               <Flag tone={t.crit} style={{ marginBottom: sp.md }}>
-                Meals in this week contain {weekAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid — so this list has ingredients for them in it. Check each item before you buy.
+                Meals in this week contain {weekAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid, so this list has ingredients for them in it. Check each item before you buy.
               </Flag>
             ) : null}
             {/* A list short of a planned recipe's ingredients is a list
@@ -2782,7 +2782,7 @@ export default function Nutrition() {
             <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>{SCREEN_HELP.meals.title}</Text>
             {[
               ...SCREEN_HELP.meals.lines,
-              { term: 'Logging', means: 'anything you eat off-plan counts toward your day once you add it — by photo, barcode, search or a typed description.' },
+              { term: 'Logging', means: 'anything you eat off-plan counts toward your day once you add it: by photo, barcode, search or a typed description.' },
               { term: 'Snacks', means: planHasSnacks
                 ? 'your plan already builds snacks into the day. The ideas further down are extras, and count only when you log one.'
                 : 'ideas only. Nothing changes your targets until you log one.' },
@@ -2791,7 +2791,7 @@ export default function Nutrition() {
               // One text node, as the help row draws it: the term and its
               // explanation are one sentence and wrap as one.
               <Text key={l.term} style={{ ...ty.label, color: t.ink2, marginBottom: sp.md }}>
-                <Text style={{ ...font('700'), color: t.ink }}>{l.term}</Text>{' — '}{l.means}
+                <Text style={{ ...font('700'), color: t.ink }}>{l.term}</Text>{': '}{l.means}
               </Text>
             ))}
             <Ghost label="Close" onPress={() => setHelpOpen(false)} />
@@ -2869,7 +2869,7 @@ export default function Nutrition() {
           const out = await fl.logFood({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, via: pendingVia });
           if (out === 'refused') { Alert.alert('Not Logged', `${f.name} could not be saved, so it is not on today's record.`); return false; }
           notifySuccess();
-          if (out === 'unsent') Alert.alert('Logged — Waiting to Send', `${f.name} is counted toward today and kept on this phone until you have signal.`);
+          if (out === 'unsent') Alert.alert('Logged, Waiting to Send', `${f.name} is counted toward today and kept on this phone until you have signal.`);
           return true;
         }} />
     </SafeAreaView>

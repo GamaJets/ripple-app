@@ -173,7 +173,7 @@ export function parseCoachBrandName(
   const name = String(input ?? '').trim().replace(/\s+/g, ' ');
   if (!name) return { kind: 'clear' };
   if (name.length > MAX_BRAND_NAME) {
-    return { kind: 'bad', reason: `That is longer than a name — ${MAX_BRAND_NAME} characters at most.` };
+    return { kind: 'bad', reason: `That is longer than a name: ${MAX_BRAND_NAME} characters at most.` };
   }
   if (reserved.some((r) => fold(r) === fold(name))) {
     return {

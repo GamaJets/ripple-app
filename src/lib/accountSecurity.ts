@@ -185,7 +185,7 @@ export function authErrorNote(message: string | null | undefined, what: 'passwor
     return 'That is the password you already have, so nothing was changed.';
   }
   if (m.includes('rate limit') || m.includes('too many') || m.includes('security purposes')) {
-    return 'Too many attempts just now. Wait a minute and try again — nothing was changed.';
+    return 'Too many attempts just now. Wait a minute and try again. Nothing was changed.';
   }
   if (m.includes('invalid login') || m.includes('invalid credentials')) {
     return 'That is not your current password, so nothing was changed.';

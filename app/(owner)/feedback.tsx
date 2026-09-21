@@ -127,7 +127,7 @@ export default function OwnerFeedback() {
             // The count goes with the average. Saying "1,000 submissions" under
             // a dash would state as a total the very figure the dash exists to
             // withhold.
-            : truncated ? `More than ${rows.length.toLocaleString()} submissions — too many to average here`
+            : truncated ? `More than ${rows.length.toLocaleString()} submissions, too many to average here`
             : rows.length === 0 ? 'No submissions yet'
             : `${rows.length} submission${rows.length === 1 ? '' : 's'}`;
           return (
@@ -180,7 +180,7 @@ export default function OwnerFeedback() {
               <Icon name={unread ? 'bell' : 'message'} size={26} color={t.ink3} />
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>
                 {unread
-                  ? 'The inbox could not be read, so this is not "no feedback" — pull down to try again.'
+                  ? 'The inbox could not be read, so this is not "no feedback". Pull down to try again.'
                   : 'No feedback yet. It shows up here as testers send it from inside the app.'}
               </Text>
             </View>
@@ -205,7 +205,7 @@ export default function OwnerFeedback() {
           <Section>
             <Flag tone={t.warn}>
               The crash log could not be read, so this cannot tell you whether the build has been
-              throwing. That is a failed read, not a clean build — do not sign anything off on it.
+              throwing. That is a failed read, not a clean build. Do not sign anything off on it.
             </Flag>
           </Section>
         </>) : null}

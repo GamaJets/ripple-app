@@ -614,7 +614,7 @@ export default function Financials() {
         setBasisClock(
           mw == null ? null
             : at!.basis === 'gym' ? mw.label
-              : `${mw.label} — cut on this phone’s clock, because this gym has not set a timezone`,
+              : `${mw.label} (cut on this phone’s clock, because this gym has not set a timezone)`,
         );
         setDerivedFailed(false);
         setFetchedAt(Date.now());
@@ -1243,7 +1243,7 @@ export default function Financials() {
                 <SectionHead title="Your Figures Could Not Be Read" />
                 <Text style={{ ...ty.body, color: t.ink2 }}>
                   This phone&rsquo;s stored copy of your monthly figures did not come back. That is
-                  a read that failed, not a month you have not filled in — anything you entered
+                  a read that failed, not a month you have not filled in. Anything you entered
                   before is still on this phone. Close the app and open it again before typing
                   anything here: saving now writes over whatever is still stored.
                 </Text>
@@ -1266,7 +1266,7 @@ export default function Financials() {
             <ActionBlock
               title={anyEntered(fin) ? 'Revenue Is Missing' : 'No Figures Yet'}
               reason={anyEntered(fin)
-                ? 'Your figures are saved. The review still needs your total revenue for the month — margin, the health score and every recommendation below are a share of it, and without it there is nothing honest to work them out from.'
+                ? 'Your figures are saved. The review still needs your total revenue for the month: margin, the health score and every recommendation below are a share of it, and without it there is nothing honest to work them out from.'
                 : "Enter this month's revenue, expenses and membership numbers. Nothing is shown until it comes from you."}
               /* Before they type, not after. Somebody deciding whether to keep
                  their P&L here needs to know it is kept nowhere else while the
@@ -1370,7 +1370,7 @@ export default function Financials() {
                 <Spark data={mrrHist.series} labels={mrrHist.labels} area />
               ) : (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  This month is recorded. A trend needs a second month — come back after your next billing month and this becomes a line.
+                  This month is recorded. A trend needs a second month. Come back after your next billing month and this becomes a line.
                 </Text>
               )}
             </Section>
@@ -1433,7 +1433,7 @@ export default function Financials() {
               <SectionHead title="Where to Improve" />
               {r.improvements.length > 0 ? flagList(r.improvements) : (
                 <Text style={{ ...ty.body, color: t.ink2 }}>
-                  Nothing is flagged on these figures — margin, retention, growth and your
+                  Nothing is flagged on these figures: margin, retention, growth and your
                   recurring mix all read well this month.
                 </Text>
               )}

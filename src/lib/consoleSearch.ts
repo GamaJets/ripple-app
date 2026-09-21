@@ -142,10 +142,10 @@ export function searchNote(
   // numbers-ok: console-shared module — no reader whose locale could be asked.
   if (shown === 0) {
     // numbers-ok: as above, a console-shared module has no locale to spell in.
-    return `Nothing here matches “${q}”. That is this search box hiding ${total} ${total === 1 ? 'row' : 'rows'}, not an empty gym — clear it to see them again.`;
+    return `Nothing here matches “${q}”. That is this search box hiding ${total} ${total === 1 ? 'row' : 'rows'}, not an empty gym. Clear it to see them again.`;
   }
   // numbers-ok: as above, a console-shared module has no locale to spell in.
   if (shown === total) return `All ${total} match “${q}”.`;
   // numbers-ok: as above, a console-shared module has no locale to spell in.
-  return `${shown} of ${total} shown — the other ${total - shown} do not match “${q}”.`;
+  return `${shown} of ${total} shown. The other ${total - shown} do not match “${q}”.`;
 }

@@ -172,7 +172,7 @@ export function receiptBlockers(d: ReceiptDraft): string[] {
   // one thing this app refuses to let a coach do anywhere.
   const me = String(d.coachId ?? '').trim();
   if (me && String(d.clientId ?? '').trim() === me) {
-    out.push('You cannot record a payment from yourself. This is for money a client has paid you, not for your own pay — nothing in this app lets you write down what you are owed by anybody.');
+    out.push('You cannot record a payment from yourself. This is for money a client has paid you, not for your own pay. Nothing in this app lets you write down what you are owed by anybody.');
   }
 
   // Currency before amount, because without one the amount cannot be
@@ -180,7 +180,7 @@ export function receiptBlockers(d: ReceiptDraft): string[] {
   // problem with a different fix.
   const cur = (d.currency || '').trim();
   if (!cur) {
-    out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym — an owner sets it in the gym settings, or you set one on a package.');
+    out.push('No currency has been set, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym. An owner sets it in the gym settings, or you set one on a package.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so no amount can be recorded in it.');
   } else {
@@ -281,7 +281,7 @@ export const RECEIPT_IS_YOUR_WORD =
  * direction the money moved, and it is worth one sentence.
  */
 export const RECEIPT_IS_NOT_PAY =
-  'This is for money a client has already paid you. It is not a record of pay you are owed by a gym and nothing here is read by anybody who pays you — where a gym employs you, what they owe you is theirs to state and you cannot write it down yourself.';
+  'This is for money a client has already paid you. It is not a record of pay you are owed by a gym and nothing here is read by anybody who pays you. Where a gym employs you, what they owe you is theirs to state and you cannot write it down yourself.';
 
 /**
  * That a receipt and a Stripe sale can be the same money.
@@ -293,7 +293,7 @@ export const RECEIPT_IS_NOT_PAY =
  * pretending to.
  */
 export const RECEIPT_MAY_DOUBLE_COUNT =
-  'Record only what did NOT go through this app. A payment Stripe took is already counted under sales and renewals, and a receipt written for the same money would count it twice — nothing can tell that the two are the same payment, because they share nothing this app can read.';
+  'Record only what did NOT go through this app. A payment Stripe took is already counted under sales and renewals, and a receipt written for the same money would count it twice. Nothing can tell that the two are the same payment, because they share nothing this app can read.';
 
 /**
  * That the client has not been told.
@@ -304,7 +304,7 @@ export const RECEIPT_MAY_DOUBLE_COUNT =
  * A coach who wants the client to have a record is pointed at that.
  */
 export const RECEIPT_IS_NOT_A_DOCUMENT =
-  'Nobody but you can see these and nobody is notified about one. If the person who paid you needs something for it, issue an invoice marked as received — that is a numbered document you can send them, and it says on its own face what it is.';
+  'Nobody but you can see these and nobody is notified about one. If the person who paid you needs something for it, issue an invoice marked as received. That is a numbered document you can send them, and it says on its own face what it is.';
 
 /**
  * The sentence under an empty list, which depends entirely on the read.

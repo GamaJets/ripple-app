@@ -125,7 +125,7 @@ export function agreementBlocker(title: string, body: string): string | null {
   if (!title.trim()) return 'Give it a title. It is what appears on the list of things a member is asked to sign.';
   if (!body.trim()) return 'An agreement with no words in it is not something anybody can agree to.';
   if (body.trim().length < 40) {
-    return 'That is shorter than any agreement anybody could rely on. Paste the whole text — this is the document produced when it is disputed, and a summary of it is worth nothing.';
+    return 'That is shorter than any agreement anybody could rely on. Paste the whole text. This is the document produced when it is disputed, and a summary of it is worth nothing.';
   }
   return null;
 }
@@ -301,7 +301,7 @@ export function signatureBlocker(
 ): string | null {
   if (!memberId) return 'Choose who is signing.';
   if (!signedName.trim()) {
-    return 'The name they signed with is the signature. It is kept separately from their account name on purpose — it is what the document says, and it must survive them changing it.';
+    return 'The name they signed with is the signature. It is kept separately from their account name on purpose. It is what the document says, and it must survive them changing it.';
   }
   if (kind === 'guardian_consent' && !guardianName.trim()) {
     return 'A guardian consent has to name the adult giving it. Without that it records only that somebody typed something.';
@@ -441,7 +441,7 @@ export function documentBlocker(
   if (!title.trim()) return 'Give it a title. A bucket full of IMG_4471.jpg is a folder, not a record.';
   if (!file) return 'Choose the file.';
   if (file.size > MAX_DOCUMENT_BYTES) {
-    return `That file is ${num1(file.size / 1048576)} MB and the limit is 25 MB. A scan at 300dpi is usually under 5 — the setting to change is the scanner's, not this.`;
+    return `That file is ${num1(file.size / 1048576)} MB and the limit is 25 MB. A scan at 300dpi is usually under 5. The setting to change is the scanner's, not this.`;
   }
   if (file.size === 0) return 'That file is empty.';
   if (file.type && !DOCUMENT_MIME.includes(file.type)) {
@@ -658,7 +658,7 @@ export async function removeDocumentObject(sb: Queryable, path: string): Promise
   const { data, error } = await b.remove([path]);
   if (error) {
     throw new Error(
-      `That file could not be deleted from storage: ${errText(error)}. Nothing has been removed — the `
+      `That file could not be deleted from storage: ${errText(error)}. Nothing has been removed. The `
       + 'document is still on file and still readable by everybody the policy admits.',
     );
   }
@@ -677,7 +677,7 @@ export async function removeDocumentObject(sb: Queryable, path: string): Promise
   }
   if (!absentFromListing(path, listing.data)) {
     throw new Error(
-      'Storage accepted the delete and removed nothing — the file is still in the bucket. That usually '
+      'Storage accepted the delete and removed nothing. The file is still in the bucket. That usually '
       + 'means the delete was refused rather than performed. The document is still on file.',
     );
   }
@@ -959,7 +959,7 @@ export function readSummary(log: DocumentReadLog | null, reads: DocumentRead[]):
   if (!log) return null;
   if (reads.length === 0) {
     return log.truncated
-      ? 'Not in the most recent openings on record — older ones are not on this screen.'
+      ? 'Not in the most recent openings on record; older ones are not on this screen.'
       : 'Never opened.';
   }
   const times = reads.length === 1 ? 'Opened once' : `Opened ${reads.length} times`;

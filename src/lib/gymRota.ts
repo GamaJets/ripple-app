@@ -800,12 +800,12 @@ export function shiftBlocker(s: {
   const a = Date.parse(s.startsAt ?? '');
   const b = Date.parse(s.endsAt ?? '');
   if (Number.isNaN(a) || Number.isNaN(b)) return 'Give the shift a start and an end.';
-  if (b <= a) return 'A shift has to end after it starts — otherwise it covers no hours at all while looking like cover on the rota.';
+  if (b <= a) return 'A shift has to end after it starts. Otherwise it covers no hours at all while looking like cover on the rota.';
   if (s.rateCents != null && s.rateCents < 0) return 'A negative rate is a typo, and it would subtract from the week’s cost.';
   // The pairing, said in the direction the form is actually filled in: somebody
   // types an amount and the currency is what they forget.
   if (s.rateCents != null && !(s.currency ?? '').trim()) {
-    return 'Say what money that is in. An amount with no currency is read in whatever the reader happens to be thinking in — and this product has no default currency.';
+    return 'Say what money that is in. An amount with no currency is read in whatever the reader happens to be thinking in, and this product has no default currency.';
   }
   if (s.rateCents == null && (s.currency ?? '').trim()) {
     return 'A currency with no amount is a setting pretending to be a cost. Give it a figure or clear the currency.';
@@ -842,7 +842,7 @@ export function shiftRate(
 ): { ok: true; minorUnits: number | null } | { ok: false; reason: string } {
   if (!rate.trim()) return { ok: true, minorUnits: null };
   if (!(currency ?? '').trim()) {
-    return { ok: false, reason: 'Say what money that is in. An amount with no currency is read in whatever the reader happens to be thinking in — and this product has no default currency.' };
+    return { ok: false, reason: 'Say what money that is in. An amount with no currency is read in whatever the reader happens to be thinking in, and this product has no default currency.' };
   }
   // NOT a charge — a shift rate is payroll, paid out rather than billed, so
   // Stripe's whole-ten rule for the thousandth-unit currencies is off. Every

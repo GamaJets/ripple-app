@@ -192,12 +192,12 @@ export function BodyYear({ scans, status, unit, goal, now }: {
           <Text style={{ ...ty.label, color: t.ink3 }}>
             {have.length === 1
               ? `One month has a ${m.label.toLowerCase()} reading so far. The line draws from the second.`
-              : `No ${m.label.toLowerCase()} reading in any of these months — a bathroom scale reports weight and body fat and no muscle figure at all.`}
+              : `No ${m.label.toLowerCase()} reading in any of these months. A bathroom scale reports weight and body fat and no muscle figure at all.`}
           </Text>
         )}
 
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-          Each month is its last reading, so a month with three weigh-ins shows the one you finished it on. A month with none is a gap in the line rather than a figure — nothing is assumed about a month you did not measure.
+          Each month is its last reading, so a month with three weigh-ins shows the one you finished it on. A month with none is a gap in the line rather than a figure; nothing is assumed about a month you did not measure.
         </Text>
         {quiet != null && quiet > 0 ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>

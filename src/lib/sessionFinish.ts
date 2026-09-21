@@ -270,7 +270,7 @@ export function finishReport(r: FinishInput): FinishReport {
       // not this coach's to file against. Naming only the roster would send a
       // coach to check a book that is already right.
       r.refusalCause
-        ?? 'Two things cause this: the person is not on your roster, or this session is not yours to file training against. If they are on your book, open their record before typing this in again — part of it may have reached them.',
+        ?? 'Two things cause this: the person is not on your roster, or this session is not yours to file training against. If they are on your book, open their record before typing this in again. Part of it may have reached them.',
     ));
   } else {
     // The queue's own sentence, verbatim, with the same subject
@@ -286,7 +286,7 @@ export function finishReport(r: FinishInput): FinishReport {
       lines.push('This session is now marked as delivered, so it is off your Mark Sessions queue.');
       break;
     case 'refused':
-      lines.push('The session was NOT marked as delivered, and that mark is not waiting to send — the server read it and declined. It may no longer be yours to mark. It is still on your Mark Sessions screen.');
+      lines.push('The session was NOT marked as delivered, and that mark is not waiting to send. The server read it and declined. It may no longer be yours to mark. It is still on your Mark Sessions screen.');
       break;
     case 'unsent':
       lines.push('The delivered mark is on this phone and has not reached the server, so to everybody else this session is still waiting on an outcome. It goes up next time this app has signal.');

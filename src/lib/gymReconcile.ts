@@ -80,7 +80,7 @@ export function markBlocker(state: MarkState, note: string): string | null {
     return 'Say why this is expected. An exception taken off a reconciliation with no reason recorded is exactly the row somebody asks about later, and "it was fine" is not an answer anybody can check.';
   }
   if (note.trim().length > 500) {
-    return 'That is longer than a note on one line of a reconciliation — 500 characters at most.';
+    return 'That is longer than a note on one line of a reconciliation: 500 characters at most.';
   }
   return null;
 }

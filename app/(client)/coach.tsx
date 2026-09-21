@@ -63,7 +63,7 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { liftLabel } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 
-const SUGGESTIONS = ['What should I eat post-workout?', "I'm sore today — should I still train?", 'Am I on track for my goal?', 'Give me a quick high-protein snack'];
+const SUGGESTIONS = ['What should I eat post-workout?', "I'm sore today. Should I still train?", 'Am I on track for my goal?', 'Give me a quick high-protein snack'];
 
 export default function Coach() {
   const t = useTheme();
@@ -239,14 +239,14 @@ export default function Coach() {
     // "0 kcal eaten" is the answer a failed food read produces, and it is the
     // one thing on this screen a model will act on hardest.
     eatenToday: !foodWhole
-      ? 'today’s food log could not be read — do not say they have eaten nothing, and do not tell them to eat on the strength of it'
+      ? 'today’s food log could not be read, so do not say they have eaten nothing, and do not tell them to eat on the strength of it'
       : macros ? `${num(consumed.kcal)}/${num(macros.kcal)} kcal, protein ${consumed.protein}/${macros.protein}g`
         // "no target set" is the member having none. Under an unread goal, diet
         // or coach adjustment we simply could not work theirs out, and telling
         // a model they have no target is how it offers to set one.
-        : targetInputsUnknown ? `${num(consumed.kcal)} kcal eaten — their target could not be worked out, so do not say they have none`
+        : targetInputsUnknown ? `${num(consumed.kcal)} kcal eaten. Their target could not be worked out, so do not say they have none`
           : `${num(consumed.kcal)} kcal eaten, no target set`,
-    streak: logWhole ? _streak : 'unknown — their training log could not be read whole',
+    streak: logWhole ? _streak : 'unknown: their training log could not be read whole',
     lastTrained: _lastEx || undefined,
     // The load in the member's own unit, through the same `liftLabel` the
     // Targets screen renders it with, rather than a hardcoded "kg" inside a
@@ -336,7 +336,7 @@ export default function Coach() {
       ? 'I have your plan and your targets, and not your body, sleep or injuries, because you asked me not to'
       : knowsAll ? 'I know your plan, targets, and latest numbers'
         : 'I have your plan and whatever of your numbers loaded'
-  } — ask me anything about training or nutrition.`;
+  }. Ask me anything about training or nutrition.`;
 
   const params = useLocalSearchParams<{ ask?: string }>();
   const seeded = useRef(false);
@@ -360,10 +360,10 @@ export default function Coach() {
     // gate existed, somebody whose answer simply had not been read yet.
     const said = res.ok ? res.reply
       : res.reason === 'no-consent'
-        ? 'I have not sent anything yet — your answer about your health details had not loaded when you asked. Try that again in a moment.'
+        ? 'I have not sent anything yet. Your answer about your health details had not loaded when you asked. Try that again in a moment.'
         : res.reason === 'unavailable'
-          ? "The AI coach turns on once your team deploys the coach-chat function and enables AI features. Until then, here's a tip: hit your protein target first — it protects muscle and keeps you full."
-          : 'I hit a snag reaching the coach service — try again in a moment.';
+          ? "The AI coach turns on once your team deploys the coach-chat function and enables AI features. Until then, here's a tip: hit your protein target first. It protects muscle and keeps you full."
+          : 'I hit a snag reaching the coach service. Try again in a moment.';
     // `history` and not the current state: the only writer of this thread is
     // this function, and reading it back through a setter would race the
     // AsyncStorage write that `set` starts.
@@ -552,7 +552,7 @@ export default function Coach() {
 
           {answered && thread.status === 'partial' ? (
             <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
-              An earlier conversation is saved on this phone and could not be read this time. It has been left alone rather than written over, so anything you ask now is not being kept — try again after the next restart.
+              An earlier conversation is saved on this phone and could not be read this time. It has been left alone rather than written over, so anything you ask now is not being kept. Try again after the next restart.
             </Flag>
           ) : null}
 
@@ -621,7 +621,7 @@ export default function Coach() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {thread.kept
                   ? THREAD_KEPT_NOTE
-                  : 'This conversation is not being kept — it goes when you leave the screen, and it is not stored on our servers either.'}
+                  : 'This conversation is not being kept. It goes when you leave the screen, and it is not stored on our servers either.'}
               </Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Ghost label={showsDetail ? 'Hide the Detail' : 'What Gets Sent'} onPress={() => setShowsDetail((v) => !v)} />
@@ -652,7 +652,7 @@ export default function Coach() {
                 {msgs.length ? (
                   <Ghost label="Clear This Chat" onPress={() => Alert.alert(
                     'Clear This Conversation?',
-                    `All ${msgs.length} ${msgs.length === 1 ? 'message' : 'messages'} go, including everything you have told your coach about your training, your injuries and how you have been feeling. This cannot be undone and there is no copy anywhere else — ${BRAND.label} does not keep one on our servers.`,
+                    `All ${msgs.length} ${msgs.length === 1 ? 'message' : 'messages'} go, including everything you have told your coach about your training, your injuries and how you have been feeling. This cannot be undone and there is no copy anywhere else. ${BRAND.label} does not keep one on our servers.`,
                     [
                       { text: 'Keep It', style: 'cancel' },
                       { text: 'Clear It', style: 'destructive', onPress: () => thread.clear() },

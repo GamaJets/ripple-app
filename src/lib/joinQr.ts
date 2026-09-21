@@ -261,7 +261,7 @@ export function joinQr(give: CodeToGive): JoinQr {
     return {
       show: false,
       why: 'unencodable',
-      note: 'A scannable version of this link could not be drawn on this device. Your code is fine and so is the link — read the characters out, or use Share the Invite.',
+      note: 'A scannable version of this link could not be drawn on this device. Your code is fine and so is the link. Read the characters out, or use Share the Invite.',
     };
   }
   return { show: true, matrix, hand: give.hand, a11yLabel: QR_A11Y_LABEL };

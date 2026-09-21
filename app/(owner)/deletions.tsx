@@ -306,7 +306,7 @@ export default function OwnerDeletions() {
     const who = p.name || 'This Account';
     Alert.alert(
       `Delete ${who}?`,
-      `This permanently erases ${who} and everything of theirs — their profile, workouts, logs, scans, messages and bookings — across ${CASCADE_TABLES} tables of this gym's records, and their sign-in account with them.\n\n` +
+      `This permanently erases ${who} and everything of theirs (their profile, workouts, logs, scans, messages and bookings) across ${CASCADE_TABLES} tables of this gym's records, and their sign-in account with them.\n\n` +
       `Your financial record survives. Invoices, memberships, payments, door-log visits and guest passes are all kept, with the person detached from them and their name copied onto the invoice so it can still be reconciled.\n\n` +
       `Requested ${day(p.requestedAt)}.`,
       [
@@ -351,7 +351,7 @@ export default function OwnerDeletions() {
             // the one instruction on the most consequential line of this screen
             // did nothing. The gesture is real now, and so is the button in the
             // queue below — both run the same read.
-            ? 'The queue could not be read. This is NOT an all-clear — pull down or try again below.'
+            ? 'The queue could not be read. This is NOT an all-clear. Pull down or try again below.'
             : !loaded
             ? 'Reading the queue…'
             : queueShort
@@ -360,7 +360,7 @@ export default function OwnerDeletions() {
             : queue.length === 0
               ? 'Nobody is waiting to be erased. This is the good state.'
               : overdue
-                ? `${overdue} past the 30 days we promise — action ${overdue === 1 ? 'it' : 'them'} today.`
+                ? `${overdue} past the 30 days we promise. Action ${overdue === 1 ? 'it' : 'them'} today.`
                 // `soonest` is null only if every row came back without a clock. Interpolating
                 // it anyway is how "null days" reaches a reader; say what is known instead.
                 : soonest == null
@@ -421,8 +421,8 @@ export default function OwnerDeletions() {
             <View style={{ marginBottom: loaded && queue.length ? sp.md : 0 }}>
               <Flag tone={t.crit}>
                 {loaded
-                  ? 'Could not read the queue just now. What is below is the last read that came back — the stamp at the top says when. Nobody new has been cleared.'
-                  : 'Could not read the queue. Nobody has been cleared — this screen simply does not know who is waiting, which is not the same as nobody waiting.'}
+                  ? 'Could not read the queue just now. What is below is the last read that came back; the stamp at the top says when. Nobody new has been cleared.'
+                  : 'Could not read the queue. Nobody has been cleared. This screen simply does not know who is waiting, which is not the same as nobody waiting.'}
               </Flag>
               <Pressable
                 onPress={() => { void load(); }}
@@ -444,7 +444,7 @@ export default function OwnerDeletions() {
             failed ? null : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nothing to action. Nobody at this gym has asked to be deleted, so no clock is
-              running — an empty queue here is the outcome you want, not a screen that failed
+              running. An empty queue here is the outcome you want, not a screen that failed
               to load.
             </Text>
             )
@@ -508,15 +508,15 @@ export default function OwnerDeletions() {
           {logFailed ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: log?.length ? sp.md : 0 }}>
               The record could not be read just now. Deletions you have already carried out are
-              still logged — this is a display problem, not a missing history.
+              still logged. This is a display problem, not a missing history.
               {log?.length ? ' What is below is the last read that came back.' : ''}
             </Text>
           ) : null}
           {log === null ? null : log.length === 0 ? (
             logFailed ? null : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing actioned yet. Every deletion you carry out is recorded here — the person is
-              gone, the record that they asked and when you did it is not.
+              Nothing actioned yet. Every deletion you carry out is recorded here. The person is
+              gone; the record that they asked and when you did it is not.
             </Text>
             )
           ) : log.map((r, i) => (

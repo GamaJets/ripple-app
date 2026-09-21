@@ -231,7 +231,7 @@ export function coverageLine(r: CoverageReport): string | null {
     // rest are illustrated.
     const bare = r.all.length - r.mine.length - r.academyOnly.length;
     if (bare > 0) {
-      parts.push(`${bare} ${bare === 1 ? 'has' : 'have'} no clip of yours — whether the catalogue illustrates ${bare === 1 ? 'it' : 'them'} could not be checked just now`);
+      parts.push(`${bare} ${bare === 1 ? 'has' : 'have'} no clip of yours, and whether the catalogue illustrates ${bare === 1 ? 'it' : 'them'} could not be checked just now`);
     }
   }
   // Nothing to say and not everything filmed: only reachable if a movement is

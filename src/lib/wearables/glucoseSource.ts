@@ -55,7 +55,7 @@ function appleSource(): GlucoseSource {
   const present = apple.healthKitPresent();
   return {
     storeName: 'Apple Health',
-    whereFrom: 'A Dexcom, or a Libre through its own app, writes into Apple Health. Repple reads from there — so any monitor that reaches Health reaches Repple.',
+    whereFrom: 'A Dexcom, or a Libre through its own app, writes into Apple Health. Repple reads from there, so any monitor that reaches Health reaches Repple.',
     present,
     absentReason: present ? null : 'Apple Health is not available in this build, so readings can only be typed in.',
     fetchGlucose: apple.fetchGlucose,
@@ -72,7 +72,7 @@ function androidSource(): GlucoseSource {
   const present = android.healthConnectPresent();
   return {
     storeName: 'Health Connect',
-    whereFrom: 'A Dexcom, or a Libre through its own app, writes into Health Connect. Repple reads from there — so any monitor that reaches Health Connect reaches Repple.',
+    whereFrom: 'A Dexcom, or a Libre through its own app, writes into Health Connect. Repple reads from there, so any monitor that reaches Health Connect reaches Repple.',
     present,
     absentReason: present ? null : 'This build of Repple cannot read Health Connect. It is part of the app itself, so it arrives with a new version from the Play Store rather than in an update.',
     fetchGlucose: android.fetchGlucose,

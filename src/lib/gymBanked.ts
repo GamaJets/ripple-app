@@ -243,7 +243,7 @@ export const BANK_DIFFERENCE_IS_ORDINARY =
 /** Why nothing here touches the filed figure. */
 export const BANK_CHANGES_NOTHING_NOTE =
   'Recording this changes no figure on the close. What was filed when the month '
-  + 'was closed stays filed — it is the record, and it is never recomputed. This '
+  + 'was closed stays filed. It is the record, and it is never recomputed. This '
   + 'is the other side written down beside it.';
 
 /** What this panel says for one line, in the owner's terms. */
@@ -254,7 +254,7 @@ export function bankLineNote(line: BankLine, fmt: (cents: number, currency: stri
         + 'the statement against. This is unknown, not nil.';
     case 'not_taken':
       return `The register recorded nothing in ${line.currency} this month. This is not a shortfall of `
-        + 'everything — it is money in an account the register does not know about.';
+        + 'everything. It is money in an account the register does not know about.';
     case 'not_banked':
       return `Nobody has said what reached the bank in ${line.currency}. Until somebody does, this month `
         + 'is unreconciled rather than reconciled.';

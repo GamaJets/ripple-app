@@ -84,7 +84,7 @@ export default function ForgotPassword() {
                 <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Back to Sign In</Text>
               </Pressable>
               {!USE_SUPABASE ? (
-                <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>Demo mode — no email is actually sent. Real reset links go out once the backend is connected.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>Demo mode: no email is actually sent. Real reset links go out once the backend is connected.</Text>
               ) : null}
             </>
           )}

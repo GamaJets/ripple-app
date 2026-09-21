@@ -65,7 +65,7 @@ export function guardOverwrite(status: LoadStatus, subject: string): OverwriteGu
       return {
         allowed: false,
         label: 'Checking What Is Saved…',
-        reason: `Still reading ${subject}. Saving now could replace something this screen has not seen yet — this takes a moment.`,
+        reason: `Still reading ${subject}. Saving now could replace something this screen has not seen yet. This takes a moment.`,
       };
     case 'partial':
       return {
@@ -77,7 +77,7 @@ export function guardOverwrite(status: LoadStatus, subject: string): OverwriteGu
       return {
         allowed: false,
         label: 'Cannot save over an unread plan',
-        reason: `${subject} could not be read, so this screen does not know what is currently saved. Saving would replace it with what is on this screen and there is no undo — try again once you have signal.`,
+        reason: `${subject} could not be read, so this screen does not know what is currently saved. Saving would replace it with what is on this screen and there is no undo. Try again once you have signal.`,
       };
   }
 }

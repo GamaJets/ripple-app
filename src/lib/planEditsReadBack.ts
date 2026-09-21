@@ -165,7 +165,7 @@ export function coachSeesPlanNote(
     case 'loading':
       return 'Reading what your coach can see of your plan.';
     case 'error':
-      return 'We couldn’t read what your coach can see of your plan, so this is not us saying they can see nothing. Check again when you have signal — nothing you have changed has been lost.';
+      return 'We couldn’t read what your coach can see of your plan, so this is not us saying they can see nothing. Check again when you have signal. Nothing you have changed has been lost.';
     // Cannot arise on a single-row read, and is handled rather than folded into
     // 'ready' on principle: src/ui/loadStatus.ts forbids computing a figure
     // over a set that is known to be a prefix, and the count below is a figure.
@@ -173,7 +173,7 @@ export function coachSeesPlanNote(
       return 'We only got part of an answer about what your coach can see of your plan, so the changes below are not a complete list of them.';
     case 'ready':
       if (!readable) {
-        return 'Your plan changes are stored and your coach can see them, but this app could not read them back to list them here. Nothing has been lost — open your plan to see what you have changed.';
+        return 'Your plan changes are stored and your coach can see them, but this app could not read them back to list them here. Nothing has been lost. Open your plan to see what you have changed.';
       }
       if (count <= 0) {
         return 'You haven’t changed anything in the program you were given, so there is nothing of yours here for your coach to look at.';

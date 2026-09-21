@@ -404,7 +404,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     const me = uidRef.current;
     if (!USE_SUPABASE || !me) {
       putBack();
-      return { ok: false, why: 'This program was not saved — the app could not confirm who you are signed in as, so nothing was sent to the server.' };
+      return { ok: false, why: 'This program was not saved. The app could not confirm who you are signed in as, so nothing was sent to the server.' };
     }
     // Counted from before the request is sent, so a read that lands while it
     // is out cannot treat this client's absence from the server's answer as a

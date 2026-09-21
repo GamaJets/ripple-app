@@ -101,7 +101,7 @@ export function coachAdviceNote(status: LoadStatus, count: number, coachName: st
     case 'loading':
       return 'Reading what your coach has written to you.';
     case 'error':
-      return `We couldn’t read this. It is not us saying ${who} has written you nothing — try again when you have signal.`;
+      return `We couldn’t read this. It is not us saying ${who} has written you nothing. Try again when you have signal.`;
     case 'partial':
       return `These are some of the notes ${who} has written to you, not all of them. There were more than this app reads at once.`;
     case 'ready':

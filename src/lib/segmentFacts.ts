@@ -158,10 +158,10 @@ export function factsCaption(a: Addressed): string | null {
     case 'drifting':
     case 'slipping':
     case 'no-record':
-      return 'Under each name, what their record actually shows — read when this screen loaded, not live.';
+      return 'Under each name, what their record actually shows, read when this screen loaded, not live.';
     case 'pack-run-out':
     case 'pack-low':
-      return 'Under each name, what is left on the packs they have paid for — read when this screen loaded, not live.';
+      return 'Under each name, what is left on the packs they have paid for, read when this screen loaded, not live.';
     case 'never-checked-in':
       return 'Under each name, why there is no adherence figure for them.';
   }

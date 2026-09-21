@@ -157,7 +157,7 @@ export function inviteSendBlocker(
   }
   const held = prior.find((i) => inviteEmail(i.email) === email);
   if (held && held.status === 'pending') {
-    return 'You already have an invitation waiting on that address. Nothing has changed — send them your coaching code instead, which works whatever address they sign up with.';
+    return 'You already have an invitation waiting on that address. Nothing has changed. Send them your coaching code instead, which works whatever address they sign up with.';
   }
   if (held && held.status === 'accepted') {
     return 'That address has already accepted an invitation from you. Recording another would put them back to pending, so nothing has been done.';
@@ -179,7 +179,7 @@ export function inviteSendBlocker(
  */
 export function invitedLine(name: string, email: string): string {
   const who = String(name ?? '').trim() || 'They';
-  return `${who} is recorded as invited on ${email}. Repple does not email anybody — tell them yourself, and they link to you the first time they sign in with that exact address.`;
+  return `${who} is recorded as invited on ${email}. Repple does not email anybody. Tell them yourself, and they link to you the first time they sign in with that exact address.`;
 }
 
 /**
@@ -194,7 +194,7 @@ export function invitedLine(name: string, email: string): string {
  */
 export function notRecordedLine(name: string, email: string): string {
   const who = String(name ?? '').trim() || 'They';
-  return `The invitation for ${email} was NOT recorded, so ${who} will not link to you when they sign in. Send them your coaching code instead — it does not depend on this.`;
+  return `The invitation for ${email} was NOT recorded, so ${who} will not link to you when they sign in. Send them your coaching code instead. It does not depend on this.`;
 }
 
 /**

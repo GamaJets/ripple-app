@@ -291,7 +291,7 @@ export default function TrainerDevices() {
    */
   const stale = !isWhole(w.todayStatus) && w.todayStatus !== 'loading';
   const staleNote = stale
-    ? `These are the last figures we had, not a current reading — ${connected.length === 1 ? 'your device' : 'one of your devices'} could not be reached just now. Pull down to try again.`
+    ? `These are the last figures we had, not a current reading: ${connected.length === 1 ? 'your device' : 'one of your devices'} could not be reached just now. Pull down to try again.`
     : null;
 
   /**
@@ -354,9 +354,9 @@ export default function TrainerDevices() {
             </View>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
               {energy.kcal == null
-                ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
+                ? `Wear your watch, and energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
                 : stale
-                  ? `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`
+                  ? `Last figure we had from ${energy.from}. It has not synced since, so it is not today's total yet.`
                   : energy.kind === 'total'
                     ? `Whole day from ${energy.from}, rest included.`
                     : `Energy above rest, from ${energy.from}.`}
@@ -502,7 +502,7 @@ export default function TrainerDevices() {
                       <TonedChip tone="amber" label="Not Readable" />
                     </View>
                   ) : blocked ? (
-                    <Ghost label="Unavailable" a11yLabel={`${p.meta.name} is unavailable — try connecting again`} onPress={() => onConnect(p)} />
+                    <Ghost label="Unavailable" a11yLabel={`${p.meta.name} is unavailable. Try connecting again`} onPress={() => onConnect(p)} />
                   ) : (
                     // The board's grey "Connect" chip. It was the green
                     // primary; the one green thing on this list is now the
@@ -570,7 +570,7 @@ export default function TrainerDevices() {
                         {m.hrv != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{Math.round(m.hrv)} ms HRV measured</Text> : null}
                       </View>
                     ) : (
-                      <Text style={{ ...ty.caption, color: t.ink3 }}>Connected. Tap Sync — no data for today yet.</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>Connected. Tap Sync; no data for today yet.</Text>
                     )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
                       <Ghost label="Sync Now" a11yLabel={`Sync ${p.meta.name} now`} onPress={() => { tapLight(); void w.sync(p.meta.id); }} />
@@ -585,7 +585,7 @@ export default function TrainerDevices() {
               and says what the other two need — the same thing their own rows
               say, rather than the opposite. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-            Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs — sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
+            Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs: sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
           </Text>
         </Section>
 
@@ -594,7 +594,7 @@ export default function TrainerDevices() {
         <Section>
           <SectionHead title="Yours Only" />
           <Text style={{ ...ty.label, color: t.ink2 }}>
-            Everything on this screen is your own body, on your own account. Nothing here is shown to a client, and connecting a device changes nothing about what you can see of theirs — a client's wearables are connected by the client, on their own phone, and reach you only through the screens they already feed.
+            Everything on this screen is your own body, on your own account. Nothing here is shown to a client, and connecting a device changes nothing about what you can see of theirs. A client's wearables are connected by the client, on their own phone, and reach you only through the screens they already feed.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             Your figures feed your own food log: My Nutrition counts the day’s burn against what you have eaten, and while nothing is connected it counts the eating and none of the burning.

@@ -162,7 +162,7 @@ export const CLIENT_UNLISTED: Record<string, string> = {
   exercise: 'Needs `name`. Explore pushes routes with no params, so the row would open an exercise with no title, no muscles and no clip. The Exercise Library is the way in and it IS listed.',
   onboarding: 'The first-run intake. It WRITES goal, stats, diet and allergens straight into the client record and its last step marks onboarding complete, so a member who tapped it out of a search result would be walked through overwriting their own profile. Reached from the dashboard banner when it is actually due.',
   explore: 'Is this list. A search result that opens the search screen is a row that does nothing. Reached from the search field at the top of Me and from every tab header.',
-  'me-group': 'The second level of the Me hub — it renders one `meGroup` of this same list. Reached from the six cards on Me, and with no group it falls back to showing all six. A search row for it would be a row whose destination is the search results themselves.',
+  'me-group': 'The second level of the Me hub. It renders one `meGroup` of this same list. Reached from the six cards on Me, and with no group it falls back to showing all six. A search row for it would be a row whose destination is the search results themselves.',
 };
 
 export const AREA_LABEL: Record<FeatureArea, string> = {
@@ -185,7 +185,7 @@ export const CLIENT_FEATURES: Feature[] = [
   //
   // Not `soloHide`. A member training themselves is the person these are FOR;
   // the note is what keeps them from reading as a coach's work.
-  { key: 'programs', label: 'Programs', note: 'Ready-made plans to follow — not written by your coach', route: '/(client)/programs', icon: 'grid', area: 'train', keywords: 'program programs program plan plans routine routines workout plan template templates split ppl push pull legs upper lower full body 5x5 stronglifts beginner strength hypertrophy bodyweight home dumbbell kettlebell hiit mobility core ready made follow' },
+  { key: 'programs', label: 'Programs', note: 'Ready-made plans to follow, not written by your coach', route: '/(client)/programs', icon: 'grid', area: 'train', keywords: 'program programs program plan plans routine routines workout plan template templates split ppl push pull legs upper lower full body 5x5 stronglifts beginner strength hypertrophy bodyweight home dumbbell kettlebell hiit mobility core ready made follow' },
   // A member's own words, through the owner: "i want to train triceps and the
   // app builds a workout for triceps". Keywords carry the muscle vocabulary a
   // member actually types — 'tricep', 'lats', 'abs', 'quads' — because the
@@ -207,7 +207,7 @@ export const CLIENT_FEATURES: Feature[] = [
   // prompt on the booking screen had no way back to it. That is the same defect
   // item 49 is about, recurring on the newest screen in the app.
   { key: 'request-session', label: 'Ask for a Time', note: 'Ask your coach for an hour they have not opened', route: '/(client)/request-session', icon: 'clock', area: 'train', keywords: 'request ask booking session appointment time slot propose suggest', soloHide: true },
-  { key: 'injuries', label: 'Injuries & Limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries', icon: 'heart', area: 'train', meGroup: 'health', keywords: 'injury injuries pain limitation niggle shoulder knee back hurt rehab physio safer swaps avoid' },
+  { key: 'injuries', label: 'Injuries & Limitations', note: 'Train around injuries with safer swaps', route: '/(client)/injuries', icon: 'heart', area: 'train', meGroup: 'health', keywords: 'injury injuries pain limitation niggle shoulder knee back hurt rehab physio safer swaps avoid' },
   // Listed separately from Injuries rather than folded into it: somebody
   // holding a physio report in their hand is looking for "upload", "scan" or
   // "report", not for the manual entry screen, and the two do genuinely

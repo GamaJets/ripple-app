@@ -83,7 +83,7 @@ const WHOLE: MemberAskInput = {
   eq(f.goal, 'fatloss', 'a read goal is the member’s own answer');
   eq(f.diet, 'vegan', 'a read diet is the member’s own answer');
   eq(f.mealsPerDay, 5, 'a read meal count is the member’s own answer');
-  eq(f.coaching, 'training alone — no coach to refer them to', 'solo is said as solo');
+  eq(f.coaching, 'training alone, with no coach to refer them to', 'solo is said as solo');
   eq(f.weightKg, 63.4, 'weight is rounded to the tenth, not withheld');
   eq(f.bodyFatPct, 27.1, 'body fat goes as the figure');
   eq(f.muscleKg, 24.2, 'muscle goes as the figure');

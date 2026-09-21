@@ -188,8 +188,8 @@ export function reversalFailureText(reason: string, a: ReversalAftermath): strin
         + ` ${gone === 1 ? 'That session is' : `Those ${gone} sessions are`} back in what this coach is owed `
         + `while the run still says it paid for ${gone === 1 ? 'it' : 'them'}, so recording another run for `
         + `this coach now pays ${gone === 1 ? 'that hour' : 'those hours'} a second time. Pressing Reverse `
-        + `again will not finish the job — the unstamp would now match nothing and be refused for that very `
-        + `reason — so put this run right on the record before paying this coach anything else.`;
+        + `again will not finish the job (the unstamp would now match nothing and be refused for that very `
+        + `reason), so put this run right on the record before paying this coach anything else.`;
     }
 
     case 'noSessions':
@@ -197,11 +197,11 @@ export function reversalFailureText(reason: string, a: ReversalAftermath): strin
         + 'It records no sessions, so none of them can have come loose. Its class pay lines and its '
         + 'adjustments may already have been unstamped from it, and neither carries a recorded count to '
         + 'check that against, so do not record another run for this coach until this one has been put '
-        + 'right — a line unstamped from a run that still stands as paid is a line that can be paid twice.';
+        + 'right. A line unstamped from a run that still stands as paid is a line that can be paid twice.';
 
     case 'unknown':
       return head
-        + `Whether its sessions are still stamped against it could not be checked just now — `
+        + `Whether its sessions are still stamped against it could not be checked just now: `
         + `${sentence(a.why).replace(/\.$/, '')}. `
         + 'If they have come loose they are back in what this coach is owed while the run still says it '
         + 'paid for them, so do not record another run for this coach until you have reloaded this page '

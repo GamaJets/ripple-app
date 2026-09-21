@@ -235,7 +235,7 @@ export default function ClientIntakeScreen() {
             {intake && intake.updatedAt ? (
               <Expandable title="Who Can Change This">
                 <Text style={{ ...ty.caption, color: t.ink3 }}>
-                  Last changed by {who} on {fmtDay(intake.updatedAt)}. Only they can change it — you
+                  Last changed by {who} on {fmtDay(intake.updatedAt)}. Only they can change it. You
                   cannot, deliberately, because an intake a coach can edit is not a disclosure.
                 </Text>
               </Expandable>

@@ -178,7 +178,7 @@ export function blockSummaryLine(s: BlockSummary): string {
   const parts: string[] = [];
   parts.push(s.blocked === 0
     ? 'Nothing was blocked.'
-    : `${s.blocked} day${s.blocked === 1 ? '' : 's'} blocked — nobody can book across ${s.blocked === 1 ? 'it' : 'them'}.`);
+    : `${s.blocked} day${s.blocked === 1 ? '' : 's'} blocked. Nobody can book across ${s.blocked === 1 ? 'it' : 'them'}.`);
   if (s.withdrawn > 0) {
     parts.push(`${s.withdrawn} open slot${s.withdrawn === 1 ? ' was' : 's were'} withdrawn.`);
   }
@@ -186,7 +186,7 @@ export function blockSummaryLine(s: BlockSummary): string {
     parts.push(`${s.already} ${s.already === 1 ? 'was' : 'were'} already covered by time you had blocked before, so ${s.already === 1 ? 'it was' : 'they were'} left alone.`);
   }
   if (s.booked.length > 0) {
-    parts.push(`${s.booked.length} could not be blocked because you have a session booked: ${list(s.booked)}. Cancel those yourself — that tells the client — and then block the day.`);
+    parts.push(`${s.booked.length} could not be blocked because you have a session booked: ${list(s.booked)}. Cancel those yourself (that tells the client), and then block the day.`);
   }
   if (s.failed.length > 0) {
     parts.push(`${s.failed.length} did not save at all, so ${s.failed.length === 1 ? 'that day is' : 'those days are'} still bookable: ${list(s.failed)}. Try again once you have signal.`);

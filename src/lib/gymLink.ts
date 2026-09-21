@@ -52,7 +52,7 @@ export type GymLink =
  * work: without it, "there is nothing here" is what the reader takes away.
  */
 export const NOT_A_QUIET_GYM =
-  'This is not a gym with nothing in it — it is an account with no gym on it. The owner sets that.';
+  'This is not a gym with nothing in it. It is an account with no gym on it. The owner sets that.';
 
 /**
  * What to say when the reader's profile carries no gym.

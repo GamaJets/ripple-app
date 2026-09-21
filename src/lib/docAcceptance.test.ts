@@ -56,7 +56,7 @@ eq(acceptedLine(1, true), '1 person has accepted this', 'one is a person');
 eq(acceptedLine(4, true), '4 people have accepted this', 'four are people');
 eq(acceptedLine(0, true), 'Nobody has accepted this yet',
   'nobody, on a document they are being asked to accept');
-eq(acceptedLine(0, false), 'Nobody has accepted this — you are not asking them to',
+eq(acceptedLine(0, false), 'Nobody has accepted this. You are not asking them to',
   'and on one they are not, the reason is said rather than left to read as a roster ignoring their coach');
 
 eq(acceptedNeedsMark(0, true), true, 'a required document nobody has signed is what the coach came here for');

@@ -277,7 +277,7 @@ export function SetChecklist({ t, ticks, movement, askFor, onTick, onUntick, lin
       })}
       {anyVague ? (
         <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
-          Some of these sets do not name one figure to log — a range, or as many as you can. Type those in below when you have done them.
+          Some of these sets do not name one figure to log, such as a range or as many as you can. Type those in below when you have done them.
         </Text>
       ) : null}
     </View>

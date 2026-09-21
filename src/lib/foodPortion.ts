@@ -98,7 +98,7 @@ export function readQuantity(text: string): QuantityRead {
   const q = parseFloat(raw);
   if (!Number.isFinite(q) || q <= 0) return { ok: false, reason: 'A portion has to be more than nothing.' };
   if (q > MAX_QUANTITY) {
-    return { ok: false, reason: `That is ${plain(q)} portions. If you meant a decimal, type it with your decimal key — ${plain(1.5)} rather than 15.` };
+    return { ok: false, reason: `That is ${plain(q)} portions. If you meant a decimal, type it with your decimal key: ${plain(1.5)} rather than 15.` };
   }
   return { ok: true, qty: q };
 }
@@ -128,7 +128,7 @@ export function missingMacroNote(f: FoodFacts): string | null {
     : missing.length === 2 ? `${missing[0]} and ${missing[1]}`
     : `${missing[0]}, ${missing[1]} and ${missing[2]}`;
   const is = missing.length === 1 ? 'was' : 'were';
-  return `The ${names} ${is} not read, so ${missing.length === 1 ? 'it is' : 'they are'} blank rather than nought. Fill ${missing.length === 1 ? 'it' : 'them'} in and this can be logged — a zero we made up would count against your day as if it had been measured.`;
+  return `The ${names} ${is} not read, so ${missing.length === 1 ? 'it is' : 'they are'} blank rather than nought. Fill ${missing.length === 1 ? 'it' : 'them'} in and this can be logged. A zero we made up would count against your day as if it had been measured.`;
 }
 
 /**

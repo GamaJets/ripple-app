@@ -1054,7 +1054,7 @@ export default function Builder() {
     if (!builderDirty()) { land(); return; }
     Alert.alert(
       'Replace What Is in the Builder?',
-      `“${tpl.name}” loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first — the button is at the foot of the screen.`,
+      `“${tpl.name}” loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first. The button is at the foot of the screen.`,
       [
         { text: 'Keep What I Have', style: 'cancel' },
         { text: 'Replace It', style: 'destructive', onPress: land },
@@ -1088,7 +1088,7 @@ export default function Builder() {
     if (!builderDirty()) { land(); return; }
     Alert.alert(
       'Replace What Is in the Builder?',
-      `A no-equipment week loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first — the button is at the foot of the screen.`,
+      `A no-equipment week loads over ${title.trim() ? `“${title.trim()}”` : 'the week you have here'}, and what you have changed in it is not saved anywhere else. To keep it, save it as a template first. The button is at the foot of the screen.`,
       [
         { text: 'Keep What I Have', style: 'cancel' },
         { text: 'Replace It', style: 'destructive', onPress: land },
@@ -2243,12 +2243,12 @@ export default function Builder() {
     // The work is on the server now, so the on-device draft has nothing left
     // to protect. Only on a counted save — see clearDraft.
     if (saved.ok) { clearDraft(); markSaved(); }
-    setTplSaveFailed(saved.ok ? null : `“${nm}” is not in your library. ${saved.why ?? 'The server did not say why.'} Nothing has been lost from the builder — try saving it again.`);
+    setTplSaveFailed(saved.ok ? null : `“${nm}” is not in your library. ${saved.why ?? 'The server did not say why.'} Nothing has been lost from the builder. Try saving it again.`);
     Alert.alert(
       saved.ok ? 'Template Saved' : 'Not Saved',
       saved.ok
-        ? 'It is in your Program Templates and will be there when you reopen the app — assign it to as many clients as you like.'
-        : `“${nm}” was not saved. ${saved.why ?? 'The server did not say why.'} What you built is still in the builder, so nothing has been lost — try again once you have signal.`,
+        ? 'It is in your Program Templates and will be there when you reopen the app. Assign it to as many clients as you like.'
+        : `“${nm}” was not saved. ${saved.why ?? 'The server did not say why.'} What you built is still in the builder, so nothing has been lost. Try again once you have signal.`,
     );
   };
   /**
@@ -2377,7 +2377,7 @@ export default function Builder() {
         // The week is named where there is one. On a twelve-week block the same
         // movement can appear in every week, and four identical lines tell a
         // coach nothing about which week to go and change.
-        x.movements.slice(0, 4).map((m) => `· ${x.name} — ${m.exercise}${m.week ? ` in week ${m.week}` : ''}, ${areaLabel(m.area).toLowerCase()}, ${m.severity}`),
+        x.movements.slice(0, 4).map((m) => `· ${x.name}: ${m.exercise}${m.week ? ` in week ${m.week}` : ''}, ${areaLabel(m.area).toLowerCase()}, ${m.severity}`),
       );
       const shown = lines.slice(0, 8);
       const more = sending.reduce((a, x) => a + x.movements.length, 0) - shown.length;
@@ -2385,11 +2385,11 @@ export default function Builder() {
         Alert.alert(
           'These Load What They Disclosed',
           `${shown.join('\n')}${more > 0 ? `\n· and ${num(more)} more` : ''}\n\n` +
-            'You can absolutely program these on purpose. Confirming records that you chose to, with the date — ' +
+            'You can absolutely program these on purpose. Confirming records that you chose to, with the date. ' +
             `${listNames(sending.map((x) => x.name))} can see that record too.`,
           [
             { text: 'Change the Program', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'I Know — Assign', style: 'destructive', onPress: () => resolve(true) },
+            { text: 'I Know, Assign', style: 'destructive', onPress: () => resolve(true) },
           ],
           { cancelable: true, onDismiss: () => resolve(false) },
         );
@@ -2409,7 +2409,7 @@ export default function Builder() {
         if (!recorded) {
           return {
             clientId: tg.clientId, name: tg.name, ok: false,
-            why: 'your acknowledgement could not be saved, so the program was not sent either — it would have left no sign you knew.',
+            why: 'your acknowledgement could not be saved, so the program was not sent either. It would have left no sign you knew.',
           };
         }
       }
@@ -2441,7 +2441,7 @@ export default function Builder() {
     // Named, never silently dropped. A coach who believes four people got a
     // program when three did is worse off than one who was refused.
     if (plan.blocked.length) {
-      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all — they have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Select them above and read what they disclosed.`);
+      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all. They have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Select them above and read what they disclosed.`);
     }
     Alert.alert(report.title, parts.join('\n\n'));
   };
@@ -2505,7 +2505,7 @@ export default function Builder() {
   const revert = async () => {
     const cleared = await clearProgram(clientId);
     if (!cleared) {
-      Alert.alert('Not Reverted', `${client?.name ?? 'Your client'} is still on their coach-assigned program — the removal did not reach the server. Reopen this screen once you have signal and try again.`);
+      Alert.alert('Not Reverted', `${client?.name ?? 'Your client'} is still on their coach-assigned program. The removal did not reach the server. Reopen this screen once you have signal and try again.`);
       return;
     }
     // The removal is what reverts them — the client's own Train tab generates
@@ -2544,7 +2544,7 @@ export default function Builder() {
   const deleteTemplate = (id: string, name: string) => {
     Alert.alert(
       'Delete This Template?',
-      `“${name}” is removed from your library for good — there is no undo. Anybody already training it keeps their program, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
+      `“${name}” is removed from your library for good. There is no undo. Anybody already training it keeps their program, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
       [
         { text: 'Keep', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: async () => {
@@ -2618,7 +2618,7 @@ export default function Builder() {
             not lose its way in — it is the first chip in the row directly
             below, beside the other two things Programs now owns. */}
         <PageHead title="Build Program"
-          subtitle={client ? `Building for ${client.name}` : 'Your own draft — nobody chosen yet'}
+          subtitle={client ? `Building for ${client.name}` : 'Your own draft, nobody chosen yet'}
           leading={cameFrom ? undefined : null} onBack={goBack}
           trailing={<Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} a11yLabel="Search every screen" />} />
 
@@ -2746,7 +2746,7 @@ export default function Builder() {
           ))}
           {weekVolume.ungrouped ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {`${num(weekVolume.ungrouped)} set${s(weekVolume.ungrouped)} not counted — no muscle group on the movement`}
+              {`${num(weekVolume.ungrouped)} set${s(weekVolume.ungrouped)} not counted (no muscle group on the movement)`}
             </Text>
           ) : null}
         </Section>
@@ -2817,7 +2817,7 @@ export default function Builder() {
             of two or more, see src/lib/setGroups.ts. */}
         <Section>
           <ListRow icon="dumbbell" tone="brand" title="Exercises"
-            note={blockExercises === 0 ? 'None yet — open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'the week is open below, a row a day' : 'tap to show the week, a row a day'}`}
+            note={blockExercises === 0 ? 'None yet. Open the editor to add the first' : `${num(blockExercises)} in the block · ${editorOpen ? 'the week is open below, a row a day' : 'tap to show the week, a row a day'}`}
             onPress={() => setEditorOpen((o) => !o)} />
           <ListRow icon="swap" tone="blue" title="Supersets"
             note={(() => { const n = days.reduce((acc, d) => acc + d.exercises.filter((_, i) => isGrouped(d.exercises, i)).length, 0); return n === 0 ? 'None in this week' : `${num(n)} grouped ${n === 1 ? 'exercise' : 'exercises'} this week`; })()}
@@ -2865,7 +2865,7 @@ export default function Builder() {
               under a WHOLE read. */}
           {rosterStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-              note="Nobody is listed below because the roster did not come back — it does not mean you have no clients, and nothing you have built here is affected.">
+              note="Nobody is listed below because the roster did not come back. It does not mean you have no clients, and nothing you have built here is affected.">
               <View style={{ marginTop: sp.md }}>
                 <Ghost label={retryBusy ? 'Trying Again…' : 'Try Reading Again'} onPress={retryReads} />
               </View>
@@ -2877,7 +2877,7 @@ export default function Builder() {
           {roster.length === 0 && rosterStatus === 'ready' ? (
             <View>
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                No clients yet — add a client from your dashboard and they'll appear here to build for.
+                No clients yet. Add a client from your dashboard and they'll appear here to build for.
               </Text>
               {/* "from your dashboard" was the whole instruction and made the
                   coach change tabs from memory. Same control and destination as
@@ -2976,7 +2976,7 @@ export default function Builder() {
         <Section>
           <SectionHead title="Equipment" />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-            What is available where this client trains. Pick No equipment and the whole week is drawn from movements that need nothing at all — no bar, no bands, no bench.
+            What is available where this client trains. Pick No equipment and the whole week is drawn from movements that need nothing at all: no bar, no bands, no bench.
           </Text>
           <Segmented options={KIT_OPTIONS} value={kit} onChange={setKit} />
 
@@ -2994,7 +2994,7 @@ export default function Builder() {
               <View style={{ marginTop: sp.md }}>
                 <PartialRead what="catalogue movements" shown={cat.rows.length} />
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
-                  Only part of the catalogue came back, so which muscle groups a no-equipment week could not cover is not known — and a week generated from a prefix would leave out groups without being able to say which. Nothing is built from a partial list.
+                  Only part of the catalogue came back, so which muscle groups a no-equipment week could not cover is not known, and a week generated from a prefix would leave out groups without being able to say which. Nothing is built from a partial list.
                 </Text>
               </View>
             ) : !noKit?.program.days.length ? (
@@ -3023,7 +3023,7 @@ export default function Builder() {
         <Section>
           <SectionHead title="Templates" note={tplStatus === 'ready' && savedCount ? `${num(savedCount)} saved` : undefined} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-            Start from one you have already built. To keep this week for reuse, Save as Template is beside Assign at the foot of the screen — it goes to your library and reaches nobody.
+            Start from one you have already built. To keep this week for reuse, Save as Template is beside Assign at the foot of the screen. It goes to your library and reaches nobody.
           </Text>
 
           {/* The starters are the problem, not the consolation. Three of them
@@ -3032,7 +3032,7 @@ export default function Builder() {
               and concludes their work is gone. */}
           {tplStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Library" title="Your Saved Templates Could Not Be Read"
-              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing — your own programs are on the server and did not come back. Reopen this screen once you have signal." />
+              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing. Your own programs are on the server and did not come back. Reopen this screen once you have signal." />
           ) : tplStatus === 'partial' ? (
             <PartialRead what="templates in your library" shown={templates.length} />
           ) : null}
@@ -3100,12 +3100,12 @@ export default function Builder() {
               to show and needs no goal at all. */}
           {client && planGuard.allowed && !assignedNow && !autoGoal ? (
             <Notice tone={t.ink3} kicker="Goal" title="No Goal on Record"
-              note={`${client.name.split(' ')[0]}'s goal is not one this app recognises${client.goal ? ` — their roster row reads “${client.goal}”` : ''}, so no auto-generated plan has been built: the plan a goal produces is a fat-loss block, a toning block or a muscle block, and picking one on their behalf is a guess about somebody's training. Ask them to set a goal in their app, or build the week yourself below and assign it.`} />
+              note={`${client.name.split(' ')[0]}'s goal is not one this app recognises${client.goal ? ` (their roster row reads “${client.goal}”)` : ''}, so no auto-generated plan has been built: the plan a goal produces is a fat-loss block, a toning block or a muscle block, and picking one on their behalf is a guess about somebody's training. Ask them to set a goal in their app, or build the week yourself below and assign it.`} />
           ) : null}
 
           {inGroups.length ? (
             <Flag tone={t.brand} style={{ marginBottom: sp.lg }}>
-              {`${client?.name.split(' ')[0] ?? 'This client'} is in ${listNames(inGroups.map((g) => g.name))}. Assigning here changes only their copy — nobody else in ${inGroups.length === 1 ? 'the group' : 'those groups'} is touched.`}
+              {`${client?.name.split(' ')[0] ?? 'This client'} is in ${listNames(inGroups.map((g) => g.name))}. Assigning here changes only their copy. Nobody else in ${inGroups.length === 1 ? 'the group' : 'those groups'} is touched.`}
             </Flag>
           ) : null}
 
@@ -3189,7 +3189,7 @@ export default function Builder() {
                 carries a date — so it is not stored at all. */}
             {startsOn && !isStartDate(startsOn) ? (
               <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
-                Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
+                Write the date as year, month and day: 2026-09-07. Anything else is not saved, and the
                 program goes out with no start date rather than one nothing can read back.
               </Flag>
             ) : (
@@ -3219,7 +3219,7 @@ export default function Builder() {
           <SectionHead title="Weeks" note={isBlock(composeProgram()) ? `${blockWeeks.length}` : undefined} />
           <Text style={{ ...ty.caption, color: t.ink3 }}>
             A block is the six, eight or twelve weeks you actually sell. Week one is what the client trains
-            now — the later weeks are stored with the program and are yours to edit before you send them.
+            now. The later weeks are stored with the program and are yours to edit before you send them.
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
             {blockWeeks.map((w, wi) => (
@@ -3284,7 +3284,7 @@ export default function Builder() {
                   // taps and sees nothing concludes the button is broken.
                   Alert.alert(
                     'No Room for Another Week',
-                    `A block holds ${MAX_WEEKS} weeks. Remove one you are not using, or write the rest as a second block — which is how a longer plan is periodised anyway.`,
+                    `A block holds ${MAX_WEEKS} weeks. Remove one you are not using, or write the rest as a second block, which is how a longer plan is periodised anyway.`,
                   );
                   return;
                 }
@@ -3387,7 +3387,7 @@ export default function Builder() {
 
           {days.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              No training days yet — add one to start building.
+              No training days yet. Add one to start building.
             </Text>
           ) : null}
 
@@ -3434,7 +3434,7 @@ export default function Builder() {
               {cuesFilled !== null ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
                   {cuesFilled === 0
-                    ? 'Nothing to fill — every note in this week already has something in it, and none of them were changed.'
+                    ? 'Nothing to fill. Every note in this week already has something in it, and none of them were changed.'
                     : `${num(cuesFilled)} empty note${s(cuesFilled)} filled from your cues. Nothing you had already written was touched.`}
                 </Text>
               ) : null}
@@ -3566,7 +3566,7 @@ export default function Builder() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>Conditioning</Text>
                   <TextInput value={d.cardio ?? ''} onChangeText={(v) => setDayCardio(di, v)}
-                    placeholder="e.g. 15 min incline walk — leave empty for none" placeholderTextColor={t.ink3}
+                    placeholder="e.g. 15 min incline walk (leave empty for none)" placeholderTextColor={t.ink3}
                     accessibilityLabel={`Conditioning on ${d.day}, sent to the client alongside the exercises`}
                     style={[inp, { flex: 1 }]} />
                 </View>
@@ -3836,7 +3836,7 @@ export default function Builder() {
                                 marker is what fits; the full label is what is
                                 read out, because "RP" is not a word. */}
                             <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: ri })} accessibilityRole="button"
-                              accessibilityLabel={`How set ${row.n} of ${movement(e.name)} is performed — currently ${rm.label}`}
+                              accessibilityLabel={`How set ${row.n} of ${movement(e.name)} is performed, currently ${rm.label}`}
                               style={{ minWidth: 34, alignItems: 'center', paddingHorizontal: sp.sm, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
                               <Text style={{ ...ty.caption, ...font('600'), color: badgeFor(row.method) ? t.ink : t.ink3 }}>{rm.short}</Text>
                             </Pressable>
@@ -4081,7 +4081,7 @@ export default function Builder() {
                     <TextInput
                       value={e.note ?? ''}
                       onChangeText={(v) => patchEx(di, e.key, { note: v })}
-                      placeholder="Cue, tempo, setup — they see this at the machine…"
+                      placeholder="Cue, tempo, setup. They see this at the machine…"
                       placeholderTextColor={t.ink3}
                       accessibilityLabel={`Your notes on ${movement(e.name)}`}
                       multiline
@@ -4231,7 +4231,7 @@ export default function Builder() {
                           {rows.tabled ? 'Set Type · every set unless a row says otherwise' : 'Set Type'}
                         </Text>
                         <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: null })} accessibilityRole="button"
-                          accessibilityLabel={`Set type for ${movement(e.name)}${rows.tabled ? ', applied to every set unless a row says otherwise' : ''} — currently ${m.label}. ${m.blurb} Opens the list of set types.`}
+                          accessibilityLabel={`Set type for ${movement(e.name)}${rows.tabled ? ', applied to every set unless a row says otherwise' : ''}. Currently ${m.label}. ${m.blurb} Opens the list of set types.`}
                           style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: sp.sm,
                                    minHeight: MIN_TARGET, paddingHorizontal: sp.lg, paddingVertical: sp.sm,
                                    borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
@@ -4506,7 +4506,7 @@ export default function Builder() {
 
           {rosterStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-              note="Nobody is listed here because the roster did not come back — it does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
+              note="Nobody is listed here because the roster did not come back. It does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
           ) : rosterStatus === 'partial' ? (
             <PartialRead what="clients on your book" shown={roster.length} />
           ) : null}
@@ -4514,7 +4514,7 @@ export default function Builder() {
           {roster.length === 0 && rosterStatus === 'ready' ? (
             <View style={{ marginBottom: sp.lg }}>
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                No clients yet — add or invite a client and they will appear here to assign to.
+                No clients yet. Add or invite a client and they will appear here to assign to.
               </Text>
               <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                 <Ghost label="Invite a Client" a11yLabel="Invite a client, on the Clients screen"
@@ -4633,7 +4633,7 @@ export default function Builder() {
 
           {blockExercises === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing to check yet. The checks read the training days above — every week of them — as you write them.
+              Nothing to check yet. The checks read the training days above, every week of them, as you write them.
             </Text>
           ) : (
             <>
@@ -4653,7 +4653,7 @@ export default function Builder() {
                 );
               }) : (
                 <Text style={{ ...ty.label, color: t.ink2 }}>
-                  Nothing matched. That is not a verdict on the program — it means none of these rules found
+                  Nothing matched. That is not a verdict on the program. It means none of these rules found
                   anything, and they are a short list.
                 </Text>
               )}
@@ -4767,7 +4767,7 @@ export default function Builder() {
             <View style={{ marginBottom: sp.md }}>
               <Flag tone={t.warn}>
                 {injuryLoads.map((x) => `${x.name}: ${num(x.movements.length)} movement${x.movements.length === 1 ? '' : 's'} (${[...new Set(x.movements.map((m) => areaLabel(m.area).toLowerCase()))].join(', ')})`).join(' · ')}
-                {' — '}this program loads something they have disclosed. You will be asked to confirm.
+                {'. '}This program loads something they have disclosed. You will be asked to confirm.
               </Flag>
             </View>
           ) : null}
@@ -4790,11 +4790,11 @@ export default function Builder() {
           {blockExercises === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.sm }}>
               Add at least one exercise to assign this program.
-              {startsOn ? ' The start date is not what is holding it — an empty program is.' : ''}
+              {startsOn ? ' The start date is not what is holding it. An empty program is.' : ''}
             </Text>
           ) : pickedIds.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.sm }}>
-              Tick everybody who should get this — one client or twenty.
+              Tick everybody who should get this, one client or twenty.
             </Text>
           ) : null}
 
@@ -4942,21 +4942,21 @@ export default function Builder() {
           ) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6, marginBottom: sp.lg }}>
             Tap a movement to add it, or the arrow to read what it is first. Add puts whatever you
-            typed in as it stands — a movement we have never heard of is fine.
+            typed in as it stands. A movement we have never heard of is fine.
           </Text>
 
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {coachEx.status === 'error' ? (
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
                 Your saved exercises could not be read, so only the built-in ones are listed. That is
-                not the same as having none saved — try again in a moment.
+                not the same as having none saved. Try again in a moment.
               </Text>
             ) : coachEx.status === 'partial' ? (
               // 'partial' arrived with the row-cap work and this branch was
               // written before it existed, so a short read of the coach's own
               // names fell through to silence.
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
-                Your saved exercises came back short — there are more of them than are listed here.
+                Your saved exercises came back short. There are more of them than are listed here.
               </Text>
             ) : null}
 
@@ -5026,7 +5026,7 @@ export default function Builder() {
                 // catalogue, and says so.
                 <Text style={{ ...ty.caption, color: t.ink2 }}>
                   The catalogue could not be read, so only your own list is shown above. The movements
-                  are still there — your saved names and anything you type still work. Try again once
+                  are still there: your saved names and anything you type still work. Try again once
                   you have signal.
                 </Text>
               ) : catShownList.length === 0 ? (
@@ -5147,7 +5147,7 @@ export default function Builder() {
         <View style={[sheet, { maxHeight: '80%' }]}>
           <Text style={{ ...ty.title, color: t.ink }}>Start from a Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
-            Loads into the builder for {client?.name ?? 'this client'} — tweak, then assign.
+            Loads into the builder for {client?.name ?? 'this client'}. Tweak, then assign.
           </Text>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             {/* The library is seeded with three built-in starters, so a failed
@@ -5161,7 +5161,7 @@ export default function Builder() {
               </Text>
             ) : tplStatus === 'partial' ? (
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
-                Your library came back short — there are more saved templates than are listed here.
+                Your library came back short. There are more saved templates than are listed here.
               </Text>
             ) : null}
             {templates.length === 0 && tplStatus === 'ready' ? (
@@ -5235,8 +5235,8 @@ export default function Builder() {
               <Text style={{ ...ty.title, color: t.ink }}>{forRow ? `How Is Set ${n} Performed?` : 'How Is It Performed?'}</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
                 {forRow
-                  ? 'This set only. It is carried to the client and read at the machine, and it drives their rest timer — a drop set runs straight through with no rest.'
-                  : 'The default for every set of this exercise that has not been given its own. It is carried to the client and read at the machine, and it drives their rest timer — a drop set runs straight through with no rest.'}
+                  ? 'This set only. It is carried to the client and read at the machine, and it drives their rest timer. A drop set runs straight through with no rest.'
+                  : 'The default for every set of this exercise that has not been given its own. It is carried to the client and read at the machine, and it drives their rest timer. A drop set runs straight through with no rest.'}
               </Text>
               <ScrollView style={{ maxHeight: 380 }}>
                 {SET_METHODS.map((m) => {
@@ -5294,7 +5294,7 @@ export default function Builder() {
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Save as Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
-            Reuse this program with other clients — {num(blockExercises)} exercise{s(blockExercises)} across {num(blockDays)} day{s(blockDays)}{blockWeeks.length > 1 ? ` in ${num(blockWeeks.length)} weeks` : ''}.
+            Reuse this program with other clients: {num(blockExercises)} exercise{s(blockExercises)} across {num(blockDays)} day{s(blockDays)}{blockWeeks.length > 1 ? ` in ${num(blockWeeks.length)} weeks` : ''}.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Template Name</Text>
           <TextInput value={tplName} onChangeText={setTplName} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}

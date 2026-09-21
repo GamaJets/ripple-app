@@ -626,9 +626,9 @@ function uncomparableNote(which: Uncomparable, income: Income, owed: Owed): stri
         : 'currencies none of them states';
   switch (which) {
     case 'taken_mixed':
-      return `The payments recorded this month are in ${list(income.currencies)}, so there is no single figure for what came in and nothing to hold the invoice register against. This is not a month with no payments in it — ${income.count} ${income.count === 1 ? 'was' : 'were'} recorded.`;
+      return `The payments recorded this month are in ${list(income.currencies)}, so there is no single figure for what came in and nothing to hold the invoice register against. This is not a month with no payments in it: ${income.count} ${income.count === 1 ? 'was' : 'were'} recorded.`;
     case 'owed_mixed':
-      return `The invoices issued this month are in ${list(owed.currencies)}, so there is no single figure for what the register says arrived and nothing to hold the payments against. This is not a month with nothing marked paid — ${owed.settled} invoice${owed.settled === 1 ? ' is' : 's are'}.`;
+      return `The invoices issued this month are in ${list(owed.currencies)}, so there is no single figure for what the register says arrived and nothing to hold the payments against. This is not a month with nothing marked paid: ${owed.settled} invoice${owed.settled === 1 ? ' is' : 's are'}.`;
     case 'sides_differ':
     default:
       return `Payments this month are in ${income.currencies[0]} and the invoices are issued in ${owed.currencies[0]}. The two records agree with themselves and not with each other, so they cannot be reconciled: the difference between them would not be an amount of either money. Nothing here has been converted, because the rate would be one nobody chose.`;
@@ -801,7 +801,7 @@ export function closeWarning(rec: CloseRecord): string | null {
   const list = names.length === 1
     ? names[0]
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `Could not read ${list}. This is a partial close, not a quiet one — ${broken.map((b) => b.cost).join('; ')}.`;
+  return `Could not read ${list}. This is a partial close, not a quiet one: ${broken.map((b) => b.cost).join('; ')}.`;
 }
 
 /* ── the refusal ───────────────────────────────────────────────────────────── */
@@ -850,7 +850,7 @@ export function closeBlockers(
   for (const b of brokenCloseParts(rec)) {
     out.push({
       kind: 'read_failed',
-      text: `Could not read ${b.label} — ${b.cost}. Nothing can be closed over a read that failed.`,
+      text: `Could not read ${b.label}: ${b.cost}. Nothing can be closed over a read that failed.`,
     });
   }
 
@@ -865,7 +865,7 @@ export function closeBlockers(
     out.push({
       kind: 'read_truncated',
       text:
-        `Only the first rows of ${CLOSE_LABEL[p]} were read, and there are more — ${CLOSE_COST[p]}. ` +
+        `Only the first rows of ${CLOSE_LABEL[p]} were read, and there are more: ${CLOSE_COST[p]}. ` +
         `A month cannot be closed over part of a set: the figure would be a subtotal with a ` +
         `signature under it.`,
     });
@@ -935,7 +935,7 @@ export function closeBlockers(
       kind: 'mixed_currency',
       text: income.currencies.length > 1
         ? `Payments in ${w.label} are recorded in ${income.currencies.join(' and ')}. They are not added together here, because that would not be a total.`
-        : `Payments in ${w.label} do not all say what currency they are in${income.currencies.length ? ` — some are recorded in ${income.currencies[0]} and at least one states none` : ''}. No total is offered: an amount whose money is unknown is not an amount.`,
+        : `Payments in ${w.label} do not all say what currency they are in${income.currencies.length ? `. Some are recorded in ${income.currencies[0]} and at least one states none` : ''}. No total is offered: an amount whose money is unknown is not an amount.`,
     });
   }
   if (owed?.mixedCurrency) {
@@ -943,7 +943,7 @@ export function closeBlockers(
       kind: 'mixed_currency',
       text: owed.currencies.length > 1
         ? `Invoices in ${w.label} are issued in ${owed.currencies.join(' and ')}, so no single figure is offered for what is owed.`
-        : `Invoices in ${w.label} do not all say what currency they are in${owed.currencies.length ? ` — some are issued in ${owed.currencies[0]} and at least one states none` : ''}, so no single figure is offered for what is owed.`,
+        : `Invoices in ${w.label} do not all say what currency they are in${owed.currencies.length ? `. Some are issued in ${owed.currencies[0]} and at least one states none` : ''}, so no single figure is offered for what is owed.`,
     });
   }
   // The two sides disagreeing with EACH OTHER has no blocker of its own above:
@@ -1162,5 +1162,5 @@ export function closeHeadline(c: MonthClose): string {
   // assurance it does not have.
   return c.check?.r.state === 'agrees'
     ? `${c.window.label} reconciles against the invoice register and nothing is unmarked. This month can be closed.`
-    : `${c.window.label} has nothing unmarked and nothing unexplained. No invoice in the month was marked paid, so what came in stands on the payment record alone — it was not checked against a second source.`;
+    : `${c.window.label} has nothing unmarked and nothing unexplained. No invoice in the month was marked paid, so what came in stands on the payment record alone. It was not checked against a second source.`;
 }

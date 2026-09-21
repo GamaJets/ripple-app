@@ -130,7 +130,7 @@ export function reconcileNote(
     case 'unreadable':
       // Says what happened and what it is NOT, because the sentence above is
       // what this used to render and an owner has to be able to tell them apart.
-      return `Your register could not be read, so your ${label} has not been checked — this is a failed read, not an empty register.`;
+      return `Your register could not be read, so your ${label} has not been checked. This is a failed read, not an empty register.`;
     case 'not_entered':
       return `Your records show ${fmt(r.derived as number)}${over}. Use that, or type your own figure.`;
     case 'differs':

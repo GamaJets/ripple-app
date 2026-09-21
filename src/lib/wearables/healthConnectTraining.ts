@@ -164,7 +164,7 @@ export function trainingReadable(): boolean {
  */
 const NO_ACCESS =
   'Repple was not given access to your steps, heart rate, calories or workouts. '
-  + 'Either it was declined, or this version of Repple cannot ask for them yet — '
+  + 'Either it was declined, or this version of Repple cannot ask for them yet. '
   + 'Health Connect ▸ App permissions shows which, and it lists Repple only once a build that can ask is installed.';
 
 /** Bring the client up. False is "it declined to start", which is an error and

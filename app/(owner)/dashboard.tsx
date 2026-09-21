@@ -417,7 +417,7 @@ export default function OwnerOverview() {
         loading ? 'Still Reading Your Roster' : 'Roster Could Not Be Read',
         loading
           ? 'Your trainers have not come back yet, so every figure in the report would be a zero this app has not confirmed. Try again in a moment.'
-          : 'Your trainers could not be read, so a report built now would state that your gym has no trainers, no clients and no sessions — none of which this app found out. Reload the roster and share it then.',
+          : 'Your trainers could not be read, so a report built now would state that your gym has no trainers, no clients and no sessions, none of which this app found out. Reload the roster and share it then.',
       );
       return;
     }
@@ -451,8 +451,8 @@ export default function OwnerOverview() {
     // exactly that sentence, and says in a comment why it earned it.
     if (how === 'text') {
       Alert.alert('Report Shared', pdfExportAvailable()
-        ? 'Shared as text — the PDF could not be produced on this phone. Nothing is missing from the figures.'
-        : 'Shared as text — this build cannot make a PDF. A newer build of the app can.');
+        ? 'Shared as text. The PDF could not be produced on this phone. Nothing is missing from the figures.'
+        : 'Shared as text. This build cannot make a PDF. A newer build of the app can.');
     }
   };
   const G = layout.gutter;
@@ -625,7 +625,7 @@ export default function OwnerOverview() {
             <Text style={{ ...ty.label, color: t.ink2 }}>
               {trainersUnread
                 ? 'Your trainers could not be read, so this is not "no trainers".'
-                : 'No trainers yet — clients, delivered sessions and trainer health fill in as they join your gym.'}
+                : 'No trainers yet. Clients, delivered sessions and trainer health fill in as they join your gym.'}
             </Text>
             {trainersUnread ? (
               <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
@@ -697,7 +697,7 @@ export default function OwnerOverview() {
           ) : trainersUnread ? (
             // Ahead of the empty branch: an unread roster scores nobody, which
             // is not the same as there being nobody to score.
-            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so none of them were scored — nobody here has been cleared.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so none of them were scored. Nobody here has been cleared.</Text>
           ) : ranked.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No trainers to score yet.</Text>
           ) : ranked.map(({ tr, h }, i) => (
@@ -822,7 +822,7 @@ export default function OwnerOverview() {
               second churn read on this console would be a second place for the
               two to disagree. */}
           <Rule />
-          <ListRow icon="trending" title="Member Retention" note="Who joined and who left, month by month — on Growth"
+          <ListRow icon="trending" title="Member Retention" note="Who joined and who left, month by month, on Growth"
             onPress={() => router.push('/(owner)/growth')} />
         </Section>
 
@@ -854,8 +854,8 @@ export default function OwnerOverview() {
             errorLine="Your recorded months could not be read, so the trend is held back. Pull down to try again."
             partialLine="Only some of your recorded months came back, so the trend is held back rather than drawn through the ones that did. Pull down to try again."
             loadingLine="Reading your recorded months…"
-            emptyLine="Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one."
-            onePointLine="Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.">
+            emptyLine="Not enough history yet. A snapshot is recorded each month, and the trend appears from the second one."
+            onePointLine="Not enough history yet. A snapshot is recorded each month, and the trend appears from the second one.">
             {/* The series goes in WITH its holes, and the months go in with it.
                 This was `series.filter((v) => v != null)` over a hand-rolled
                 label row, which drew four points across the width while
@@ -1114,7 +1114,7 @@ function SetUp({ items, onGo }: { items: SetupItem[]; onGo: (route: string) => v
             screen with no such control is not. */}
         {elsewhere.length > 0 ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {elsewhere.map((i) => i.title.toLowerCase()).join(', ')} — in the Repple Studio web
+            {elsewhere.map((i) => i.title.toLowerCase()).join(', ')}: in the Repple Studio web
             console, which is the only place this app can send you for it.
           </Text>
         ) : null}

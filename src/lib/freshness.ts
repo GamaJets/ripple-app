@@ -114,7 +114,7 @@ export function isStale(at: number | null, now: number, ttlMs: number = STALE_MS
 export function fetchedNote(at: number | null, now: number, reach: Reach, zone?: string | null): string {
   if (at == null) {
     return reach === 'offline'
-      ? 'Not read yet, and this phone cannot reach us — nothing on this screen is your gym’s.'
+      ? 'Not read yet, and this phone cannot reach us. Nothing on this screen is your gym’s.'
       : 'Reading…';
   }
   const age = agePhrase(Math.max(0, now - at));
@@ -123,7 +123,7 @@ export function fetchedNote(at: number | null, now: number, reach: Reach, zone?:
   const clock = gymTimeLabel(at, zone ?? null);
   const at_ = clock ? `, at ${clock} at the gym` : '';
   if (reach === 'offline') {
-    return `Offline — read ${age}${at_}. Nothing here will change until there is signal.`;
+    return `Offline. Read ${age}${at_}. Nothing here will change until there is signal.`;
   }
   return `Read ${age}${at_}`;
 }

@@ -276,17 +276,17 @@ export function coachPlanLine(type: PlannedDayType, outcome: PlanOutcome, who: s
   const label = DAY_TYPE_LABEL[type].toLowerCase();
   switch (outcome) {
     case 'not-yet':
-      return `${who} has marked this a ${label}. It hasn’t happened yet — this is what they intend, not what they did.`;
+      return `${who} has marked this a ${label}. It hasn’t happened yet. This is what they intend, not what they did.`;
     case 'today':
       return `${who} has marked today a ${label}. The day is still running, so there is nothing to hold it against yet.`;
     case 'log-unknown':
       return `${who} marked this a ${label} and the day has gone. This screen doesn’t read their training log, so it can’t tell you whether anything was logged against it.`;
     case 'nothing-logged':
-      return `${who} marked this a ${label} and nothing was logged on the day. That is not evidence they kept to it — an unlogged session looks exactly the same from here.`;
+      return `${who} marked this a ${label} and nothing was logged on the day. That is not evidence they kept to it. An unlogged session looks exactly the same from here.`;
     case 'log-agrees':
       return `${who} marked this a ${label} and there is training logged on the day. The log is what happened; this row is only what they meant to do.`;
     case 'log-disagrees':
-      return `${who} marked this a ${label} and there is training logged on the day. Both stand as they are — neither has been changed to match the other.`;
+      return `${who} marked this a ${label} and there is training logged on the day. Both stand as they are. Neither has been changed to match the other.`;
   }
 }
 
@@ -304,7 +304,7 @@ export function coachConflictLine(
   const label = DAY_TYPE_LABEL[type].toLowerCase();
   return conflict.kind === 'plan-schedules-a-session'
     ? `Your program puts ${conflict.focus} on this day and ${who} has marked it a ${label}. Worth agreeing which one stands before the day arrives.`
-    : `${who} has marked this a training day and your program schedules nothing on it. Their mark doesn’t add a session to the program — it says what they intend to do.`;
+    : `${who} has marked this a training day and your program schedules nothing on it. Their mark doesn’t add a session to the program. It says what they intend to do.`;
 }
 
 /**

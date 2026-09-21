@@ -105,7 +105,7 @@ export default function OwnerExercise() {
           </View>
         ) : status === 'error' ? (
           <Notice tone={t.warn} kicker="Exercise" title="This Could Not Be Read"
-            note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
+            note="Nothing below is missing because it does not exist. We could not reach the catalogue. Try again once you have signal." />
         ) : animUrl ? (
           <>
             <DemoAnimation uri={animUrl} label={detail?.name || name}
@@ -115,7 +115,7 @@ export default function OwnerExercise() {
               stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
             {detail?.demoLicence !== 'commercial' ? (
               <View style={{ marginTop: sp.sm }}>
-                <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+                <Flag tone={t.warn}>Evaluation asset: licensed for review only, never for release.</Flag>
               </View>
             ) : null}
           </>
@@ -140,12 +140,12 @@ export default function OwnerExercise() {
               ? 'This movement has no artwork, so members see its name, its muscles and the written steps. Your coaches can film their own clip for it from the trainer app.'
               : signedOut
               ? 'This session was not allowed to read the catalogue, so nothing here says whether we hold this movement. That is a sign-in that has not restored, not a gap in the product.'
-              : 'This movement is not in our catalogue, so there is no guide for it — nothing here is missing because of an error.'} />
+              : 'This movement is not in our catalogue, so there is no guide for it. Nothing here is missing because of an error.'} />
         )}
 
         {FRAMES_ARE_UNHOSTED && frames.length ? (
           <View style={{ marginTop: sp.sm }}>
-            <Flag tone={t.warn}>Illustrations are served from the source dataset — not for release.</Flag>
+            <Flag tone={t.warn}>Illustrations are served from the source dataset. Not for release.</Flag>
           </View>
         ) : null}
 

@@ -128,7 +128,7 @@ export function OwnRecoveryPanel({ noGoalNote }: {
       setHrs(''); setQ(0);
       if (out === 'unsent') {
         Alert.alert('Saved on This Phone',
-          'That night has not reached your account yet — there is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
+          'That night has not reached your account yet. There is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
       }
     })();
   };
@@ -146,7 +146,7 @@ export function OwnRecoveryPanel({ noGoalNote }: {
             // a remove button.
             if (!(await removeSleep(id))) {
               Alert.alert('Not Removed',
-                'That night is still in your log — we could not reach the server to take it out.');
+                'That night is still in your log. We could not reach the server to take it out.');
             }
           })();
         } },
@@ -257,7 +257,7 @@ export function OwnRecoveryPanel({ noGoalNote }: {
               : sleepStatus === 'partial' ? 'more nights than are shown' : undefined} />
         <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
           Nights you type in. A night a watch or a ring recorded is read separately and is never
-          averaged into these — a figure somebody remembered in the morning and a figure a device
+          averaged into these. A figure somebody remembered in the morning and a figure a device
           measured are not the same kind of fact, and blending them would make both unfalsifiable.
         </Text>
         <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
@@ -291,10 +291,10 @@ export function OwnRecoveryPanel({ noGoalNote }: {
         {sleep.length === 0 ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
             {sleepStatus === 'error'
-              ? 'Your sleep log could not be read just now, so this is blank rather than empty — any nights you have already logged are not shown here.'
+              ? 'Your sleep log could not be read just now, so this is blank rather than empty. Any nights you have already logged are not shown here.'
               : sleepStatus === 'loading'
                 ? 'Reading your sleep log…'
-                : 'No nights of your own logged yet — log one above and your average appears here.'}
+                : 'No nights of your own logged yet. Log one above and your average appears here.'}
           </Text>
         ) : null}
         {sleepStatus === 'error' ? (
@@ -309,7 +309,7 @@ export function OwnRecoveryPanel({ noGoalNote }: {
             {unsentNights === 1
               ? 'One night is saved on this phone only'
               : `${num(unsentNights)} nights are saved on this phone only`}
-            {' '}— they go up the next time you are online. Nothing to re-enter.
+            {'. '}They go up the next time you are online. Nothing to re-enter.
           </Text>
         ) : null}
         {sleep.slice(0, NIGHTS).map((sx) => (

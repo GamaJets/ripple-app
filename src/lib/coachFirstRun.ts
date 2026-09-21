@@ -176,7 +176,7 @@ export const COACH_SETUP: readonly CoachSetupItem[] = [
     note: 'so a client can pay you from inside the app',
     // The honest framing: Repple never holds the money. The coach's Stripe
     // account does, and until it exists a package is a price list.
-    breaks: 'a client can see what you sell and cannot pay for it — the money has nowhere to land',
+    breaks: 'a client can see what you sell and cannot pay for it, because the money has nowhere to land',
     route: '/(trainer)/payments',
   },
   {
@@ -415,7 +415,7 @@ export function coachSetupNote(rows: readonly CoachSetupRow[], status: LoadStatu
   const left = coachSetupLeft(rows);
   const unknown = coachSetupUnknown(rows);
   if (unknown > 0 && left === 0) {
-    return 'Everything that could be checked is done. Some of it could not be read just now, so those rows show a dash rather than a tick — that is this screen not knowing, not you not having done it.';
+    return 'Everything that could be checked is done. Some of it could not be read just now, so those rows show a dash rather than a tick. That is this screen not knowing, not you not having done it.';
   }
   if (unknown > 0) {
     return 'Work through these in any order. A dash means that row could not be read, so it is not counted either way.';

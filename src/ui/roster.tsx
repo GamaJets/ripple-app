@@ -281,6 +281,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           // screen can be vouched for — and nothing is cleared either: a coach
           // on bad wifi keeps their clients, with the status saying they are
           // not confirmed.
+          // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
           reportError('roster.session', new Error('auth read unreadable — who is signed in could not be established'));
           setStatus('error');
           return;
@@ -290,6 +291,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         if (cancelled()) return;
         const who = uidFromAuth(whoRes);
         if (who.fate === 'unreadable') {
+          // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
           reportError('roster.getUser', new Error('auth read unreadable — who is signed in could not be established'));
           setStatus('error');
           return;
@@ -693,6 +695,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
           reportError('roster.addClient.session', new Error(
             who.fate === 'signed-out'
               ? 'no signed-in coach to attribute the client to'
+              // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
               : 'auth read unreadable — who is signed in could not be established',
           ));
         } else {

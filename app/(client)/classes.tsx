@@ -93,7 +93,7 @@ function classTermsLine(policy: ClassPolicyRead): string {
   if (policy.notice === 0) return 'Your gym does not run a notice period for classes, so cancelling this later is not a late cancellation.';
   const window = `Your gym asks for ${policy.notice} hours’ notice. Cancelling inside that counts as a late cancellation`;
   if (policy.fee === 0) return `${window}, and your gym has recorded no charge for one.`;
-  return `${window} — what that costs is shown before you confirm a cancellation.`;
+  return `${window}. What that costs is shown before you confirm a cancellation.`;
 }
 
 export default function Classes() {
@@ -181,7 +181,7 @@ export default function Classes() {
   const reviewBooking = async (c: GymClass, full: boolean | null, spotsLeft: number | null): Promise<boolean> => {
     const policy = await fetchClassCancelPolicy(c.id);
     const state = full === true
-      ? 'This class is full. Confirming puts you on the waitlist — it does not book a place.'
+      ? 'This class is full. Confirming puts you on the waitlist. It does not book a place.'
       : spotsLeft == null ? 'How many spaces are left could not be read. Confirming asks for a place.'
       : `${spotsLeft} spot${spotsLeft === 1 ? '' : 's'} left. Confirming books your place.`;
     const body = [
@@ -213,7 +213,7 @@ export default function Classes() {
       Alert.alert('Not Booked', `We could not get you into ${c.title}. Nothing has been reserved. ${retryLine(reach)}`);
       return;
     }
-    if (st === 'waitlist') Alert.alert('Added to Waitlist', `${c.title} is full — you're on the waitlist and we'll move you up if a spot opens.`);
+    if (st === 'waitlist') Alert.alert('Added to Waitlist', `${c.title} is full. You're on the waitlist and we'll move you up if a spot opens.`);
     else {
       // ── the sentence is decided by what actually happened ────────────────
       //
@@ -247,7 +247,7 @@ export default function Classes() {
         : !notifPush
         ? ' Notifications are off, so there will be no reminder.'
         : tooLate
-        ? ' It starts in under an hour, so there is no reminder — head over.'
+        ? ' It starts in under an hour, so there is no reminder. Head over.'
         : ' We could not set a reminder for this one, so nothing will arrive. Check your class reminders in Settings, or set your own alarm.';
       Alert.alert('Booked', `You're in for ${c.title} at ${c.branch}, ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}.` + reminder);
     }
@@ -277,8 +277,8 @@ export default function Classes() {
       Alert.alert(
         wasWaitlist ? 'Still on the Waitlist' : 'Not Cancelled',
         wasWaitlist
-          ? `You are still on the waitlist for ${c.title} — that did not save, so nothing has changed. ${retryLine(reach)}`
-          : `Your seat in ${c.title} on ${dayLabel(c.startsAt)} at ${timeLabel(c.startsAt)} is still booked — that did not save, so nothing has changed and the gym still expects you. ${retryLine(reach)}`,
+          ? `You are still on the waitlist for ${c.title}. That did not save, so nothing has changed. ${retryLine(reach)}`
+          : `Your seat in ${c.title} on ${dayLabel(c.startsAt)} at ${timeLabel(c.startsAt)} is still booked. That did not save, so nothing has changed and the gym still expects you. ${retryLine(reach)}`,
         [{ text: 'OK' }],
       );
     };
@@ -495,7 +495,7 @@ export default function Classes() {
                             // `holds`, not the truthiness of a status: a member
                             // who cancelled and then had the class called off
                             // was being told they were booked in on it.
-                            ? (holds ? 'Cancelled by the gym — you were booked in' : 'Cancelled by the gym')
+                            ? (holds ? 'Cancelled by the gym · you were booked in' : 'Cancelled by the gym')
                             // The member's own standing comes first and wins,
                             // because "you cancelled this" is what stops a
                             // wasted journey and "4 spots left" is not about

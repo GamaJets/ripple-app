@@ -615,7 +615,7 @@ export default function OwnerMembers() {
       reportError('members.dates', e);
       Alert.alert('Dates Not Saved',
         (e instanceof Error && e.message)
-        || `Nothing was changed — this membership still starts ${m.startedOn}. Check your connection and try again.`);
+        || `Nothing was changed. This membership still starts ${m.startedOn}. Check your connection and try again.`);
     } finally { setDtBusy(false); }
   };
 
@@ -765,7 +765,7 @@ export default function OwnerMembers() {
             : sum.mrrCents == null
             ? canSayEmpty(state) && list.length === 0
               ? 'No memberships on the register yet.'
-              : 'No active membership sits on a priced plan, so this is not known — which is not the same as nothing.'
+              : 'No active membership sits on a priced plan, so this is not known, which is not the same as nothing.'
             : `${sum.activeMembers} active${frozen ? ` · ${frozen} frozen` : ''}`;
           return (
             <Section>
@@ -918,7 +918,7 @@ export default function OwnerMembers() {
               These memberships have an end date that has already passed and a status the door
               still reads as live, because nothing in this product closes a membership at
               midnight. Cancel the ones that are over, or correct the end date on the ones that
-              are not — an end date on its own changes nothing.
+              are not. An end date on its own changes nothing.
             </Flag>
           ) : null}
 
@@ -945,7 +945,7 @@ export default function OwnerMembers() {
                which is a true thing to say and a different thing. */
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nobody on the register yet. Open a membership for someone who already has a Repple
-              account — a membership has to point at a real account, so somebody who has never
+              account. A membership has to point at a real account, so somebody who has never
               used the app is invited rather than imported.
             </Text>
           ) : shown.length === 0 ? (
@@ -1121,7 +1121,7 @@ export default function OwnerMembers() {
                   make then. */}
               {clockNote ? (
                 <View style={{ marginBottom: sp.lg }}>
-                  <Flag tone={t.warn}>{`This membership will be recorded as starting ${dayWindow.day} — ${clockNote}`}</Flag>
+                  <Flag tone={t.warn}>{`This membership will be recorded as starting ${dayWindow.day}. ${clockNote}`}</Flag>
                 </View>
               ) : null}
 
@@ -1141,7 +1141,7 @@ export default function OwnerMembers() {
                   {searchFailed ? (
                     <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
                       The lookup failed, so this cannot tell you whether they have an account. Do
-                      not read it as “not found” — check your connection and type the name again.
+                      not read it as “not found”. Check your connection and type the name again.
                     </Flag>
                   ) : found !== null ? (
                     <>
@@ -1167,7 +1167,7 @@ export default function OwnerMembers() {
                           // actually support.
                           ? 'Nobody matching that name.'
                           : searchCut
-                          ? `More than ${SEARCH_LIMIT} people match that, and every one this lookup saw already holds an active membership — which is not the same as everyone who matches. Type more of the name.`
+                          ? `More than ${SEARCH_LIMIT} people match that, and every one this lookup saw already holds an active membership, which is not the same as everyone who matches. Type more of the name.`
                           : 'Nobody matching, or everyone matching already holds an active membership.'}
                       </Text>
                     ) : (
@@ -1177,7 +1177,7 @@ export default function OwnerMembers() {
                             concluding a name is not in the gym. */}
                         {searchCut ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-                            The first {SEARCH_LIMIT} matches, in name order &mdash; there are more. If the person
+                            The first {SEARCH_LIMIT} matches, in name order. There are more. If the person
                             you want is not here, type more of their name.
                           </Text>
                         ) : null}
@@ -1213,7 +1213,7 @@ export default function OwnerMembers() {
                 </Flag>
               ) : plans.length === 0 ? (
                 <Text style={{ ...ty.caption, color: t.ink3 }}>
-                  No plans set up yet. The membership can still be opened without one — recurring
+                  No plans set up yet. The membership can still be opened without one; recurring
                   revenue will read as a dash until a priced plan is attached.
                 </Text>
               ) : (
@@ -1310,7 +1310,7 @@ export default function OwnerMembers() {
                     // open-ended membership, and calling it one would tell an
                     // owner their member has no term at all.
                     ? 'The end date on this membership could not be read, so this app cannot say where it moves to. Ask before relying on it.'
-                    : 'This membership has no end date, so there is nothing to extend — it simply does not run on those days.'}
+                    : 'This membership has no end date, so there is nothing to extend. It simply does not run on those days.'}
                   {had != null
                     ? ` This replaces the pause already recorded here, so the ${had === 1 ? 'day it gave' : `${had} days it gave`} back ${had === 1 ? 'is' : 'are'} taken off first rather than kept on top.`
                     : ''}
@@ -1493,7 +1493,7 @@ export default function OwnerMembers() {
               </>
             ) : (
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                This gym has not set its currency, so a payment cannot be recorded yet — an amount
+                This gym has not set its currency, so a payment cannot be recorded yet: an amount
                 with no currency is a number, and it would be stored as one permanently. An owner
                 sets the currency in Ops, and this form works from that moment on.
               </Text>

@@ -98,7 +98,7 @@ function DetailGap({ status, what, onPress }: { status: LoadStatus; what: string
   if (status === 'error') {
     return (
       <Flag>
-        The {what} behind this run could not be read. That is not a statement that there are none — the
+        The {what} behind this run could not be read. That is not a statement that there are none. The
         amount above is unaffected and is what your gym recorded paying you.
       </Flag>
     );
@@ -313,7 +313,7 @@ export function PaidRuns({ paid }: { paid: MySettlements }) {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {/* The reason is REQUIRED by `payroll_settlements_reverse_has_why`,
                           so a reversal a coach can see always says why. */}
-                      Taken back{s.reverseReason ? ` — ${s.reverseReason}` : ''}
+                      Taken back{s.reverseReason ? `: ${s.reverseReason}` : ''}
                     </Text>
                   ) : null}
                 </View>

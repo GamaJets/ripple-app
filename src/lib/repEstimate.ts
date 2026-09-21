@@ -69,7 +69,7 @@ export function readReps(text: string | number | null | undefined): RepRead {
   if (n > EPLEY_MAX_REPS) {
     return {
       ok: false,
-      reason: `Past ${EPLEY_MAX_REPS} reps this is no longer an estimate of a one-rep max — the formula simply keeps adding. Use a heavier set of ${EPLEY_CLEAN_REPS} reps or fewer.`,
+      reason: `Past ${EPLEY_MAX_REPS} reps this is no longer an estimate of a one-rep max; the formula simply keeps adding. Use a heavier set of ${EPLEY_CLEAN_REPS} reps or fewer.`,
     };
   }
   return { ok: true, reps: n };

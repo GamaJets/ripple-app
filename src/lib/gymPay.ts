@@ -280,7 +280,7 @@ export function payRateBlocker(
   // still falls through to `parseRate`, which is the right voice for it: the
   // gym HAS said what money it is in, and the difficulty is with the code.
   if (!currency && (isTyped(sessionRate) || isTyped(classRate))) {
-    return 'This gym has not set its currency, so a rate cannot say what money it is in — and a rate is what somebody is actually paid.';
+    return 'This gym has not set its currency, so a rate cannot say what money it is in, and a rate is what somebody is actually paid.';
   }
   // The currency this function already takes, now passed down. It was in scope
   // the whole time and `parseRate` was doing its own arithmetic beside it.
@@ -289,7 +289,7 @@ export function payRateBlocker(
   const c = parseRate(classRate, currency);
   if (c.kind === 'bad') return `Class rate: ${c.reason}`;
   if (c.kind === 'rate' && classKind === '') {
-    return 'Say how the class rate is counted — a flat amount for the class, or an amount per person. "80" and "8 a head" are the same number of digits and completely different money.';
+    return 'Say how the class rate is counted: a flat amount for the class, or an amount per person. "80" and "8 a head" are the same number of digits and completely different money.';
   }
   if (c.kind === 'clear' && classKind !== '') {
     return 'A way of counting class pay with no rate beside it pays nothing. Enter the rate, or clear the counting method.';
@@ -358,7 +358,7 @@ export function parseRate(input: string | null | undefined, currency: string | n
   // by the database with a 22003 after the form has closed. The ceiling is in
   // MINOR units, which is what the column holds.
   if (read.minorUnits > 2_147_483_647) {
-    return { kind: 'bad', reason: 'That is more than Repple will record as a rate — check the zeros.' };
+    return { kind: 'bad', reason: 'That is more than Repple will record as a rate. Check the zeros.' };
   }
   return { kind: 'rate', cents: read.minorUnits };
 }
@@ -680,10 +680,10 @@ export const ADJUSTMENT_KINDS: readonly AdjustmentKind[] =
  * that matters to whoever files it — one is taxable and one is not.
  */
 export const ADJUSTMENT_LABEL: Record<AdjustmentKind, string> = {
-  bonus: 'Bonus — extra pay',
-  deduction: 'Deduction — taken off pay',
-  reimbursement: 'Reimbursement — money they spent, paid back',
-  advance: 'Advance — pay already handed over',
+  bonus: 'Bonus · extra pay',
+  deduction: 'Deduction · taken off pay',
+  reimbursement: 'Reimbursement · money they spent, paid back',
+  advance: 'Advance · pay already handed over',
 };
 
 /**
@@ -915,8 +915,8 @@ export function unreadableAmountBlocker(
     + adjustments.filter((a) => a.amountCents == null).length;
   if (n === 0) return null;
   return n === 1
-    ? 'One line on this run came back without an amount on it, so this run has no total. Read it again before settling — a run settled now would pay everything except that line and record itself as the whole of it.'
-    : `${n} lines on this run came back without an amount on them, so this run has no total. Read it again before settling — a run settled now would pay everything except those lines and record itself as the whole of it.`;
+    ? 'One line on this run came back without an amount on it, so this run has no total. Read it again before settling. A run settled now would pay everything except that line and record itself as the whole of it.'
+    : `${n} lines on this run came back without an amount on them, so this run has no total. Read it again before settling. A run settled now would pay everything except those lines and record itself as the whole of it.`;
 }
 
 /* ── which period a pay line belongs to ────────────────────────────────────── */
@@ -1184,7 +1184,7 @@ export function strandedLineBlocker(
   const came = unstamped == null
     ? 'The server did not say how many came loose'
     : `${unstamped} came loose`;
-  return `This run was not taken back. Its ${what} were unstamped — ${came} — and at least one is `
+  return `This run was not taken back. Its ${what} were unstamped (${came}), and at least one is `
     + `still attached to it. Marking the run reversed now would leave that line settled against a `
     + `run that no longer paid for it, which takes it out of what the coach is owed permanently. `
     + `The settlement still stands and still reads as paid, and the run's sessions have already `

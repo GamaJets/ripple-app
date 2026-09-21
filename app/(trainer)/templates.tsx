@@ -322,7 +322,7 @@ export default function Templates() {
     // Named, never silently dropped. A coach who believes twelve people got a
     // program when eleven did is worse off than one who was refused.
     if (plan.blocked.length) {
-      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all — they have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Open them in the builder and read what they disclosed.`);
+      parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} not written to at all. They have disclosed injuries this screen cannot confirm you have read, and they are still ticked. Open them in the builder and read what they disclosed.`);
     }
     Alert.alert(report.title, parts.join('\n\n'));
   };
@@ -469,7 +469,7 @@ export default function Templates() {
               programs in it and concludes their work is gone. */}
           {tplStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Library" title="Your Saved Templates Could Not Be Read"
-              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing — your own programs are on the server and did not come back. Reopen this screen once you have signal." />
+              note="Only the built-in starters are listed below. That is not a statement that you have saved nothing. Your own programs are on the server and did not come back. Reopen this screen once you have signal." />
           ) : tplStatus === 'partial' ? (
             <PartialRead what="templates in your library" shown={templates.length} />
           ) : null}
@@ -480,7 +480,7 @@ export default function Templates() {
           {usage.withheld ? <Flag style={{ marginTop: sp.sm }}>{usage.withheld}</Flag> : null}
 
           {templates.length === 0 && tplStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No templates yet — build a program above and save it here.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>No templates yet. Build a program above and save it here.</Text>
           ) : null}
           {templates.map((tpl, i) => (
             <View key={tpl.id} style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -546,7 +546,7 @@ export default function Templates() {
                 {!isStarter(tpl.id) ? (
                   <Pressable onPress={() => Alert.alert(
                     'Delete This Template?',
-                    `“${tpl.name}” is removed from your library for good — there is no undo. Anybody already training it keeps their program, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
+                    `“${tpl.name}” is removed from your library for good. There is no undo. Anybody already training it keeps their program, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
                     [{ text: 'Keep', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => {
                       const gone = await removeTemplateFrom(tpl.id);
                       if (gone.ok) { setDelFailed((p) => (p && p.id === tpl.id ? null : p)); return; }
@@ -641,13 +641,13 @@ export default function Templates() {
                     the whole book — "Select all" over it selects part of it. */}
                 {rosterStatus === 'error' ? (
                   <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-                    note="Nobody is listed below because the roster did not come back — it does not mean you have no clients." />
+                    note="Nobody is listed below because the roster did not come back. It does not mean you have no clients." />
                 ) : rosterStatus === 'partial' ? (
                   <PartialRead what="clients on your book" shown={roster.length} />
                 ) : null}
 
                 {roster.length === 0 && rosterStatus === 'ready' ? (
-                  <Text style={{ ...ty.label, color: t.ink3 }}>No clients yet — add or invite a client first.</Text>
+                  <Text style={{ ...ty.label, color: t.ink3 }}>No clients yet. Add or invite a client first.</Text>
                 ) : null}
                 {/* ── moved above the roster ───────────────────────────────
                     Same move as the builder, for the same reason: when a block
@@ -715,7 +715,7 @@ export default function Templates() {
                         "unreadable" for ever, so it is not stored at all. */}
                     {startsOn && !isStartDate(startsOn) ? (
                       <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
-                        Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
+                        Write the date as year, month and day: 2026-09-07. Anything else is not saved, and the
                         program goes out with no start date rather than one nothing can read back.
                       </Flag>
                     ) : (
@@ -957,7 +957,7 @@ function PlatformPrograms() {
         <Text style={{ ...ty.label, color: t.ink3 }}>Reading the platform programs…</Text>
       ) : status === 'error' ? (
         <Notice tone={t.warn} kicker="Platform" title="The Platform Programs Could Not Be Read"
-          note="This is our end. Nothing has been removed and none of your own templates above are affected — pull down to try again." />
+          note="This is our end. Nothing has been removed and none of your own templates above are affected. Pull down to try again." />
       ) : signedOut ? (
         <Notice tone={t.warn} kicker="Platform" title="Sign In to See the Platform Programs"
           note="These are only readable once you are signed in, so this section was not allowed to look them up." />

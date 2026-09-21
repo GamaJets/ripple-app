@@ -134,7 +134,7 @@ export default function Offers() {
     Alert.alert(
       'Code Redeemed',
       pct == null
-        ? `${res.code ?? c} is recorded against your account and your gym has been told. We couldn’t read how much it takes off — your gym applies it to your billing and can tell you.`
+        ? `${res.code ?? c} is recorded against your account and your gym has been told. We couldn’t read how much it takes off. Your gym applies it to your billing and can tell you.`
         // `res.code ?? c`, like the branch above it. The RPC is not obliged to
         // echo the code back, and one of these two lines defended against that
         // while the other did not — so the same response produced "undefined ·
@@ -182,7 +182,7 @@ export default function Offers() {
         </Section>
 
         <Notice tone={t.ink3} kicker="How This Works" title={`${BRAND.label} records it, your gym applies it`}
-          note={`Redeeming tells your gym you have used the code. The discount comes off through their billing, not through the app — ${BRAND.label} never touches the payment.`} />
+          note={`Redeeming tells your gym you have used the code. The discount comes off through their billing, not through the app. ${BRAND.label} never touches the payment.`} />
 
 
         <Section>
@@ -210,7 +210,7 @@ export default function Offers() {
                     says so rather than printing a nought, which is a number
                     somebody would argue with reception about. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                  {r.discount == null ? 'Redeemed — we couldn’t read how much off' : `${r.discount}% off`}
+                  {r.discount == null ? 'Redeemed, but we couldn’t read how much off' : `${r.discount}% off`}
                 </Text>
               </View>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{when(r.redeemedAt)}</Text>

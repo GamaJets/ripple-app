@@ -168,7 +168,7 @@ export default function OwnerSettings() {
     if (res === 'on' || res === 'off') return;
     if (res === 'no-build') {
       Alert.alert('Not on This Build Yet',
-        'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
+        'This version of the app cannot receive push notifications at all. That needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
       return;
     }
     if (res === 'os-refused') {
@@ -182,7 +182,7 @@ export default function OwnerSettings() {
     // turned notifications off and then gets one needs to have been told it
     // might happen. The reconciler in src/ui/settings.tsx retries every launch.
     Alert.alert('Saved, but Not Confirmed',
-      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
+      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list. You may still get one until the next time you open the app. Nothing else has changed.");
   };
 
   const { tenant, loading: tenantLoading, status: tenantStatus, refresh: refreshTenant } = useTenant();
@@ -415,7 +415,7 @@ export default function OwnerSettings() {
       if (!ok) {
         // `requestAccountDeletion` returns false only when the write was
         // refused. Saying "noted" here would be inventing a promise.
-        Alert.alert('Not Requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again.');
+        Alert.alert('Not Requested', 'Your deletion request was not recorded. Nothing has changed. Check your connection and try again.');
         return;
       }
       // The re-read is CONSULTED, not merely performed.
@@ -438,8 +438,8 @@ export default function OwnerSettings() {
         'Deletion Requested',
         (after.selfRead
           ? ''
-          : 'Your account could not be re-read afterwards, so this could not confirm the request is now pending — check Deletion requests before relying on it.\n\n') +
-        'Your request is recorded and now appears in Deletion requests alongside everyone else waiting. Only a gym owner can action it — which, while you are still signed in, means you.\n\nStaying signed in lets you carry it out yourself. Signing out leaves it for another owner.',
+          : 'Your account could not be re-read afterwards, so this could not confirm the request is now pending. Check Deletion requests before relying on it.\n\n') +
+        'Your request is recorded and now appears in Deletion requests alongside everyone else waiting. Only a gym owner can action it, which, while you are still signed in, means you.\n\nStaying signed in lets you carry it out yourself. Signing out leaves it for another owner.',
         [
           { text: 'Stay Signed In', style: 'cancel' },
           { text: 'Open Deletion Requests', onPress: () => router.push('/(owner)/deletions') },
@@ -448,7 +448,7 @@ export default function OwnerSettings() {
       );
     } catch (e) {
       reportError('ownerSettings.delete', e);
-      Alert.alert('Not Requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again.');
+      Alert.alert('Not Requested', 'Your deletion request was not recorded. Nothing has changed. Check your connection and try again.');
     } finally { setDeleting(false); }
   };
 
@@ -463,7 +463,7 @@ export default function OwnerSettings() {
     Alert.alert(
       'Delete Your Owner Account?',
       'This asks for your own account and everything of yours to be permanently erased.\n\n' +
-      `It does not close ${gym ?? 'your gym'}. The gym, its members, its trainers, its classes and its records all stay — they just stay without you.\n\n` +
+      `It does not close ${gym ?? 'your gym'}. The gym, its members, its trainers, its classes and its records all stay. They just stay without you.\n\n` +
       `${queueLine()}\n\n${ownersLine()}`,
       [
         { text: 'Keep My Account', style: 'cancel' },
@@ -471,7 +471,7 @@ export default function OwnerSettings() {
           text: 'Continue', style: 'destructive', onPress: () => {
             Alert.alert(
               'This Does Not Close Your Gym',
-              `${gym ?? 'Your gym'} and everything recorded against it stays after your account is gone. If you meant to close the gym, or to hand it to someone else, do that first — deleting your account will not do it, and afterwards there may be no owner left who can.\n\n` +
+              `${gym ?? 'Your gym'} and everything recorded against it stays after your account is gone. If you meant to close the gym, or to hand it to someone else, do that first. Deleting your account will not do it, and afterwards there may be no owner left who can.\n\n` +
               'Request permanent erasure of your own account now?',
               [
                 { text: 'Keep My Account', style: 'cancel' },
@@ -497,7 +497,7 @@ export default function OwnerSettings() {
             const ok = await withdrawAccountDeletion();
             if (!ok) {
               reportError('ownerSettings.withdraw', new Error('withdraw_account_deletion did not clear the request'));
-              Alert.alert('Not Withdrawn', 'Your deletion request is still in place — nothing has changed. Check your connection and try again, or email support@repplefitness.com from the address on your account.');
+              Alert.alert('Not Withdrawn', 'Your deletion request is still in place. Nothing has changed. Check your connection and try again, or email support@repplefitness.com from the address on your account.');
               return;
             }
             // Consulted rather than assumed, exactly as `run` above now does.
@@ -510,7 +510,7 @@ export default function OwnerSettings() {
             if (after.selfRead && after.requestedAt != null) {
               Alert.alert(
                 'Not Withdrawn',
-                'The server accepted that, and your account still shows a deletion request pending — so it has NOT been withdrawn and any owner can still action it. Try again, or email support@repplefitness.com from the address on your account.',
+                'The server accepted that, and your account still shows a deletion request pending, so it has NOT been withdrawn and any owner can still action it. Try again, or email support@repplefitness.com from the address on your account.',
               );
               return;
             }
@@ -518,7 +518,7 @@ export default function OwnerSettings() {
               'Request Withdrawn',
               after.selfRead
                 ? 'Your account will be kept and nothing has been deleted.'
-                : 'Your account could not be re-read afterwards, so this could not confirm the request is gone. Nothing has been deleted — check this screen again before relying on it.',
+                : 'Your account could not be re-read afterwards, so this could not confirm the request is gone. Nothing has been deleted. Check this screen again before relying on it.',
             );
           } finally { setWithdrawing(false); }
         } },
@@ -531,7 +531,7 @@ export default function OwnerSettings() {
     : !facts.selfRead
       ? 'Whether you already have a deletion request open could not be checked. That is a read failure, not an all-clear.'
       : facts.requestedAt
-        ? `You asked to be deleted on ${day(facts.requestedAt)}. It sits in Deletion requests until an owner actions it. Only you can take it back — nobody can withdraw it on your behalf.`
+        ? `You asked to be deleted on ${day(facts.requestedAt)}. It sits in Deletion requests until an owner actions it. Only you can take it back. Nobody can withdraw it on your behalf.`
         : 'You have no deletion request open.';
 
   return (
@@ -611,7 +611,7 @@ export default function OwnerSettings() {
             </View>
           </Pressable>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Turning this off takes this phone off the list entirely. Your gym runs exactly as before — you will see what happened next time you open the app rather than as it happens, and your other devices are unaffected.
+            Turning this off takes this phone off the list entirely. Your gym runs exactly as before. You will see what happened next time you open the app rather than as it happens, and your other devices are unaffected.
           </Text>
         </Section>
 
@@ -623,7 +623,7 @@ export default function OwnerSettings() {
             onPress={exportData} />
           {facts?.requestedAt ? (
             <ListRow icon={BACK_ICON} tone="brand" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
-              note="Keep your account — possible until the deletion is carried out"
+              note="Keep your account, possible until the deletion is carried out"
               onPress={withdraw} />
           ) : (
             <ListRow icon="minus" tone="red" title={deleting ? 'Requesting…' : 'Delete My Account'}

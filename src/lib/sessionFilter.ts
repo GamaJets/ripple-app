@@ -189,7 +189,7 @@ export function emptyFilterLine(total: number, f: SessionFilter): string {
     return 'Nothing to show.';
   }
   return `None of the ${num(total)} sessions read matches what you have narrowed to. `
-    + 'They have not gone anywhere — clear the filters to see them again.';
+    + 'They have not gone anywhere. Clear the filters to see them again.';
 }
 
 /**

@@ -154,7 +154,7 @@ export function contactGapLine(status: LoadStatus, count: number, who: string): 
   switch (status) {
     case 'loading': return 'Reading who has already tried…';
     case 'error':
-      return `Who has already contacted ${who} could not be read, so this is not a statement that nobody has. Check before you call — a second call from your gym in one week is what this record exists to prevent.`;
+      return `Who has already contacted ${who} could not be read, so this is not a statement that nobody has. Check before you call: a second call from your gym in one week is what this record exists to prevent.`;
     case 'partial':
       return `Only part of the contact history came back, so whether anybody has already contacted ${who} is not established. Check before you call.`;
     case 'ready':

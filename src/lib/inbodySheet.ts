@@ -196,7 +196,7 @@ export const ASSUMED_METRIC_NOTE =
 /** What the screen says when the printout named pounds, so the member can see
  *  why the figure in the box is not the one on the paper. */
 export const CONVERTED_FROM_LB_NOTE =
-  'Your printout is in pounds — the figures were converted, so they may not read the same as the paper.';
+  'Your printout is in pounds. The figures were converted, so they may not read the same as the paper.';
 
 /* ── The same confusion, on the path nobody guarded ────────────────────────
  *

@@ -853,7 +853,7 @@ export function staffScopeNote(hasGym: boolean | null): string | null {
   }
   if (!hasGym) {
     return 'Your account is not attached to a gym, so this app can read neither a class register nor '
-      + 'a door log for anybody. Nothing below is a record of them staying away — there is no record '
+      + 'a door log for anybody. Nothing below is a record of them staying away. There is no record '
       + 'here to read.';
   }
   return null;

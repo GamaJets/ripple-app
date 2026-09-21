@@ -499,7 +499,7 @@ export default function ExerciseScreen() {
       }
       if (out === 'unsent') {
         Alert.alert('Saved on This Phone',
-          'No connection, so this set has not reached your training log yet — nothing is lost. It is saved here and goes up on its own next time you have signal.');
+          'No connection, so this set has not reached your training log yet. Nothing is lost. It is saved here and goes up on its own next time you have signal.');
         return 'unsent';
       }
       Alert.alert('Not Saved',
@@ -670,7 +670,7 @@ export default function ExerciseScreen() {
     </View>
   ) : status === 'error' ? (
     <Notice tone={t.warn} kicker="Exercise" title="This could not be read"
-      note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
+      note="Nothing below is missing because it does not exist. We could not reach the catalogue. Try again once you have signal." />
   ) : clip ? (
     <ExerciseVideo video={clip} exerciseName={exName} />
   ) : animUrl ? (
@@ -682,7 +682,7 @@ export default function ExerciseScreen() {
         stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
       {detail?.demoLicence !== 'commercial' ? (
         <View style={{ marginTop: sp.sm }}>
-          <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+          <Flag tone={t.warn}>Evaluation asset: licensed for review only, never for release.</Flag>
         </View>
       ) : null}
     </>
@@ -712,7 +712,7 @@ export default function ExerciseScreen() {
         style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
       />
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
-        The equipment, not a demonstration — this is a machine rather than a movement.
+        The equipment, not a demonstration. This is a machine rather than a movement.
       </Text>
       {detail?.source === 'repdb' ? <RepdbInlineCredit /> : null}
     </>
@@ -815,7 +815,7 @@ export default function ExerciseScreen() {
     <View style={{ marginTop: sp.lg }}>
       <Flag tone={t.ink3}>
         Your coach’s note for this movement could not be read just now. That is not a record that they have not
-        written one — pull down to try again.
+        written one. Pull down to try again.
       </Flag>
     </View>
   ) : null;
@@ -831,7 +831,7 @@ export default function ExerciseScreen() {
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cd.profileStatus === 'loading' ? t.ink3 : t.crit, marginTop: 5 }} />
       <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
         {cd.profileStatus === 'loading'
-          ? 'Still reading what you have disclosed — this movement has not been checked against your injuries yet.'
+          ? 'Still reading what you have disclosed. This movement has not been checked against your injuries yet.'
           : 'Your injuries could not be read, so this movement has not been checked against them. Go easy if something is hurt.'}
       </Text>
     </View>
@@ -938,7 +938,7 @@ export default function ExerciseScreen() {
                 onPress={() => {
                   Alert.alert(
                     'Delete This Clip?',
-                    'It goes from your coach’s screen and from this app. Deleting it is final — there is no copy anywhere else.',
+                    'It goes from your coach’s screen and from this app. Deleting it is final. There is no copy anywhere else.',
                     [
                       { text: 'Keep It', style: 'cancel' },
                       { text: 'Delete', style: 'destructive', onPress: async () => {
@@ -1106,7 +1106,7 @@ export default function ExerciseScreen() {
               <SetKindChip
                 t={nightTheme} on={bwOn} onToggle={() => setBwOn((v) => !v)}
                 label="Bodyweight Set"
-                onLabel={`Bodyweight set — the box is what you added, in ${wu}`}
+                onLabel={`Bodyweight set: the box is what you added, in ${wu}`}
                 a11yHint={bwOn
                   ? `The box holds what you added on top of your own weight, in ${wu}. Turn this off for a set on a bar or a machine.`
                   : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'}
@@ -1114,7 +1114,7 @@ export default function ExerciseScreen() {
               <SetKindChip
                 t={nightTheme} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
                 label="Timed Set"
-                onLabel="Timed set — the first box is seconds held"
+                onLabel="Timed set: the first box is seconds held"
                 a11yHint={timedOn
                   ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
                   : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'}
@@ -1167,7 +1167,7 @@ export default function ExerciseScreen() {
             {heroMedia}
             {FRAMES_ARE_UNHOSTED && frames.length ? (
               <View style={{ marginTop: sp.sm }}>
-                <Flag tone={t.warn}>Reference frames are served from the source dataset — not for release.</Flag>
+                <Flag tone={t.warn}>Reference frames are served from the source dataset, not for release.</Flag>
               </View>
             ) : null}
 
@@ -1231,7 +1231,7 @@ export default function ExerciseScreen() {
             {heroMedia}
             {FRAMES_ARE_UNHOSTED && frames.length ? (
               <View style={{ marginTop: sp.sm }}>
-                <Flag tone={t.warn}>Reference frames are served from the source dataset — not for release.</Flag>
+                <Flag tone={t.warn}>Reference frames are served from the source dataset, not for release.</Flag>
               </View>
             ) : null}
             <View style={{ marginTop: sp.lg }}>

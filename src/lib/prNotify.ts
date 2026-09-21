@@ -195,16 +195,16 @@ export function prDecision(
 ): PrDecision {
   const movement = movementKey(set.movement);
   if (!movement) {
-    return { announce: false, why: 'no movement name — the message would name no lift' };
+    return { announce: false, why: 'no movement name, so the message would name no lift' };
   }
   if (!Number.isFinite(set.kg) || set.kg <= 0) {
-    return { announce: false, why: 'no load — a bodyweight set is not compared upstream and cannot reach here' };
+    return { announce: false, why: 'no load: a bodyweight set is not compared upstream and cannot reach here' };
   }
   if (!Number.isFinite(set.reps) || set.reps <= 0) {
-    return { announce: false, why: 'no reps — there is no set to describe' };
+    return { announce: false, why: 'no reps, so there is no set to describe' };
   }
   if (!Number.isFinite(atMs)) {
-    return { announce: false, why: 'no readable clock — the once-a-day rule has no day to work in' };
+    return { announce: false, why: 'no readable clock, so the once-a-day rule has no day to work in' };
   }
   const day = prDayKey(atMs);
   if (last && last.day === day) {

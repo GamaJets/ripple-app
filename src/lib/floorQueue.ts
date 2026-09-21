@@ -367,7 +367,7 @@ export function actLine(a: FloorAct): string {
       // A retraction is its own sentence. "marked null" is what a shared branch
       // would have produced, on the list a coach reads to see what this phone
       // is still carrying.
-      if (a.outcome == null) return `${whose} — outcome taken back`;
+      if (a.outcome == null) return `${whose}: outcome taken back`;
       return `${whose} marked ${a.outcome.replace(/_/g, ' ')}`;
     }
   }
@@ -442,7 +442,7 @@ export function registerVisibilityLine(unsent: number, queueRead: boolean): stri
  * evicting somebody's Monday.
  */
 export function floorFullLine(what: string): string {
-  return `${what} was not saved and is not waiting to send. This phone is already holding as much unsent work as it will hold — get some signal so what is waiting can go up, then do this again.`;
+  return `${what} was not saved and is not waiting to send. This phone is already holding as much unsent work as it will hold. Get some signal so what is waiting can go up, then do this again.`;
 }
 
 /**
@@ -455,7 +455,7 @@ export function floorFullLine(what: string): string {
  */
 export function refusedLine(what: string, why: string | null): string {
   const tail = why && why.trim() ? ` ${why.trim().replace(/\s*$/, '')}` : '';
-  return `${what} was not saved and is not waiting to send — the server read it and declined.${tail}`;
+  return `${what} was not saved and is not waiting to send. The server read it and declined.${tail}`;
 }
 
 /**

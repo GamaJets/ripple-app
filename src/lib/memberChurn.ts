@@ -213,7 +213,7 @@ export function churnMonths(
     let churn: number | null = null;
     let churnNote = '';
     if (running) {
-      churnNote = 'still running — a partial month is not a low churn month';
+      churnNote = 'still running; a partial month is not a low churn month';
     } else if (undatedExits > 0) {
       churnNote = `${undatedExits} ended membership${undatedExits === 1 ? ' has' : 's have'} no end date, so the leavers are incomplete`;
     } else if (undatedLeavers > 0) {
@@ -229,7 +229,7 @@ export function churnMonths(
       churn = rateOf(churnable, opening);
       if (churn == null) {
         const p = pointsPerMember(opening);
-        churnNote = `${opening} on the books — one leaver would move it ${num1(p)} points`;
+        churnNote = `${opening} on the books, so one leaver would move it ${num1(p)} points`;
       }
     }
 

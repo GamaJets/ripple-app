@@ -303,7 +303,7 @@ export function lastTime(i: LastTimeInput): LastTime {
   if (i.status === 'error') {
     return {
       kind: 'error',
-      note: 'Your training history could not be read, so this cannot show what you last did on this. That is a read that failed rather than a movement you have never done — log the session as normal, it is saved either way.',
+      note: 'Your training history could not be read, so this cannot show what you last did on this. That is a read that failed rather than a movement you have never done. Log the session as normal; it is saved either way.',
     };
   }
 
@@ -314,7 +314,7 @@ export function lastTime(i: LastTimeInput): LastTime {
     if (i.status === 'partial') {
       return {
         kind: 'unknown',
-        note: 'Nothing for this movement in the sessions that came back, and your history was cut short at the sessions it could fit — so an older one may exist that is not in it.',
+        note: 'Nothing for this movement in the sessions that came back, and your history was cut short at the sessions it could fit, so an older one may exist that is not in it.',
       };
     }
     return {

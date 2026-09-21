@@ -121,7 +121,7 @@ export function rosterSearchLine(o: {
     case 'error':
       return `Your roster could not be read, so nothing was searched. Not finding “${q}” here does not mean they are not on your book.`;
     case 'loading':
-      return `Still reading your roster — this has searched only the names that have arrived so far, so “${q}” may yet turn up.`;
+      return `Still reading your roster. This has searched only the names that have arrived so far, so “${q}” may yet turn up.`;
     case 'partial':
       // Said whether or not there are matches. A coach who finds one Sarah
       // among a book that came back short has no way of knowing there is a
@@ -155,10 +155,10 @@ export function rosterPickerLine(o: { status: LoadStatus; shown: number; known: 
     case 'error':
       return `Showing the ${o.shown} clients this app still had. Your roster could not be read, so this is not a count of your book. ${tail}`;
     case 'loading':
-      return `Showing ${o.shown} of the clients read so far — your roster is still arriving. ${tail}`;
+      return `Showing ${o.shown} of the clients read so far. Your roster is still arriving. ${tail}`;
     case 'partial':
       return `Showing ${o.shown} of the ${o.known} clients that arrived. Your roster came back short, so that is not all of them and a name you cannot find here may still be on your book.`;
     case 'ready':
-      return `Showing ${o.shown} of your ${o.known} clients — ${tail.charAt(0).toLowerCase()}${tail.slice(1)}`;
+      return `Showing ${o.shown} of your ${o.known} clients. ${tail}`;
   }
 }

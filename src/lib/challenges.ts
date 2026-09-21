@@ -415,8 +415,8 @@ export function challengeActionsAllowed(status: LoadStatus): boolean {
  *  row, next to where the button was. */
 export function staleChallengeNote(status: LoadStatus): string | null {
   if (status === 'loading') return 'Checking this one…';
-  if (status === 'error') return 'Last read — joining and leaving are off until this can be checked.';
-  if (status === 'partial') return 'Part of this list came back — joining and leaving are off until all of it does.';
+  if (status === 'error') return 'Last read. Joining and leaving are off until this can be checked.';
+  if (status === 'partial') return 'Part of this list came back. Joining and leaving are off until all of it does.';
   return null;
 }
 
@@ -432,7 +432,7 @@ export function staleChallengeNote(status: LoadStatus): string | null {
  */
 export const BOARD_VISIBILITY_NOTE =
   'Joining puts your first name and your score on this board for the other '
-  + 'athletes in it. Nothing else is shared — not your surname, not your photo, '
+  + 'athletes in it. Nothing else is shared: not your surname, not your photo, '
   + 'not what you trained. Leave and you come straight off it.';
 
 /** Where the score comes from. Said on screen because a client who thinks a

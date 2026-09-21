@@ -424,7 +424,7 @@ export interface ExportOptions {
 export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<ExportResult> {
   const out: Record<string, unknown> = { app: BRAND.label, exportedAt: new Date().toISOString() };
   if (!USE_SUPABASE) {
-    out.note = `Not connected to ${BRAND.label} — nothing of yours is stored on a server to export.`;
+    out.note = `Not connected to ${BRAND.label}, so nothing of yours is stored on a server to export.`;
     out.complete = true;
     return { json: JSON.stringify(out, null, 2), complete: true, failed: [], files: [] };
   }
@@ -462,7 +462,7 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
         // "this is all of them".
         const reason = `only the first ${page.rows.length} rows could be read; there are more`;
         failed.push({ table: tbl, reason });
-        out[tbl] = { error: 'INCOMPLETE — this table has more rows than could be read in one go', reason, rows: page.rows };
+        out[tbl] = { error: 'INCOMPLETE: this table has more rows than could be read in one go', reason, rows: page.rows };
       } else {
         out[tbl] = page.rows;
       }
@@ -471,7 +471,7 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
       failed.push({ table: tbl, reason });
       // Never `[]`. An object cannot be mistaken for "you had none of these",
       // and it survives into the file somebody opens in a year.
-      out[tbl] = { error: 'NOT EXPORTED — this table could not be read', reason };
+      out[tbl] = { error: 'NOT EXPORTED: this table could not be read', reason };
     }
   }
 
@@ -498,14 +498,14 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
       if (page.truncated) {
         const reason = `only the first ${page.rows.length} rows could be read; there are more`;
         failed.push({ table: c.table, reason });
-        out[c.table] = { error: `INCOMPLETE — ${c.what} has more rows than could be read in one go`, reason, rows: page.rows };
+        out[c.table] = { error: `INCOMPLETE: ${c.what} has more rows than could be read in one go`, reason, rows: page.rows };
       } else {
         out[c.table] = page.rows;
       }
     } catch (e: any) {
       const reason = e?.message ? String(e.message) : 'could not be read';
       failed.push({ table: c.table, reason });
-      out[c.table] = { error: `NOT EXPORTED — ${c.what} could not be read`, reason };
+      out[c.table] = { error: `NOT EXPORTED: ${c.what} could not be read`, reason };
     }
   }
   if (opts.coach) out.coachingNote = COACH_OMISSION_NOTE;

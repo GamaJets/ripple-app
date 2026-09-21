@@ -87,7 +87,7 @@ export function parseGymZone(input: string | null | undefined): ZoneInput {
     return {
       kind: 'bad',
       reason:
-        'A timezone is an IANA name — Europe/London, Asia/Dubai, America/Los_Angeles. ' +
+        'A timezone is an IANA name, such as Europe/London, Asia/Dubai or America/Los_Angeles. ' +
         'Not an abbreviation such as GMT or PST, which are ambiguous, and not an offset such as +04:00, which stops being right when the clocks move.',
     };
   }

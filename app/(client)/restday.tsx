@@ -214,7 +214,7 @@ export default function RestDay() {
         <Section>
           <SectionHead title="Trained This Week" />
           {/* Label, figure, unit and sentence are one fact, and one stop. */}
-          <View accessible accessibilityLabel={['Trained This Week', [known ? fig(wk.days) : fig(null), known ? (wk.days === 1 ? 'day' : 'days') : undefined].filter(Boolean).join(' '), known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading — an empty bar here is not an empty week.' : 'Nothing this screen can count — an empty bar here is not an empty week.'].filter(Boolean).join(', ')}>
+          <View accessible accessibilityLabel={['Trained This Week', [known ? fig(wk.days) : fig(null), known ? (wk.days === 1 ? 'day' : 'days') : undefined].filter(Boolean).join(' '), known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading. An empty bar here is not an empty week.' : 'Nothing this screen can count. An empty bar here is not an empty week.'].filter(Boolean).join(', ')}>
             <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
               {/* Shrunk to fit and never wrapped: a figure broken across two lines
                   is a figure read wrong. */}
@@ -224,7 +224,7 @@ export default function RestDay() {
                 <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{known ? (wk.days === 1 ? 'day' : 'days') : undefined}</Text>
               ) : null}
             </View>
-            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading — an empty bar here is not an empty week.' : 'Nothing this screen can count — an empty bar here is not an empty week.'}</Text>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{known ? `${dl.hardWeeks} consecutive hard week${dl.hardWeeks === 1 ? '' : 's'} behind you` : logStatus === 'loading' ? 'Still reading. An empty bar here is not an empty week.' : 'Nothing this screen can count. An empty bar here is not an empty week.'}</Text>
           </View>
           {weekPct != null ? (
             <View accessible accessibilityRole="progressbar"
@@ -352,7 +352,7 @@ export default function RestDay() {
           <SectionHead title="Plan It In" />
           <Text style={{ ...ty.body, color: t.ink2 }}>
             {dl.due
-              ? 'A deload is a week, not a mood — mark the days on your calendar and the plan is there when you get to them.'
+              ? 'A deload is a week, not a mood. Mark the days on your calendar and the plan is there when you get to them.'
               : 'Pick the day now rather than deciding on the morning. Marking a rest day on your calendar records what you intend; what you actually do still comes from your training log.'}
           </Text>
           <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>

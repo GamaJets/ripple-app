@@ -216,11 +216,11 @@ export function classifyRefusal(reason: string | null | undefined, accountProven
 function deadSentence(name: string, why: DeadReason): string {
   switch (why) {
     case 'expired-no-refresh':
-      return `${name} is still set up here, but the sign-in expired and ${name} issued nothing to renew it with. Reconnect and it picks up where it left off — nothing you have recorded is lost.`;
+      return `${name} is still set up here, but the sign-in expired and ${name} issued nothing to renew it with. Reconnect and it picks up where it left off. Nothing you have recorded is lost.`;
     case 'refresh-failed':
-      return `${name} is still set up here, but Repple could not renew its sign-in. Reconnect to fix it — nothing you have recorded is lost.`;
+      return `${name} is still set up here, but Repple could not renew its sign-in. Reconnect to fix it. Nothing you have recorded is lost.`;
     default:
-      return `${name} is still set up here, but ${name} is no longer accepting Repple's sign-in. Reconnect to fix it — nothing you have recorded is lost.`;
+      return `${name} is still set up here, but ${name} is no longer accepting Repple's sign-in. Reconnect to fix it. Nothing you have recorded is lost.`;
   }
 }
 
@@ -262,7 +262,7 @@ export function describeLink(f: LinkFacts): LinkView {
       label: 'Connected',
       // Says connected first, on purpose. The complaint was a working device
       // being described as a broken one because one endpoint was shut.
-      detail: `${name} is connected and working. It will not give Repple your ${m.name} yet — Repple did not ask ${name} for permission to read it when you signed in. Reconnect ${name} to grant it; everything else keeps working either way.`,
+      detail: `${name} is connected and working. It will not give Repple your ${m.name} yet. Repple did not ask ${name} for permission to read it when you signed in. Reconnect ${name} to grant it; everything else keeps working either way.`,
       action: 'reconnect',
       tone: 'warn',
     };
@@ -307,7 +307,7 @@ export function describeLink(f: LinkFacts): LinkView {
       // built to read once with it and never twice in a row: "your Oura Ring
       // account", then "pair a device", not "pair your Oura Ring in the Oura
       // Ring app".
-      detail: `Your ${name} account is connected — and ${name} says there is no device on it yet, so there is `
+      detail: `Your ${name} account is connected, but ${name} says there is no device on it yet, so there is `
         + `nothing for Repple to read. Pair a device in the ${name} app and your figures appear here on the `
         + `next sync. Repple reads what ${name} holds, not the device directly.`,
       action: null,
@@ -322,7 +322,7 @@ export function describeLink(f: LinkFacts): LinkView {
       label: 'Connected',
       detail: `${name} is connected and has never sent Repple a figure. That is usually one of two things: `
         + `no device on the ${name} account yet, or one that has not synced. Open the ${name} app and check `
-        + `a device is paired and has synced today — Repple reads what ${name} holds, not the device directly.`,
+        + `a device is paired and has synced today. Repple reads what ${name} holds, not the device directly.`,
       action: null,
       tone: 'muted',
     };

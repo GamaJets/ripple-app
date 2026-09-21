@@ -134,7 +134,7 @@ export function conversionWarning(rec: PassConversionRecord): string | null {
   const list = names.length === 1
     ? names[0]
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `Could not read ${list}. ${broken.length === 1 ? 'That is' : 'Those are'} missing from this page rather than empty — ${broken.map((b) => b.cost).join('; ')} ${broken.length === 1 ? 'is' : 'are'} unknown here.`;
+  return `Could not read ${list}. ${broken.length === 1 ? 'That is' : 'Those are'} missing from this page rather than empty: ${broken.map((b) => b.cost).join('; ')} ${broken.length === 1 ? 'is' : 'are'} unknown here.`;
 }
 
 /* ── the words the screen is required to print ─────────────────────────────── */
@@ -148,10 +148,10 @@ export function conversionWarning(rec: PassConversionRecord): string | null {
  * themselves out of habit.
  */
 export const CAUSAL_CAVEAT =
-  'This is a sequence, not a cause. It counts people who held a pass and later took out a membership, and how long there was between the two. Nothing in these rows says the pass is why they joined — some of them would have joined anyway. Read it as "used a pass, then joined", never as "the pass converted them".';
+  'This is a sequence, not a cause. It counts people who held a pass and later took out a membership, and how long there was between the two. Nothing in these rows says the pass is why they joined. Some of them would have joined anyway. Read it as "used a pass, then joined", never as "the pass converted them".';
 
 export const MONEY_NOTE =
-  'These two figures are different kinds of money and must not be added. Pass income is cash already taken, once. The membership figure is what the memberships those holders now hold are worth per month, for as long as they last — it has not been taken and may never be. A single total would book a hypothetical year of subscription as revenue.';
+  'These two figures are different kinds of money and must not be added. Pass income is cash already taken, once. The membership figure is what the memberships those holders now hold are worth per month, for as long as they last. It has not been taken and may never be. A single total would book a hypothetical year of subscription as revenue.';
 
 /* ── one holder ────────────────────────────────────────────────────────────── */
 
@@ -705,7 +705,7 @@ export function moneyOf(
 
 function floorSentence(minGroup: number): string {
   const p = pointsPerMember(minGroup);
-  return `A percentage is shown only once ${minGroup} pass holders have decided. At ${minGroup}, one person is worth ${fmt(p ?? 0)} points of it; below that a single person moving swings the figure further than anything a gym would act on, so it would be measuring the group's size rather than the gym. Under the floor the counts are still shown — they are true. This is the same floor /retention uses, from the same constant.`;
+  return `A percentage is shown only once ${minGroup} pass holders have decided. At ${minGroup}, one person is worth ${fmt(p ?? 0)} points of it; below that a single person moving swings the figure further than anything a gym would act on, so it would be measuring the group's size rather than the gym. Under the floor the counts are still shown, and they are true. This is the same floor /retention uses, from the same constant.`;
 }
 
 /** Names the passes that could never have been answered for. Null when every
@@ -717,7 +717,7 @@ export function attributionSentence(
 ): string | null {
   if (anonymous <= 0) return null;
   const share = issued > 0 ? Math.round((anonymous / issued) * 100) : 0;
-  let s = `${anonymous} of ${issued} passes (${share}%) went to somebody with no account. There is no key to look those people up by in the roster, so whether they joined later is UNANSWERABLE — not "no". They are excluded from the figures below rather than counted as failures, and they cannot be counted as people either: two anonymous passes may be one person twice.`;
+  let s = `${anonymous} of ${issued} passes (${share}%) went to somebody with no account. There is no key to look those people up by in the roster, so whether they joined later is UNANSWERABLE, not "no". They are excluded from the figures below rather than counted as failures, and they cannot be counted as people either: two anonymous passes may be one person twice.`;
   if (share >= 50) {
     s += ' Over half the passes are in this position, so the figures below describe a minority of what the gym actually handed out. Taking a name and an email at the desk is what would change that.';
   }
@@ -730,7 +730,7 @@ export function attributionSentence(
 /** Names the holders whose story has not finished. Null when none. */
 export function undecidedSentence(counts: HolderCounts | null): string | null {
   if (!counts || counts.undecided <= 0) return null;
-  return `${counts.undecided} holder${counts.undecided === 1 ? '' : 's'} still ${counts.undecided === 1 ? 'has' : 'have'} a live pass and ${counts.undecided === 1 ? 'has' : 'have'} not joined. ${counts.undecided === 1 ? 'That is' : 'Those are'} undecided, not lost, and ${counts.undecided === 1 ? 'is' : 'are'} outside the figure — a pass handed out last week has not failed. Note the asymmetry this creates while any pass is live: a holder who has already joined is counted even though their pass is still running, so the figure will move as the live passes run out.`;
+  return `${counts.undecided} holder${counts.undecided === 1 ? '' : 's'} still ${counts.undecided === 1 ? 'has' : 'have'} a live pass and ${counts.undecided === 1 ? 'has' : 'have'} not joined. ${counts.undecided === 1 ? 'That is' : 'Those are'} undecided, not lost, and ${counts.undecided === 1 ? 'is' : 'are'} outside the figure. A pass handed out last week has not failed. Note the asymmetry this creates while any pass is live: a holder who has already joined is counted even though their pass is still running, so the figure will move as the live passes run out.`;
 }
 
 function headlineOf(x: {
@@ -744,14 +744,14 @@ function headlineOf(x: {
   if (x.passes.issued === 0) return null;
   const head = `${x.passes.issued} pass${x.passes.issued === 1 ? '' : 'es'} issued, ${x.redeemedPasses} used at least once.`;
   if (!x.memberRead || !x.counts) {
-    return `${head} The membership roster could not be read, so whether any holder later joined is unknown here — not none.`;
+    return `${head} The membership roster could not be read, so whether any holder later joined is unknown here, not none.`;
   }
   const c = x.counts;
   if (c.identified === 0) {
     return `${head} None of them carries an account, so no holder can be matched to a membership.`;
   }
   if (c.decided === 0) {
-    return `${head} ${c.identified} went to somebody with an account, and not one of those has decided yet — every pass is either still live or its holder was already a member. There is nothing to report a rate over.`;
+    return `${head} ${c.identified} went to somebody with an account, and not one of those has decided yet. Every pass is either still live or its holder was already a member. There is nothing to report a rate over.`;
   }
   const rate = x.joinedAfterRate == null ? '' : ` (${Math.round(x.joinedAfterRate * 100)}%)`;
   let out = `${head} ${c.joinedAfter} of ${c.decided} holders whose pass has run out later took out a membership${rate}.`;
@@ -768,12 +768,12 @@ export function suppressionSentence(
   minGroup: number = MIN_COHORT_FOR_RATE,
 ): string | null {
   if (c.suppressed === 'no-denominator') {
-    return 'No pass holder has decided yet — every identified holder either still has a live pass or was already a member. A rate over nobody is not 0%, it is nothing.';
+    return 'No pass holder has decided yet. Every identified holder either still has a live pass or was already a member. A rate over nobody is not 0%, it is nothing.';
   }
   if (c.suppressed === 'too-few') {
     const n = c.counts?.decided ?? 0;
     const p = pointsPerMember(n);
-    return `${n} holder${n === 1 ? '' : 's'} ${n === 1 ? 'has' : 'have'} decided — one of them is worth ${fmt(p ?? 0)} points, so no percentage is shown. The floor is ${minGroup}. The counts beside it are still true.`;
+    return `${n} holder${n === 1 ? '' : 's'} ${n === 1 ? 'has' : 'have'} decided. One of them is worth ${fmt(p ?? 0)} points, so no percentage is shown. The floor is ${minGroup}. The counts beside it are still true.`;
   }
   return null;
 }
@@ -932,21 +932,21 @@ export function expiringExclusions(x: ExpiringPasses): string | null {
   if (x.anonymous > 0) {
     parts.push(
       `${x.anonymous} ${x.anonymous === 1 ? 'pass is' : 'passes are'} held by a walk-in with no `
-      + 'account, so there is nobody here to ring — and they cannot be counted as people either, '
+      + 'account, so there is nobody here to ring, and they cannot be counted as people either, '
       + 'since two anonymous passes may be one person twice',
     );
   }
   if (x.neverExpire > 0) {
     parts.push(
       `${x.neverExpire} live ${x.neverExpire === 1 ? 'pass has' : 'passes have'} no expiry at all, `
-      + 'which is a decision the gym made rather than a missing date — nothing on those runs out',
+      + 'which is a decision the gym made rather than a missing date. Nothing on those runs out',
     );
   }
   if (x.unreadableExpiry > 0) {
     parts.push(
       `${x.unreadableExpiry} live ${x.unreadableExpiry === 1 ? 'pass carries' : 'passes carry'} a `
-      + 'last day this app cannot read as a date, so whether it is close is UNKNOWN rather than no '
-      + '— those are outside the list and are not thereby safe',
+      + 'last day this app cannot read as a date, so whether it is close is UNKNOWN rather than no, '
+      + 'so those are outside the list and are not thereby safe',
     );
   }
   if (!parts.length) return null;

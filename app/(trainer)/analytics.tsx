@@ -252,7 +252,7 @@ export default function TrainerAnalytics() {
    *  null. Said in full sentences rather than left to a short list, on the
    *  reasoning `unassessedNote` in src/lib/segments.ts sets out. */
   const handAddedNote: string | null = handAdded > 0
-    ? `${handAdded} ${handAdded === 1 ? 'client is' : 'clients are'} not in this and could not be: you added them by hand, so there is no account behind them and no training record to judge them by. They are not being counted as having stopped — they were never asked about.`
+    ? `${handAdded} ${handAdded === 1 ? 'client is' : 'clients are'} not in this and could not be: you added them by hand, so there is no account behind them and no training record to judge them by. They are not being counted as having stopped. They were never asked about.`
     : null;
   const clients = rosterWhole ? roster.length : null;
 
@@ -417,8 +417,8 @@ export default function TrainerAnalytics() {
    */
   const adhGap = !rosterWhole || _adhKnown.length ? null
     : roster.length === 0
-      ? 'unknown — there is nobody on this roster to have an adherence figure'
-      : 'unknown — not one of the ' + roster.length + ' clients on this roster has a check-in on record'
+      ? 'unknown: there is nobody on this roster to have an adherence figure'
+      : 'unknown: not one of the ' + roster.length + ' clients on this roster has a check-in on record'
         + (handAdded ? ' (' + handAdded + ' of them were added by hand and have no Repple account to record one with)' : '')
         + ', so state no adherence figure and do not say anyone is on track or at risk';
   // Clients with no check-in are counted as unknown, not as on-track. Null when
@@ -723,7 +723,7 @@ export default function TrainerAnalytics() {
     const ctx = {
       sessionsDeliveredThisMonth: sessionsMo,
       sessionsStillUnmarked: unmarkedMo,
-      revenueAtOwnRate: revenue ?? 'unknown — no session rate set',
+      revenueAtOwnRate: revenue ?? 'unknown: no session rate set',
       // Was `takenOne ?? (takenMonth.reason ?? 'nothing recorded')`. The reason
       // arm is honest and stays; the bare fallback behind it was reached in
       // three different states and described one of them.
@@ -746,10 +746,10 @@ export default function TrainerAnalytics() {
           ? 'taken in ' + takenPots.length + ' separate currencies this month, which are never added into one figure: '
             + takenPots.map((pt) => minorMoney(pt.minorUnits, pt.currency)).filter(Boolean).join(', ')
           : takenHoles > 0
-            ? 'unknown — ' + takenHoles + ' payment' + (takenHoles === 1 ? '' : 's') + ' recorded this month '
+            ? 'unknown: ' + takenHoles + ' payment' + (takenHoles === 1 ? '' : 's') + ' recorded this month '
               + 'carr' + (takenHoles === 1 ? 'ies' : 'y') + ' no currency or no amount, so nothing can be totalled: '
               + 'state no takings figure and do not say they took nothing'
-            : '0 — every takings read for this month (packages, subscription renewals and payments recorded by hand) '
+            : '0: every takings read for this month (packages, subscription renewals and payments recorded by hand) '
               + 'came back whole and holds no payment, so this is a counted zero rather than a missing figure'),
       // Was `myCur ?? 'unknown — the gym has not set one'` — one string for six
       // states, four of which it describes wrongly, and after part 940 the
@@ -767,7 +767,7 @@ export default function TrainerAnalytics() {
       avgAdherence: avgAdh != null
         ? _adhKnown.length === roster.length
           ? avgAdh + '%'
-          : avgAdh + '% — averaged over the ' + _adhKnown.length + ' of ' + roster.length
+          : avgAdh + '%, averaged over the ' + _adhKnown.length + ' of ' + roster.length
             + ' clients who have a check-in on record, so it is not the whole book'
         : adhGap,
       // Null rather than a number when the training record did not come back.
@@ -786,11 +786,11 @@ export default function TrainerAnalytics() {
       atRiskClients: !rosterWhole ? null
         : driftSubjects.length === 0
           ? (roster.length
-            ? 'unknown — all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
+            ? 'unknown: all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
               + 'account, so there is no training record to judge any of them by and nobody has been assessed'
             : null)
           : atRisk === null
-            ? (dr.note ? 'unknown — ' + dr.note : null)
+            ? (dr.note ? 'unknown: ' + dr.note : null)
             : handAdded
               // The denominator travels with the number whenever it is not the
               // whole book, for the same reason `avgAdherence` now carries one.
@@ -810,9 +810,9 @@ export default function TrainerAnalytics() {
     // `askAboutMyBusiness`, not `askCoach`. Nothing in `ctx` above names a
     // person today, and the filter is what keeps that true the day somebody
     // adds `atRiskNames` to it — see the coach half of src/lib/coachShare.ts.
-    const answer = await askAboutMyBusiness([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers: one line on money and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific. RULES. sessionsDeliveredThisMonth counts only sessions whose outcome was recorded as completed — never describe it as sessions booked. sessionsStillUnmarked are sessions that happened and have no outcome recorded: they are neither delivered nor missed, so never add them to the delivered figure, and if there are any, say they are waiting to be marked. revenueAtOwnRate is those delivered sessions multiplied by the coach own session rate and is the coach own arithmetic, not a payout. takenThisMonth is money clients were actually charged across packages, subscription renewals and payments recorded by hand: it is already written in its own currency, quote it exactly as given, and NEVER add it to revenueAtOwnRate, because a package and the sessions delivered out of it are the same money twice. For any other amount write the ISO code from the currency field before the figure, never a currency symbol, and if currency is unknown state no amount at all. If howTheyCoach says entirely online, lead on takenThisMonth and do not suggest anything that needs a room or a booking calendar.' }], ctx);
+    const answer = await askAboutMyBusiness([{ role: 'user', content: 'You are my fitness-coaching business assistant. Write a short Monday digest (3-4 sentences) from these numbers: one line on money and clients, one on roster health (on-track vs at-risk), and one concrete action to grow or retain. Encouraging and specific. RULES. sessionsDeliveredThisMonth counts only sessions whose outcome was recorded as completed. Never describe it as sessions booked. sessionsStillUnmarked are sessions that happened and have no outcome recorded: they are neither delivered nor missed, so never add them to the delivered figure, and if there are any, say they are waiting to be marked. revenueAtOwnRate is those delivered sessions multiplied by the coach own session rate and is the coach own arithmetic, not a payout. takenThisMonth is money clients were actually charged across packages, subscription renewals and payments recorded by hand: it is already written in its own currency, quote it exactly as given, and NEVER add it to revenueAtOwnRate, because a package and the sessions delivered out of it are the same money twice. For any other amount write the ISO code from the currency field before the figure, never a currency symbol, and if currency is unknown state no amount at all. If howTheyCoach says entirely online, lead on takenThisMonth and do not suggest anything that needs a room or a booking calendar.' }], ctx);
     setDigestBusy(false);
-    setDigest(answer.ok ? answer.reply : 'Could not generate the digest right now — the AI backend may be unavailable.');
+    setDigest(answer.ok ? answer.reply : 'Could not generate the digest right now. The AI backend may be unavailable.');
   };
   // `revenue` is already null unless the sessions read was whole, and that
   // matters more here than anywhere else on the screen: this hook WRITES. A
@@ -922,7 +922,7 @@ export default function TrainerAnalytics() {
     if (rosterStatus === 'loading') return 'Reading your roster…';
     if (!rosterWhole) {
       return rosterStatus === 'partial'
-        ? 'Your roster came back short, so this is not drawn — a figure over part of your book is not a figure about it.'
+        ? 'Your roster came back short, so this is not drawn. A figure over part of your book is not a figure about it.'
         : 'Your roster could not be read, so this is not drawn. It is unknown, not zero.';
     }
     if (read.status === 'loading') return 'Reading what your clients recorded…';
@@ -932,7 +932,7 @@ export default function TrainerAnalytics() {
         : 'Everyone on your roster was added by hand, so there is no account behind them and nothing of theirs to read. They are not being counted as having done nothing.';
     }
     if (read.status === 'error') return 'Their records could not be read, so this is not drawn. It is unknown, not zero.';
-    if (read.status === 'partial') return 'More was recorded in this window than one read returns, so this is not drawn — a figure over part of it would be stated as the whole.';
+    if (read.status === 'partial') return 'More was recorded in this window than one read returns, so this is not drawn. A figure over part of it would be stated as the whole.';
     return null;
   };
   const windowGap = rangeGap(curRead);
@@ -1269,7 +1269,7 @@ export default function TrainerAnalytics() {
                       go and ring people, and a hedged instruction is still an
                       instruction. */}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                    {atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.
+                    {atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping. Check in before they churn.
                     {atRiskRevenue == null
                       ? (sessionFee == null
                           ? ' Set a session rate in your profile to see what that is worth.'
@@ -1324,7 +1324,7 @@ export default function TrainerAnalytics() {
               {rosterStatus === 'loading'
                 ? 'Reading your roster…'
                 : rosterStatus === 'partial'
-                  ? 'Your roster came back short, so the split between on-track, watch and at-risk is not drawn — a share of part of your book is not a share of it.'
+                  ? 'Your roster came back short, so the split between on-track, watch and at-risk is not drawn. A share of part of your book is not a share of it.'
                   : 'Your roster could not be read, so the split between on-track, watch and at-risk is not drawn. It is unknown, not empty.'}
             </Text>
           ) : (<>
@@ -1395,7 +1395,7 @@ export default function TrainerAnalytics() {
               {rosterStatus === 'loading' || dr.drift === null
                 ? 'Reading who has stopped training…'
                 : !rosterWhole
-                  ? 'Your roster did not come back whole, so who is drifting cannot be worked out — this is not a clean bill of health for your book.'
+                  ? 'Your roster did not come back whole, so who is drifting cannot be worked out. This is not a clean bill of health for your book.'
                   /* The truncated read gets its own sentence, and it is the
                      provider's — `dr.note`. A read that came back at the row
                      ceiling is not a roster that came back short, and sending a
@@ -1403,7 +1403,7 @@ export default function TrainerAnalytics() {
                      problem that is not there. Said second because a short
                      roster is the more fundamental of the two and is the one
                      they can do something about. */
-                  : (dr.note ?? 'More activity is on record than one request returns, so who is drifting cannot be worked out from it — this is not a clean bill of health for your book.')}
+                  : (dr.note ?? 'More activity is on record than one request returns, so who is drifting cannot be worked out from it. This is not a clean bill of health for your book.')}
             </Text>
           ) : atRisk.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Everyone is holding their own pattern.</Text>
@@ -1634,7 +1634,7 @@ export default function TrainerAnalytics() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {payingClients === 1
                 ? 'Value per client is over the one client who trained with you this month, not over the roster beside it.'
-                : `Value per client is over the ${payingClients} clients who trained with you this month, not over the ${clients == null ? 'roster' : `roster of ${clients}`} beside it. Somebody who has left keeps the sessions they took, and a client you added by hand has no bookings to count — so the two are different sets of people and dividing one by the other is not this figure.`}
+                : `Value per client is over the ${payingClients} clients who trained with you this month, not over the ${clients == null ? 'roster' : `roster of ${clients}`} beside it. Somebody who has left keeps the sessions they took, and a client you added by hand has no bookings to count, so the two are different sets of people and dividing one by the other is not this figure.`}
             </Text>
           ) : null}
         </Section>
@@ -1677,14 +1677,14 @@ export default function TrainerAnalytics() {
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
               {priced(goals.revenue) == null
                 ? noCur('your monthly revenue target cannot be shown as an amount')
-                : `Monthly revenue target ${priced(goals.revenue)} — progress needs ${sessionsMo == null ? (sessionsStatus === 'loading' ? 'a session count that is still being read' : 'a session count that did not come back whole') : 'a session rate in your profile'}.`}
+                : `Monthly revenue target ${priced(goals.revenue)}. Progress needs ${sessionsMo == null ? (sessionsStatus === 'loading' ? 'a session count that is still being read' : 'a session count that did not come back whole') : 'a session rate in your profile'}.`}
             </Text>
           ) : null}
           {/* Same withholding for the client target. A bar drawn at 0% tells a
               coach with a full book that nobody is on it. */}
           {goals.clients > 0 && clients == null ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              Client target {goals.clients} — your roster {rosterStatus === 'loading' ? 'is still being read' : 'did not come back whole'}, so there is no progress to draw against it.
+              Client target {goals.clients}. Your roster {rosterStatus === 'loading' ? 'is still being read' : 'did not come back whole'}, so there is no progress to draw against it.
             </Text>
           ) : null}
           {goalRows.map((g) => {
@@ -1777,10 +1777,10 @@ export default function TrainerAnalytics() {
             // The months live on the account now (part 129) — a phone that
             // cannot reach them has not established that there are none.
             <Flag tone={t.crit}>
-              Your recorded months could not be read, so this is not "no history yet" — there may be months on your account this phone has not got. Nothing has been lost; open this screen again once you have signal.
+              Your recorded months could not be read, so this is not "no history yet". There may be months on your account this phone has not got. Nothing has been lost; open this screen again once you have signal.
             </Flag>
           ) : (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet — a snapshot is recorded each month, and the trend appears from the second one.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Not enough history yet. A snapshot is recorded each month, and the trend appears from the second one.</Text>
           )}
           {/* A chart drawn from the device cache alone is real as far as it
               goes and is not the whole of the account. Said under the line
@@ -1788,7 +1788,7 @@ export default function TrainerAnalytics() {
               genuinely recorded would be its own kind of wrong. */}
           {chartMonths >= 2 && revHist.status === 'error' ? (
             <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-              Drawn from what this phone recorded — your account's months could not be read just now, so there may be more than this.
+              Drawn from what this phone recorded. Your account's months could not be read just now, so there may be more than this.
             </Flag>
           ) : null}
         </Section>
@@ -1879,8 +1879,8 @@ export default function TrainerAnalytics() {
               {figuresWhole
                 ? 'An AI Monday summary of your coaching business.'
                 : figureStatus === 'loading'
-                  ? 'An AI Monday summary of your coaching business — it needs the figures above, which are still being read.'
-                  : 'An AI Monday summary of your coaching business. It is written from the figures above, and those could not be worked out from this read — a digest composed from them would sound just as certain and be about nothing.'}
+                  ? 'An AI Monday summary of your coaching business. It needs the figures above, which are still being read.'
+                  : 'An AI Monday summary of your coaching business. It is written from the figures above, and those could not be worked out from this read, and a digest composed from them would sound just as certain and be about nothing.'}
             </Text>
           )}
           {/* Withheld rather than run on nulls. The digest comes back as
@@ -1900,7 +1900,7 @@ export default function TrainerAnalytics() {
             accessibilityLabel={digestBusy
               ? 'Writing your weekly business digest'
               : !figuresWhole
-                ? 'Generate digest — unavailable, because the figures above could not all be read'
+                ? 'Generate digest, unavailable because the figures above could not all be read'
                 : digest ? 'Write the digest again' : 'Generate your weekly business digest'}
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sp.sm,
                      backgroundColor: t.surface2, borderRadius: radius.sm, paddingVertical: 12, opacity: digestBusy || !figuresWhole ? 0.4 : 1 }}>
@@ -1943,7 +1943,7 @@ export default function TrainerAnalytics() {
             first way onward a coach met. */}
         <Section>
           <ListRow icon="trophy" tone="amber" title="Leaderboard"
-            note="Your clients ranked by consistency — a comparison, not an outcome"
+            note="Your clients ranked by consistency: a comparison, not an outcome"
             onPress={() => router.push('/(trainer)/leaderboard')} />
         </Section>
 

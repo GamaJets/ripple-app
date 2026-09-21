@@ -133,7 +133,7 @@ export const UNKNOWN_REASON_NOTE =
 export function chargesLine(status: 'loading' | 'ready' | 'partial' | 'error'): string {
   if (status === 'loading') return 'Reading what has been charged to you…';
   if (status === 'error') {
-    return 'We couldn’t read your charges. That is not a statement that you have none — anything already recorded still stands.';
+    return 'We couldn’t read your charges. That is not a statement that you have none. Anything already recorded still stands.';
   }
   if (status === 'partial') {
     return 'There are more charges on your record than we can read at once. Every one listed is real; this is not all of them.';

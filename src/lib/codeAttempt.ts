@@ -90,7 +90,7 @@ export interface CodeAttempt {
  */
 export const CODE_UNREACHED_MESSAGE =
   'We could not reach Repple, so nothing was sent and your code has not been used up. '
-  + 'This is our end rather than the code — try again in a moment.';
+  + 'This is our end rather than the code. Try again in a moment.';
 
 /**
  * The fallback when a refusal arrives with nothing quotable on it.

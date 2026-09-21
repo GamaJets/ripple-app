@@ -126,7 +126,7 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
         <SetKindChip
           t={t} on={bwOn} onToggle={() => setBwOn((v) => !v)}
           label="Bodyweight Set"
-          onLabel={`Bodyweight set — the box above is what you added, in ${unit}`}
+          onLabel={`Bodyweight set: the box above is what you added, in ${unit}`}
           a11yHint={bwOn
             ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
             : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'}
@@ -134,7 +134,7 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
         <SetKindChip
           t={t} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
           label="Timed Set"
-          onLabel="Timed set — the first box is seconds held"
+          onLabel="Timed set: the first box is seconds held"
           a11yHint={timedOn
             ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
             : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'}

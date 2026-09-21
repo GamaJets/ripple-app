@@ -106,13 +106,13 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
         // Which record proves it, because "the door says so" and "your coach
         // ticked you off" are different kinds of evidence and a member querying
         // this with reception needs to know which one to ask about.
-        label: o.register && o.door ? 'You were there — register and door'
-          : o.register ? 'You were there — marked by your gym'
-          : 'You were there — logged at the door',
+        label: o.register && o.door ? 'You were there · register and door'
+          : o.register ? 'You were there · marked by your gym'
+          : 'You were there · logged at the door',
         tone: 'good',
       };
     case 'unmarked':
-      return { label: 'Not recorded — your gym did not mark this either way', tone: 'quiet' };
+      return { label: 'Not recorded. Your gym did not mark this either way', tone: 'quiet' };
     case 'missed':
       // Names the REGISTER, because that is the thing a member who disputes
       // this has to ask their gym about. `unmarked` above and this are the same
@@ -138,7 +138,7 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
       // the row that holds it.
       return { label: 'You cancelled this inside your gym’s notice period.', tone: 'quiet' };
     case 'upcoming':
-      return { label: 'Booked — still to come', tone: 'ahead' };
+      return { label: 'Booked · still to come', tone: 'ahead' };
     case 'waitlisted':
       return { label: 'You were on the waitlist', tone: 'quiet' };
     case 'unknown':
@@ -318,7 +318,7 @@ export default function Attendance() {
                 // from four days ago, and the member can only judge what they
                 // are looking at if they are told which.
                 ? (cachedNote ?? 'What is below is what we had before the read failed. It is not confirmed current, and there may be visits missing from it.')
-                : 'This is NOT a record of you never coming in — it is a record we could not open. Pull down to try again.'}>
+                : 'This is NOT a record of you never coming in. It is a record we could not open. Pull down to try again.'}>
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void reload(); }} /></View>
             </Notice>
           </Section>
@@ -348,12 +348,12 @@ export default function Attendance() {
           source={countable ? `${num(days.length)} days on record` : undefined}
           detail={status === 'loading' ? 'Reading your attendance…'
             : !countable
-              ? 'No average while the record is incomplete — a rate over part of it would be a number about a gym you do not go to.'
+              ? 'No average while the record is incomplete. A rate over part of it would be a number about a gym you do not go to.'
               : rhythm.perWeek == null
                 ? (rhythm.firstDay
                   ? `Your record starts ${shortDay(rhythm.firstDay)}. There is not yet a finished week inside it to average, so no rate is shown.`
                   : 'Nothing recorded yet, so there is no average to show. A zero here would be a claim, not a blank.')
-                : `Averaged over the ${rhythm.countedWeeks} finished week${rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(rhythm.firstDay!)}. This week is left out of it — it is not over.`}>
+                : `Averaged over the ${rhythm.countedWeeks} finished week${rhythm.countedWeeks === 1 ? '' : 's'} since ${shortDay(rhythm.firstDay!)}. This week is left out of it because it is not over.`}>
           {status === 'loading' ? null : (
             <>
               {/* The kit's DayBars, drawn by hand: same 18pt rounded bars and
@@ -459,7 +459,7 @@ export default function Attendance() {
             // tell that a coach would act on.
             status === 'ready' ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                Your gym has not recorded you coming in. That may simply mean it does not scan people at the door and your classes have not been marked off — plenty of gyms record neither. It is not a record of you staying away.
+                Your gym has not recorded you coming in. That may simply mean it does not scan people at the door and your classes have not been marked off. Plenty of gyms record neither. It is not a record of you staying away.
               </Text>
             ) : null
           ) : (
@@ -482,7 +482,7 @@ export default function Attendance() {
                   <View style={{ paddingVertical: sp.md }}>
                     <Text style={{ ...ty.body, color: t.ink }}>A Class We Could Not Read</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                      Booked {dayLabel(e.booking?.bookedAt ?? null)} — the booking date, not the class date.
+                      Booked {dayLabel(e.booking?.bookedAt ?? null)}. This is the booking date, not the class date.
                     </Text>
                   </View>
                 </View>
@@ -494,9 +494,9 @@ export default function Attendance() {
 
         {/* Folded: whose record this is and how to have it corrected is read
             once, and the approved look keeps paragraphs behind a control. */}
-        <Expandable title="About This Record" note="Your gym’s own register — reception can correct it">
+        <Expandable title="About This Record" note="Your gym’s own register. Reception can correct it">
           <Text style={{ ...ty.label, color: t.ink2 }}>
-            This is your gym’s own record. A class with nothing marked against it means nobody took the register — it does not mean you were not there. If something here looks wrong, reception can correct it.
+            This is your gym’s own record. A class with nothing marked against it means nobody took the register. It does not mean you were not there. If something here looks wrong, reception can correct it.
           </Text>
         </Expandable>
       </ScrollView>

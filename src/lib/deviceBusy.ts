@@ -251,7 +251,7 @@ export function candidateTimeLabel(c: BusyCandidate): string {
   const to = c.endMin >= MINS_PER_DAY
     ? 'midnight'
     : fmtClock(Math.floor(c.endMin / 60), c.endMin % 60);
-  return `${from} — ${to}`;
+  return `${from} – ${to}`;
 }
 
 /**

@@ -283,7 +283,7 @@ export default function MyTraining() {
    *  null and no route this app has would change it. Saying so is honest;
    *  offering a door that is not there is not. The COUNT is unaffected. */
   const noWaterGoal =
-    'There is no daily water goal on a coach account — that target lives on a client record, and '
+    'There is no daily water goal on a coach account. That target lives on a client record, and '
     + 'you do not have one. The count is still yours and still real; there is just nothing to fill '
     + 'it against.';
 
@@ -344,14 +344,14 @@ export default function MyTraining() {
       // still not IN the log, so no exercise is minted: the library is shared,
       // and its rows are earned by a workout the server has accepted.
       Alert.alert('Saved on This Phone',
-        `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet — nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and go up on their own the next time you have signal.`);
+        `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet. Nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and go up on their own the next time you have signal.`);
     } else {
       // The server read this and declined it, so it is not recorded and it is
       // not waiting either. Saying "logged" here would be the same event as a
       // real save; saying "it will be gone at the next launch" would be the
       // same event as the one above.
       Alert.alert('Not Saved',
-        'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box — sending it again as it is will be rejected again.');
+        'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box. Sending it again as it is will be rejected again.');
     }
   };
 
@@ -509,12 +509,12 @@ export default function MyTraining() {
       // workout the server has accepted.
       setExercise(''); setSetCount(''); setLadder([]); setOneGroup(null);
       Alert.alert('Saved on This Phone',
-        `No connection, so ${stored} has not reached your training log yet — nothing is lost. It is saved here and goes up on its own the next time you have signal.`);
+        `No connection, so ${stored} has not reached your training log yet. Nothing is lost. It is saved here and goes up on its own the next time you have signal.`);
     } else {
       // The boxes are deliberately NOT cleared. What was typed is the only copy
       // of it that exists, and emptying the form would take that away on the
       // one path where the coach may want to try again.
-      setProblem('Not saved — your training log rejected this lift, so it is not recorded and it is not waiting to send. Saving it again as it is will be rejected again.');
+      setProblem('Not saved. Your training log rejected this lift, so it is not recorded and it is not waiting to send. Saving it again as it is will be rejected again.');
     }
   };
 
@@ -531,7 +531,7 @@ export default function MyTraining() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         if (!(await removeWorkout(e))) {
-          Alert.alert('Not Removed', `${e.exercise} is still in your log — we could not reach the server to take it out.`);
+          Alert.alert('Not Removed', `${e.exercise} is still in your log. We could not reach the server to take it out.`);
         }
       } },
     ]);
@@ -673,7 +673,7 @@ export default function MyTraining() {
           {status === 'error' ? (
             <Section>
               <Notice tone={t.warn} kicker="Your Training" title="We Couldn’t Read Your Training Log"
-                note="Your own sessions are safe — this screen cannot see them right now. Nothing has been reset, and an empty list below means unknown rather than none.">
+                note="Your own sessions are safe. This screen cannot see them right now. Nothing has been reset, and an empty list below means unknown rather than none.">
                 <View style={{ marginTop: sp.lg }}><Cta label="Try Again" wide onPress={reload} /></View>
               </Notice>
             </Section>
@@ -860,7 +860,7 @@ export default function MyTraining() {
               // somebody who has not said yet, and the sentence says what
               // saying it will do rather than telling them off for it.
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Say how many sets, and a row appears for each one — its own reps, its own weight, ticked off as you do it.
+                Say how many sets, and a row appears for each one, with its own reps, its own weight, ticked off as you do it.
               </Text>
             )}
             {problem ? (
@@ -923,7 +923,7 @@ export default function MyTraining() {
               // coach's own day that a failed read gives nobody the standing to
               // make.
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Whether you logged anything today is not known — your log could not be read.
+                Whether you logged anything today is not known. Your log could not be read.
               </Text>
             ) : !whole ? (
               // Nothing in hand for today, out of a log that came back short.
@@ -934,7 +934,7 @@ export default function MyTraining() {
               // incomplete read is unknown, and it is the branch above — not the
               // one below — that this resembles.
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Nothing of your own is in hand for today, but your log came back short — anything you
+                Nothing of your own is in hand for today, but your log came back short. Anything you
                 logged without signal may not be among the entries this screen could read.
               </Text>
             ) : (
@@ -959,7 +959,7 @@ export default function MyTraining() {
               <Text style={{ ...ty.body, color: t.ink3 }}>Reading your log…</Text>
             ) : !known ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Your own past sessions could not be read. They have not gone anywhere — this screen
+                Your own past sessions could not be read. They have not gone anywhere. This screen
                 cannot see them right now.
               </Text>
             ) : !whole ? (
@@ -968,7 +968,7 @@ export default function MyTraining() {
               // is a claim about the whole of a coach's history, and a read that
               // came back short is not the standing to make it.
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Nothing of your own is in hand to list here, but your log came back short — this is
+                Nothing of your own is in hand to list here, but your log came back short. This is
                 not the same as never having trained.
               </Text>
             ) : (
@@ -996,7 +996,7 @@ export default function MyTraining() {
               as current. Null is the only value that makes a panel say it
               could not read. */}
           <Expandable title="Your Records"
-            note="Your best set for every movement you have logged — barbell, bodyweight and holds.">
+            note="Your best set for every movement you have logged: barbell, bodyweight and holds.">
             <OwnRecordsPanel
               log={status === 'error' ? null : log}
               status={status}
@@ -1058,7 +1058,7 @@ export default function MyTraining() {
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
               Your own training, broken down by the muscles the exercise catalogue names for each
               movement you logged. Nothing here is about a client, and nothing here is a judgement
-              about how recovered you are — it is what you logged and when you logged it.
+              about how recovered you are. It is what you logged and when you logged it.
             </Text>
             <MuscleWorkPanel
               log={status === 'error' ? null : log}
@@ -1122,7 +1122,7 @@ export default function MyTraining() {
           <Section>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               Logging a session you ran for someone else? That goes on their record, from their card on
-              the Clients tab — not here.
+              the Clients tab, not here.
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
               <Icon name="people" size={14} color={t.ink3} />

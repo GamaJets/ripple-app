@@ -180,7 +180,7 @@ export function readOwnCadence(
         ? 'Reading your training log…'
         // Never "you have not trained". The log is unknown, not empty, and this
         // is the sentence src/ui/loadStatus.ts was written about.
-        : 'Your training log didn’t load, so there is no usual gap to show. That is a read that failed — not a quiet few weeks.',
+        : 'Your training log didn’t load, so there is no usual gap to show. That is a read that failed, not a quiet few weeks.',
     };
   }
 
@@ -262,7 +262,7 @@ function unsettledLine(c: Cadence, windowDays: number): string {
     case 'no-events':
       return `Nothing logged in ${window}, so there is no usual gap to measure against yet.`;
     case 'too-few':
-      return `Only ${days(c.activeDays)} logged in ${window} — too few to say what your usual gap between sessions is.`;
+      return `Only ${days(c.activeDays)} logged in ${window}, too few to say what your usual gap between sessions is.`;
     case 'too-short':
       return 'Your logged sessions don’t cover enough time yet to settle on a usual gap. It fills in as you log.';
     case 'too-spread':
@@ -292,7 +292,7 @@ function pacedLine(c: Cadence, gap: string, since: string): string {
   // The fallback states the two facts and draws no arithmetic between them,
   // which is the honest thing to print when the third number is missing.
   if (c.state === 'due' || c.overdueDays == null) {
-    return `You log a session ${gap}. The last one was ${since} ago — just past it, which is the ordinary width of a week.`;
+    return `You log a session ${gap}. The last one was ${since} ago, just past it, which is the ordinary width of a week.`;
   }
   return `You log a session ${gap}. The last one was ${since} ago, which is ${days(c.overdueDays)} past your own usual gap.`;
 }

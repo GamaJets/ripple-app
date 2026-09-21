@@ -202,7 +202,7 @@ export function reportCategoryLabel(id: ReportCategory): string {
 export const REPORT_EXPLAINER =
   'What you report is recorded with the message itself, so it stays on record even if it is deleted afterwards. '
   + 'The other person is not told that you reported them, and they cannot see or remove it. '
-  + 'Reporting on its own does not stop them messaging you — block them as well if you want that.';
+  + 'Reporting on its own does not stop them messaging you. Block them as well if you want that.';
 
 /** Confirmation after the row exists. Never shown on the strength of a call
  *  that returned without raising: the caller checks for an id first. */

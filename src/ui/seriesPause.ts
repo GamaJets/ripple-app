@@ -180,7 +180,7 @@ export async function resumeSeries(skipId: string): Promise<{ resumed: boolean; 
     if (!r.resumed) {
       return {
         resumed: false, created: null,
-        error: 'Nothing was resumed. Open this screen again — that pause may already have been lifted somewhere else.',
+        error: 'Nothing was resumed. Open this screen again; that pause may already have been lifted somewhere else.',
       };
     }
     // `created` is how many sessions came back, and `resumedLine` reads 0 as

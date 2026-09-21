@@ -72,7 +72,7 @@ export const MAX_NOTE = 2000;
  *  every other blocker in this codebase. */
 export function noteBlocker(body: string | null | undefined): string | null {
   const b = (body ?? '').trim();
-  if (!b) return 'Write the note first — an empty note records nothing and cannot be taken back once it is in the list.';
+  if (!b) return 'Write the note first. An empty note records nothing and cannot be taken back once it is in the list.';
   if (b.length > MAX_NOTE) {
     return `That is ${b.length} characters and the limit is ${MAX_NOTE}. Notes are appended and never edited, so put the rest in a second one rather than cutting this short.`;
   }
@@ -141,7 +141,7 @@ export function withLegacy(
  * reads as a stored value nobody could make sense of, which is what it is.
  */
 export function noteAttribution(n: MemberNote, zone?: string | null): string {
-  if (n.legacy) return 'written before notes were kept — no author or date';
+  if (n.legacy) return 'written before notes were kept, no author or date';
   const who = n.writtenByName ?? 'somebody whose account has since gone';
   if (!n.writtenAt) return who;
   return `${who}, ${gymDateTimeText(n.writtenAt, zone) ?? n.writtenAt}`;
@@ -219,6 +219,6 @@ export async function addMemberNote(
     .select('id');
   if (error) throw error;
   if (!data || (Array.isArray(data) && data.length === 0)) {
-    throw new Error('That note was not saved — the database accepted nothing back. It is not on the record, so write it again once you know why.');
+    throw new Error('That note was not saved. The database accepted nothing back. It is not on the record, so write it again once you know why.');
   }
 }

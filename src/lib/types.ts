@@ -49,9 +49,9 @@ export const COACHING_MODE_LABEL: Record<CoachingMode, string> = {
  *  travels with the option everywhere it is offered — "Hybrid" on its own is
  *  a word, not a choice anybody can make. */
 export const COACHING_MODE_NOTE: Record<CoachingMode, string> = {
-  online: 'Your coach programs and checks in remotely — no sessions to book.',
-  inperson: 'Your coach trains you in the room — book sessions with them.',
-  hybrid: 'Both — book sessions with them, and check in for the weeks you train alone.',
+  online: 'Your coach programs and checks in remotely. No sessions to book.',
+  inperson: 'Your coach trains you in the room. Book sessions with them.',
+  hybrid: 'Both: book sessions with them, and check in for the weeks you train alone.',
   solo: 'No coach. AI plans and tools, and nothing sent to anybody.',
 };
 
@@ -59,7 +59,7 @@ export const COACHING_MODE_NOTE: Record<CoachingMode, string> = {
 export const COACHED_MODE_NOTE_COACH: Record<CoachedMode, string> = {
   online: 'You program and check in remotely. They get no booking calendar.',
   inperson: 'You train them in the room. They can book your open slots.',
-  hybrid: 'Both — they book your slots, and check in for the weeks they train alone.',
+  hybrid: 'Both: they book your slots, and check in for the weeks they train alone.',
 };
 
 /** Whether this person has sessions with their coach to book. The booking

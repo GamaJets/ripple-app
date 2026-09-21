@@ -85,7 +85,7 @@ export function deloadCheck(log: WorkoutEntry[], now: number = Date.now(), thres
     due,
     hardWeeks: hard,
     reason: due
-      ? `${hard} straight weeks of solid training — a lighter week now lets your body adapt and come back stronger.`
+      ? `${hard} straight weeks of solid training. A lighter week now lets your body adapt and come back stronger.`
       : `${hard} consecutive hard week${hard === 1 ? '' : 's'}.`,
   };
 }

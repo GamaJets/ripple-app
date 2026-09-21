@@ -107,7 +107,7 @@ export function progressionOffer(i: ProgressionInput): ProgressionOffer {
     // who has been pressing 80 for a year.
     return {
       kind: 'gap',
-      note: 'Their training could not be read, so there is nothing here to base a load on. That is a read that failed rather than a client with no history — reopen the screen once you have signal.',
+      note: 'Their training could not be read, so there is nothing here to base a load on. That is a read that failed rather than a client with no history. Reopen the screen once you have signal.',
     };
   }
   // No read was issued at all — a hand-added client with no account, or a build

@@ -351,7 +351,7 @@ export function oneOffDiscount(
         // `money` is not the answer either: there is nothing here to take
         // decimal places from, and inventing some would be the defect this file
         // is written against.
-        why: `${pct}% of ${priceCents} minor units is ${(priceCents * pct) / 100}, which is not a whole number of them — and Stripe does not document how it rounds a percentage discount, so what it would actually charge cannot be known before the session is created`,
+        why: `${pct}% of ${priceCents} minor units is ${(priceCents * pct) / 100}, which is not a whole number of them, and Stripe does not document how it rounds a percentage discount, so what it would actually charge cannot be known before the session is created`,
       };
     }
     return { ok: true, discountCents, totalCents: priceCents - discountCents };
@@ -372,7 +372,7 @@ export function oneOffDiscount(
  * question can be answered from it.
  */
 export const CODE_CANNOT_COME_OFF_THIS_ONE =
-  'That code does not come off this one. Nothing has been charged — buy it at the price shown, or check with your coach which of the things they sell it is for.';
+  'That code does not come off this one. Nothing has been charged. Buy it at the price shown, or check with your coach which of the things they sell it is for.';
 
 /* ── the code itself ──────────────────────────────────────────────────────── */
 
@@ -399,7 +399,7 @@ export function promoBlocker(code: string, percentOff: number, target: PromoTarg
   const out: string[] = [];
   const c = normaliseCode(code);
   if (!c) {
-    out.push('Type a code. It is what your client types at checkout, so letters and numbers only — anything else is dropped.');
+    out.push('Type a code. It is what your client types at checkout, so letters and numbers only. Anything else is dropped.');
   } else if (c.length < 3) {
     out.push('That code is too short to be worth typing. Three characters is the shortest Stripe will take.');
   }
@@ -637,7 +637,7 @@ export function promoUseLine(p: PromoCode): string {
  * precisely the reason written above.
  */
 export const PROMO_IS_A_PERCENTAGE =
-  'A code takes a percentage off, never a fixed amount. Repple is white-labelled, so a fixed amount would need a currency and would do nothing at all for a client paying in a different one — a percentage is the same offer whatever you charge in.';
+  'A code takes a percentage off, never a fixed amount. Repple is white-labelled, so a fixed amount would need a currency and would do nothing at all for a client paying in a different one. A percentage is the same offer whatever you charge in.';
 
 /**
  * Where the client types it, so the coach knows what to tell them.
@@ -661,7 +661,7 @@ export const PROMO_IS_TYPED_AT_CHECKOUT =
  * is Stripe, and there is only one copy.
  */
 export const PROMO_LIVES_AT_STRIPE =
-  'These live in your own Stripe account rather than in Repple, which is why the number of times each has been used is exact — there is one copy of it and Stripe keeps it. Withdrawing one here archives it at Stripe.';
+  'These live in your own Stripe account rather than in Repple, which is why the number of times each has been used is exact: there is one copy of it and Stripe keeps it. Withdrawing one here archives it at Stripe.';
 
 /**
  * That withdrawing does not un-discount anybody.
@@ -672,4 +672,4 @@ export const PROMO_LIVES_AT_STRIPE =
  * the discount for existing subscribers has a surprise coming a year later.
  */
 export const PROMO_WITHDRAW_IS_FORWARD_ONLY =
-  'Withdrawing a code stops anybody new using it. It does not change what somebody already subscribed on it pays — they keep the price they signed up at until their subscription ends, which is what they agreed to.';
+  'Withdrawing a code stops anybody new using it. It does not change what somebody already subscribed on it pays. They keep the price they signed up at until their subscription ends, which is what they agreed to.';

@@ -82,7 +82,7 @@ export const PAYMENT_TERMS: ReadonlyArray<PaymentTerm> = [
   { id: 'on_issue', name: 'Due on the day you issue it', label: 'On the day', days: 0, note: 'Payment on receipt. It is due the day you issue it.' },
   { id: 'net7', name: 'Due in 7 days', label: '7 days', days: 7, note: 'A week. Common where somebody is paying session by session.' },
   { id: 'net14', name: 'Due in 14 days', label: '14 days', days: 14, note: 'A fortnight.' },
-  { id: 'net30', name: 'Due in 30 days', label: '30 days', days: 30, note: 'Thirty days — what most businesses mean by "a month" on an invoice.' },
+  { id: 'net30', name: 'Due in 30 days', label: '30 days', days: 30, note: 'Thirty days: what most businesses mean by "a month" on an invoice.' },
 ];
 
 /** A term by id, or null for one this build does not know. Null rather than a
@@ -166,9 +166,9 @@ export function dueTermLine(issuedOn: string, dueOn: string | null | undefined):
   }
   if (days < 0) {
     const n = -days;
-    return `That is ${n} ${n === 1 ? 'day' : 'days'} BEFORE the day you are issuing this, so it cannot be a due date — an invoice does not fall due before it exists.`;
+    return `That is ${n} ${n === 1 ? 'day' : 'days'} BEFORE the day you are issuing this, so it cannot be a due date. An invoice does not fall due before it exists.`;
   }
-  if (days === 0) return `Due on the day you issue it — payment on receipt, ${invoiceDayLabel(to)}.`;
+  if (days === 0) return `Due on the day you issue it: payment on receipt, ${invoiceDayLabel(to)}.`;
   return `Due in ${days} ${days === 1 ? 'day' : 'days'}, on ${invoiceDayLabel(to)}.`;
 }
 
@@ -183,7 +183,7 @@ export function dueTermLine(issuedOn: string, dueOn: string | null | undefined):
  * made once rather than two made a week apart.
  */
 export const TERM_STARTS_THE_CHASING =
-  'Whichever term you pick is the day this starts counting as overdue on your own lists, and you will not need to set a separate day to chase it from — that is only for invoices you issue with no due date at all. It goes on the document as a date, not as a term.';
+  'Whichever term you pick is the day this starts counting as overdue on your own lists, and you will not need to set a separate day to chase it from. That is only for invoices you issue with no due date at all. It goes on the document as a date, not as a term.';
 
 /**
  * That no term is chosen for the coach.

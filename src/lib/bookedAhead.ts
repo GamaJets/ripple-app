@@ -173,7 +173,7 @@ export function bookedAheadNote(
   const shown = a.startsAt.slice(0, Math.max(1, max));
   const rest = n - shown.length;
   const dates = shown.map(when).join(', ');
-  return rest > 0 ? `${head} — ${dates} and ${rest} more.` : `${head} — ${dates}.`;
+  return rest > 0 ? `${head}: ${dates} and ${rest} more.` : `${head}: ${dates}.`;
 }
 
 /** The line when nobody has anything in the window. A real answer, and one a

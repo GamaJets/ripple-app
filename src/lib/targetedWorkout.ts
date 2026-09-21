@@ -329,7 +329,7 @@ export function targetedProgram(
 
   const names = fit.map((s) => s.target.name);
   const note = [
-    noKit ? 'Every movement here needs no equipment at all — no bar, no bands, no bench.' : null,
+    noKit ? 'Every movement here needs no equipment at all: no bar, no bands, no bench.' : null,
     targetedCoverageNote(coverage, perDay),
   ].filter(Boolean).join(' ');
 

@@ -216,8 +216,8 @@ function OutingRow({ o, unit, first }: { o: ExerciseOuting; unit: WeightUnit; fi
         </Text>
       ) : o.sets.length ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-          No load could be put on any set of this day, so there is no tonnage and no estimated max —
-          bodyweight work with no weight on record reads exactly like this.
+          No load could be put on any set of this day, so there is no tonnage and no estimated max.
+          Bodyweight work with no weight on record reads exactly like this.
         </Text>
       ) : null}
       {/* Folded, not deduplicated. The live record holds one squat session
@@ -228,8 +228,8 @@ function OutingRow({ o, unit, first }: { o: ExerciseOuting; unit: WeightUnit; fi
           day block: report the shape of the record rather than pick a winner. */}
       {o.entryCount > 1 ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-          Saved in {o.entryCount} separate entries that day, and the sets above are all of them —
-          if the same work was saved twice, this day reads high.
+          Saved in {o.entryCount} separate entries that day, and the sets above are all of them.
+          If the same work was saved twice, this day reads high.
         </Text>
       ) : null}
       {/* What the tonnage does not cover, said beside it. A bodyweight set is
@@ -348,7 +348,7 @@ export function ExerciseTrail({ summary, log, status, windowDays, unit, voice, h
         <Text style={{ ...ty.body, color: t.ink2 }}>
           Logged on {dayCount(summary.days)}{readQualifier(summary.recordDays != null, windowDays)}
           {summary.lastDay ? `, most recently ${dayLabel(summary.lastDay)}` : ''}, with no sets
-          recorded against any of them — so there are no reps or loads to follow here. Cardio is
+          recorded against any of them, so there are no reps or loads to follow here. Cardio is
           logged as time and distance rather than as sets, and it reads exactly like this.
         </Text>
       </View>
@@ -445,7 +445,7 @@ export function ExerciseTrail({ summary, log, status, windowDays, unit, voice, h
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
         A movement is stated here and not judged. Whether more load, more reps or the same
         weight held is the right direction depends on the block being run, which this screen
-        does not know — so nothing above is marked as good or bad, and a lift that has not
+        does not know, so nothing above is marked as good or bad, and a lift that has not
         moved is said to have not moved rather than given a sign.
       </Text>
 
@@ -470,7 +470,7 @@ export function ExerciseTrail({ summary, log, status, windowDays, unit, voice, h
         <View style={{ marginTop: sp.md }}>
           <Flag tone={t.warn}>
             {windowDays != null
-              ? `This read asked for the last ${windowDays} days only, and it came back complete — so every day below is the whole of that window. Training before it is still on record and is in nothing above: the best and the earliest here are the best and the earliest of these ${windowDays} days, not of a lifetime.`
+              ? `This read asked for the last ${windowDays} days only, and it came back complete, so every day below is the whole of that window. Training before it is still on record and is in nothing above: the best and the earliest here are the best and the earliest of these ${windowDays} days, not of a lifetime.`
               : 'This read did not ask for the whole record, so the best and the earliest above are the best and the earliest of what was asked for rather than of a lifetime.'}
           </Flag>
         </View>
@@ -490,7 +490,7 @@ export function ExerciseTrail({ summary, log, status, windowDays, unit, voice, h
       ) : null}
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
         Grouped by the day it was done on. Sets logged twice on one day are one day here, so a
-        movement saved in two goes — or saved twice by a double tap — is not read as two
+        movement saved in two goes (or saved twice by a double tap) is not read as two
         sessions. Loads are shown in {unit}.
       </Text>
     </View>
@@ -603,7 +603,7 @@ export function ExerciseHistoryPanel({ log, status, windowDays, unit, voice, his
             : undefined}
       />
       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-        Pick a movement to see every day it appears in — the sets, the reps and the load as they
+        Pick a movement to see every day it appears in: the sets, the reps and the load as they
         were recorded, newest first, with how the top set has moved.
       </Text>
 
@@ -630,8 +630,8 @@ export function ExerciseHistoryPanel({ log, status, windowDays, unit, voice, his
 
       {matches.length === 0 ? (
         <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
-          Nothing logged matches that. {voice.they} may have written it down under another name —
-          the search matches the words in it, in any order.
+          Nothing logged matches that. {voice.they} may have written it down under another name.
+          The search matches the words in it, in any order.
         </Text>
       ) : (
         <View style={{ marginTop: sp.sm }}>
@@ -644,7 +644,7 @@ export function ExerciseHistoryPanel({ log, status, windowDays, unit, voice, his
 
       {matches.length > LIST_CAP ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-          Showing {LIST_CAP} of the {matches.length} movements {covers ? 'on record' : 'read'} — type
+          Showing {LIST_CAP} of the {matches.length} movements {covers ? 'on record' : 'read'}. Type
           above to narrow it.
         </Text>
       ) : null}

@@ -46,5 +46,5 @@ export const SIGN_OUT_UNCONFIRMED_TITLE = 'Sign out not confirmed';
 /** The body. See the header for every clause in it. */
 export const SIGN_OUT_UNCONFIRMED_HANDSET =
   'The sign-in service could not be reached, so this phone may still be signed in. Open the app '
-  + 'again and sign out once more if the account is still there — and do not hand this phone to '
+  + 'again and sign out once more if the account is still there, and do not hand this phone to '
   + 'anybody until it is gone.';

@@ -432,7 +432,7 @@ export function readMinorAmount(typed: string | null | undefined, currency: stri
   // setting that already has a value in it.
   if (dp == null) {
     const shown = cur.length > 24 ? cur.slice(0, 24) + '…' : cur;
-    return { ok: false, reason: `The currency recorded here is “${shown}”, which is not a currency code, so there is no way to tell how many places an amount in it has. Set it to a three-letter code — GBP, JPY, KWD — and this will take an amount.` };
+    return { ok: false, reason: `The currency recorded here is “${shown}”, which is not a currency code, so there is no way to tell how many places an amount in it has. Set it to a three-letter code (GBP, JPY, KWD) and this will take an amount.` };
   }
   const raw = String(typed ?? '').trim().replace(/\s/g, '');
   if (!raw) return { ok: false, reason: 'Type an amount.' };
@@ -442,7 +442,7 @@ export function readMinorAmount(typed: string | null | undefined, currency: stri
   // different number from the one on the screen.
   if (!/^[0-9]*[.,]?[0-9]*$/.test(raw)) {
     const shape = dp === 0 ? '500' : '12.' + '5'.padEnd(dp, '0');
-    return { ok: false, reason: `That is not an amount. Type the figure in digits — ${shape}, for instance — with no symbol and no spaces.` };
+    return { ok: false, reason: `That is not an amount. Type the figure in digits (${shape}, for instance) with no symbol and no spaces.` };
   }
   const sep = raw.search(/[.,]/);
   const intPart = sep === -1 ? raw : raw.slice(0, sep);
@@ -458,7 +458,7 @@ export function readMinorAmount(typed: string | null | undefined, currency: stri
     // it grew up on, and neither reading may be chosen on their behalf.
     return {
       ok: false,
-      reason: `${cur} has ${dp} decimal place${dp === 1 ? '' : 's'}, and that has ${fracPart.length}. Type the amount without a thousands separator — 1234.50 rather than 1,234.50.`,
+      reason: `${cur} has ${dp} decimal place${dp === 1 ? '' : 's'}, and that has ${fracPart.length}. Type the amount without a thousands separator: 1234.50 rather than 1,234.50.`,
     };
   }
   const digits = (intPart || '0') + fracPart.padEnd(dp, '0');

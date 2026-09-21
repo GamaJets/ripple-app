@@ -199,7 +199,7 @@ export default function Progression() {
             {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{unitNote} Load the nearest thing your gym has.</Text> : null}
             <View style={{ marginTop: sp.md }}>
               <Expandable title="How Targets Are Worked Out">
-                <Text style={{ ...ty.caption, color: t.ink3 }}>Double-progression: clear the top of the rep range on every working set, then the weight goes up and reps reset. These are guidance — log what you actually lift.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Double-progression: clear the top of the rep range on every working set, then the weight goes up and reps reset. These are guidance. Log what you actually lift.</Text>
               </Expandable>
             </View>
           </Section>

@@ -86,7 +86,7 @@ export function zonesNote(reach: WatchReach): string | null {
       return null;
     case 'connected-silent':
       return 'Your watch is connected and has not sent a reading yet. An Apple Watch only streams '
-        + 'heart rate while a workout is running ON THE WATCH — start one there. If it still says '
+        + 'heart rate while a workout is running ON THE WATCH. Start one there. If it still says '
         + 'nothing, open the iPhone’s Health app ▸ Sharing ▸ Apps and check Repple may read Heart Rate.';
     case 'none':
       return 'Connect a watch under Train → Watch & Devices and your zones appear here live while you train.';
@@ -135,10 +135,10 @@ export function liveHrNote(reach: WatchReach, calories: boolean): string | null 
     case 'stale':
       return null;
     case 'connected-silent':
-      return 'Your watch is connected and has not sent a reading yet — an Apple Watch only '
+      return 'Your watch is connected and has not sent a reading yet. An Apple Watch only '
         + 'streams heart rate while a workout is running on the watch. Start one there.';
     case 'none':
-      return `Connect an Apple Watch under Watch & Devices, then start a workout on the watch — `
-        + `that is what streams live heart rate${calories ? ' and calories' : ''}.`;
+      return `Connect an Apple Watch under Watch & Devices, then start a workout on the watch. `
+        + `That is what streams live heart rate${calories ? ' and calories' : ''}.`;
   }
 }

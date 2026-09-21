@@ -163,5 +163,5 @@ export function logWhenLine(day: string, hour: number, now: Date, who: string): 
   const same = day === isoDay(now);
   return same
     ? `Goes into ${who}'s record as today at ${hourLabel(hour)}. The day is what their log, their streak, their weekly report and plan-versus-actual all count it on.`
-    : `Goes into ${who}'s record as ${when} — not as the moment you are typing it. The day is what their log, their streak, their weekly report and plan-versus-actual all count it on.`;
+    : `Goes into ${who}'s record as ${when}, not as the moment you are typing it. The day is what their log, their streak, their weekly report and plan-versus-actual all count it on.`;
 }

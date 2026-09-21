@@ -90,8 +90,8 @@ import { numUpTo } from './format';
 export interface CardSize { key: CardShape; label: string; note: string; w: number; h: number }
 export type CardShape = 'post' | 'story';
 export const CARD_SIZES: CardSize[] = [
-  { key: 'post', label: 'Post', note: '4:5 — feed', w: 1080, h: 1350 },
-  { key: 'story', label: 'Story', note: '9:16 — stories, Reels, TikTok', w: 1080, h: 1920 },
+  { key: 'post', label: 'Post', note: '4:5 · feed', w: 1080, h: 1350 },
+  { key: 'story', label: 'Story', note: '9:16 · stories, Reels, TikTok', w: 1080, h: 1920 },
 ];
 
 export const cardSize = (shape: CardShape): CardSize =>
@@ -190,8 +190,8 @@ export type BlockReason = 'unread' | 'empty' | 'consent' | 'nothing-picked';
  * only for not knowing which of the two situations this is.
  */
 export const BRAND_UNREAD_NOTE =
-  'Your gym could not be read, so this card has no name to carry. It is not made rather than made with the wrong one — '
-  + 'a card that went out with your own account name where your gym\'s should be cannot be taken back. Pull to refresh and it will build.';
+  'Your gym could not be read, so this card has no name to carry. It is not made rather than made with the wrong one. '
+  + 'A card that went out with your own account name where your gym\'s should be cannot be taken back. Pull to refresh and it will build.';
 
 /**
  * The logo is set, and the picture of it did not arrive.
@@ -441,7 +441,7 @@ export function weekCard(input: WeekInput): CardBuild {
   if (sessions == null && minutes == null && clients == null) {
     return {
       ok: false, reason: 'unread',
-      why: 'Repple could not read your sessions just now, so there are no figures it can honestly put on a card. Try again in a moment — nothing has been posted.',
+      why: 'Repple could not read your sessions just now, so there are no figures it can honestly put on a card. Try again in a moment. Nothing has been posted.',
     };
   }
 
@@ -458,7 +458,7 @@ export function weekCard(input: WeekInput): CardBuild {
   if (!stats.length) {
     return {
       ok: false, reason: 'empty',
-      why: `You have no sessions marked as delivered in ${lower(input.spanLabel)}. Mark a session’s outcome and it will appear here — Repple will not make a card out of a week that has not happened.`,
+      why: `You have no sessions marked as delivered in ${lower(input.spanLabel)}. Mark a session’s outcome and it will appear here. Repple will not make a card out of a week that has not happened.`,
     };
   }
 
@@ -474,7 +474,7 @@ export function weekCard(input: WeekInput): CardBuild {
   // — reads as a template that was filled in rather than as something a coach
   // wrote, which is the whole difference between a post and an ad.
   const caption = [
-    `${headline} — ${lower(input.spanLabel)}.`,
+    `${headline}, ${lower(input.spanLabel)}.`,
     // `lower()` is for the coach's span label, where "August" has to survive.
     // Stat labels are common nouns this module wrote itself, so they are simply
     // lower-cased — running them through the proper-noun heuristic produced
@@ -621,7 +621,7 @@ export function resultCard(input: ResultInput, consent: ResultConsent): CardBuil
   const brand = String(input.brand ?? '').trim() || 'Repple';
 
   const caption = [
-    `${capitalise(who)} — ${lower(span)}.`,
+    `${capitalise(who)}, ${lower(span)}.`,
     figures.map((f) => `${f.label}: ${f.value}`).join(' · '),
     note,
   ].filter(Boolean).join('\n');

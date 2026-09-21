@@ -277,7 +277,7 @@ export function planFanOut(
   }
   if (!members.length) {
     return origin === 'written'
-      ? NOTHING('nobody', 'Nobody Ticked Yet', 'Tick everybody who should get this — one client or twenty — and it goes out to all of them at once.')
+      ? NOTHING('nobody', 'Nobody Ticked Yet', 'Tick everybody who should get this, one client or twenty, and it goes out to all of them at once.')
       : NOTHING('nobody', 'Nobody In This Group Yet', 'Add the clients who should be on this program, then assign it to all of them at once.');
   }
 
@@ -311,7 +311,7 @@ export function planFanOut(
     label: blocked.length ? `Assign to ${send.length} of ${members.length}` : null,
     reason: null,
     heldNote: blocked.length
-      ? `${listNames(blocked.map((b) => b.name))} ${blocked.length === 1 ? 'is' : 'are'} held and will NOT be assigned — they have disclosed injuries this screen cannot confirm you have read. Everyone else gets it now; open them individually when you have.`
+      ? `${listNames(blocked.map((b) => b.name))} ${blocked.length === 1 ? 'is' : 'are'} held and will NOT be assigned. They have disclosed injuries this screen cannot confirm you have read. Everyone else gets it now; open them individually when you have.`
       : null,
     send,
     blocked,
@@ -530,5 +530,5 @@ export function bespokeNote(rows: readonly MemberVersion[], names: (clientId: st
   const bespoke = rows.filter((r) => r.state === 'diverged' && !r.behind);
   if (!bespoke.length) return null;
   const who = listNames(bespoke.map((r) => names(r.clientId)));
-  return `${who} ${bespoke.length === 1 ? 'is' : 'are'} on a program that is not any version of this one — someone edited ${bespoke.length === 1 ? 'their' : 'their'} copy. Assigning to the whole group would overwrite that.`;
+  return `${who} ${bespoke.length === 1 ? 'is' : 'are'} on a program that is not any version of this one: someone edited ${bespoke.length === 1 ? 'their' : 'their'} copy. Assigning to the whole group would overwrite that.`;
 }

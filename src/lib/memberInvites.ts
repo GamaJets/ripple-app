@@ -346,14 +346,14 @@ export function inviteMessage(
   );
   lines.push('');
   lines.push(`Download the Repple app and sign up with this exact address: ${invite.email}`);
-  lines.push('That is how the invitation finds you — an account made with a different address will not see it.');
+  lines.push('That is how the invitation finds you. An account made with a different address will not see it.');
 
   const days = daysUntilExpiry(invite as MemberInvite);
   if (days != null) {
     lines.push('');
     lines.push(
       days <= 0
-        ? 'This invitation has lapsed — tell us and we will reopen it.'
+        ? 'This invitation has lapsed. Tell us and we will reopen it.'
         : `The invitation is open for another ${days} day${days === 1 ? '' : 's'}.`,
     );
   }

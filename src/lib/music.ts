@@ -217,7 +217,7 @@ export function generatePlaylist(p: GenParams, salt = 0): Playlist {
   const minutes = Math.round(tracks.length * AVG_TRACK_MIN);
   const intensityWord = p.intensity >= 3 ? 'high-intensity' : p.intensity === 2 ? 'moderate' : 'steady';
   return {
-    title: `${MODE_LABEL[p.mode]} · ${intensityWord} — ${p.minutes} min`,
+    title: `${MODE_LABEL[p.mode]} · ${intensityWord} · ${p.minutes} min`,
     subtitle: `${tracks.length} tracks · ~${minutes} min · ${intensityWord}, ${lo === hi ? `energy ${lo}` : `energy ${lo}–${hi}`}`,
     minutes,
     tracks,

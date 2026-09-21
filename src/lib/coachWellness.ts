@@ -264,7 +264,7 @@ export interface Voice {
  *  they have — that is the half a coach is not entitled to infer. */
 export const notSharedLine = (v: Voice): string =>
   `${v.they} ${v.have} not shared their sleep and water logs. Whether there are any is not ` +
-  'something this screen can tell you — it is theirs to change, in their own app, under ' +
+  'something this screen can tell you. It is theirs to change, in their own app, under ' +
   'Watch & Devices.';
 
 /** What to say when the read failed. Never "there are none". */

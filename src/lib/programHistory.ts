@@ -301,7 +301,7 @@ export function blockSpanLine(e: BlockEntry, dayName: (day: string) => string): 
   if (e.fromDay && e.toDay) {
     return e.ranDays == null
       ? `Assigned ${dayName(e.fromDay)}, ${ended} ${dayName(e.toDay)}.`
-      : `Assigned ${dayName(e.fromDay)}, ${ended} ${dayName(e.toDay)} — ${e.ranDays} day${s(e.ranDays)}.`;
+      : `Assigned ${dayName(e.fromDay)}, ${ended} ${dayName(e.toDay)} (${e.ranDays} day${s(e.ranDays)}).`;
   }
   if (e.toDay) {
     return `${ended === 'taken off it' ? 'Taken off it' : 'Replaced'} ${dayName(e.toDay)}. When it was assigned is not on record.`;

@@ -362,6 +362,6 @@ export function refusedForThread(
 export function refusedBodyNote(r: RefusedMessage, now?: number): string {
   const ago = refusedAgeClause(r.at, now);
   return r.body.trim()
-    ? `${ago}Not delivered. Your words are below — copy them before you dismiss this.`
+    ? `${ago}Not delivered. Your words are below. Copy them before you dismiss this.`
     : `${ago}Not delivered. This phone could not read the message back, so the words are not recoverable.`;
 }

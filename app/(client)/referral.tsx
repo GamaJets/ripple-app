@@ -255,7 +255,7 @@ export default function Referral() {
 
           {status === 'error' ? (
             <Text style={{ ...ty.label, color: t.ink2 }}>
-              We couldn’t check who has joined. This is a connection problem — nobody has been removed.
+              We couldn’t check who has joined. This is a connection problem. Nobody has been removed.
             </Text>
           ) : null}
 

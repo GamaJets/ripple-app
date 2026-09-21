@@ -139,7 +139,7 @@ export function parseTenantCurrency(input: string | null | undefined): CurrencyI
   if (!/^[A-Z]{3}$/.test(code)) {
     return {
       kind: 'bad',
-      reason: 'A currency is its three-letter ISO code — GBP, AED, EUR, USD. Not a symbol and not a name.',
+      reason: 'A currency is its three-letter ISO code: GBP, AED, EUR, USD. Not a symbol and not a name.',
     };
   }
   return { kind: 'currency', currency: code };
@@ -179,7 +179,7 @@ export function parseBrandColor(input: string | null | undefined): BrandColorInp
   if (!color) {
     return {
       kind: 'bad',
-      reason: 'A brand colour is a hex code — #1e88e5 or #1b5, with the hash. Not a colour name and not rgb().',
+      reason: 'A brand colour is a hex code: #1e88e5 or #1b5, with the hash. Not a colour name and not rgb().',
     };
   }
   return { kind: 'color', color };

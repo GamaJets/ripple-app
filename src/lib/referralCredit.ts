@@ -209,15 +209,15 @@ export const CONVERSION_RULE =
  */
 export function rewardNote(brand: string): string {
   return `${brand} records who you brought in and whether they started training. What `
-    + 'that is worth is up to your gym or coach — nothing here is a discount or '
+    + 'that is worth is up to your gym or coach. Nothing here is a discount or '
     + 'a credit, and no reward has been promised on their behalf.';
 }
 
 /** What the referrer sees about a friend, and what the friend sees about them.
  *  Held against my_referrals()'s select list by the test beside this file. */
 export const REFERRAL_PRIVACY_NOTE =
-  'You see a friend’s first name and whether they have started training — '
-  + 'nothing else about them. They are never shown anything about your training.';
+  'You see a friend’s first name and whether they have started training, '
+  + 'and nothing else about them. They are never shown anything about your training.';
 
 /* ── the coach's side of the same rows ─────────────────────────────────────
  *
@@ -353,12 +353,12 @@ export function coachSummaryLine(status: LoadStatus, rows: CoachReferrer[] | nul
  */
 export const COACH_REWARD_NOTE =
   'Nothing has been credited to anybody. There is no discount, no free session and no balance '
-  + 'here — what a referral is worth is yours to decide, in your own money, and this app has '
+  + 'here. What a referral is worth is yours to decide, in your own money, and this app has '
   + 'never been told what that is.';
 
 /** What a coach sees about the people their client brought in, which is nothing.
  *  Held against coach_referrals()'s select list by the test beside this file. */
 export const COACH_REFERRAL_PRIVACY_NOTE =
   'You see which of your own clients brought people in and how many. You are not shown who those '
-  + 'people are — they used your client’s code, not yours, and most of them never agreed to be '
+  + 'people are. They used your client’s code, not yours, and most of them never agreed to be '
   + 'listed to you.';

@@ -251,13 +251,13 @@ export function outcomeLine(
 ): string {
   switch (outcomeOf(r, now)) {
     case 'asked':
-      return `You asked for ${when}. Nothing is booked and the time is not held for you — your coach has not answered yet, and this stops standing once ${when} arrives.`;
+      return `You asked for ${when}. Nothing is booked and the time is not held for you. Your coach has not answered yet, and this stops standing once ${when} arrives.`;
     case 'accepted':
       return `Your coach said yes to ${when}, so it is a real session now and it is on your calendar.`;
     case 'declined':
       return r.declineNote
         ? `Your coach couldn’t do ${when}, and said: “${r.declineNote}” Ask for another time, or message them.`
-        : `Your coach couldn’t do ${when}. They didn’t say why — ask for another time, or message them.`;
+        : `Your coach couldn’t do ${when}. They didn’t say why. Ask for another time, or message them.`;
     case 'withdrawn':
       return `You took back your request for ${when}, so your coach is no longer being asked about it.`;
     case 'expired':
@@ -338,7 +338,7 @@ export function askBlocker(
   if (!Number.isFinite(t)) return 'Pick a day and a time first.';
   if (t <= now) return 'That time has already passed. Pick a time that is still ahead.';
   if (t > now + REQUEST_HORIZON_DAYS * 86_400_000) {
-    return `That is more than ${REQUEST_HORIZON_DAYS} days away. Ask nearer the time — your coach can’t answer for a date that far out.`;
+    return `That is more than ${REQUEST_HORIZON_DAYS} days away. Ask nearer the time. Your coach can’t answer for a date that far out.`;
   }
   if (!Number.isFinite(durationMin) || durationMin <= 0) return 'Pick how long you want.';
 
@@ -386,7 +386,7 @@ export function ownDiaryNote(status: LoadStatus): string | null {
     case 'partial':
       return 'There are more sessions on your record than we can read in one go, so we may not have checked this time against all of them. Look at your calendar before you ask.';
     case 'error':
-      return 'We couldn’t read your own sessions, so we have not checked whether you are already booked at this time. Your coach’s diary is checked when they answer — yours is not, so check your calendar before you ask.';
+      return 'We couldn’t read your own sessions, so we have not checked whether you are already booked at this time. Your coach’s diary is checked when they answer, but yours is not, so check your calendar before you ask.';
   }
 }
 
@@ -435,7 +435,7 @@ export function askRefusalNote(reason: string | null | undefined): string {
     case 'too-many':
       return 'You have as many unanswered requests as you can have at once, so this one was not sent. Wait for your coach to answer one, or take one back.';
     default:
-      return 'That request was not sent, so your coach has not been asked. Nothing has changed — try again in a moment.';
+      return 'That request was not sent, so your coach has not been asked. Nothing has changed. Try again in a moment.';
   }
 }
 
@@ -456,7 +456,7 @@ export function answerRefusalNote(reason: string | null | undefined, className?:
     case 'not-yours':
       return 'That request isn’t on your list any more. Pull down to refresh.';
     case 'already-answered':
-      return 'That one has already been answered — by you on another device, or a moment ago. Nothing was changed and no second session was made.';
+      return 'That one has already been answered, by you on another device or a moment ago. Nothing was changed and no second session was made.';
     case 'expired':
       return 'The time this asked for has passed, so there is nothing left to say yes to. Your client can ask for another time.';
     case 'clash-booked':
@@ -483,7 +483,7 @@ export function answerRefusalNote(reason: string | null | undefined, className?:
  */
 export function askedConfirmation(when: string, coachName: string | null): string {
   const who = coachName ? `${coachName} has` : 'Your coach has';
-  return `${who} been asked about ${when}. Nothing is booked yet and the time is not held for you — you will see the answer here. ${EXPIRY_RULE}`;
+  return `${who} been asked about ${when}. Nothing is booked yet and the time is not held for you. You will see the answer here. ${EXPIRY_RULE}`;
 }
 
 /** What the coach's own answer says back to them. Two sentences, because the
@@ -545,7 +545,7 @@ export function answerTellLine(told: AnswerTold): string | null {
     return `${pushPartialNote(1)} Message them if the time matters.`;
   }
   if (told.inboxKept !== false && told.recorded === 0) {
-    return 'Their phone was sent a notification, but nothing was written to their notifications — so if they miss the banner there is nothing in the app telling them. Message them if the time matters.';
+    return 'Their phone was sent a notification, but nothing was written to their notifications, so if they miss the banner there is nothing in the app telling them. Message them if the time matters.';
   }
   return null;
 }

@@ -324,7 +324,7 @@ export function readingLine(s: MetricSeries, wu: WeightUnit): string {
       : 'Nothing on record for this metric, so there is nothing to trend.';
   }
   if (n === 1) {
-    return 'One reading only, so there is nothing yet to compare it to — not a change of zero.';
+    return 'One reading only, so there is nothing yet to compare it to. It is not a change of zero.';
   }
   const mv = movementOf(s)!;
   const unit = metricUnit(s.key, wu);
@@ -379,7 +379,7 @@ export function seriesAgeLine(s: MetricSeries, todayISO: string): string {
   const on = dayHeading(last.atISO);
   const when = whenLabel(last.atISO, todayISO);
   return isSeriesStale(s, todayISO)
-    ? `Measured ${on} · ${when} — a training block ago, so it is not where they are now.`
+    ? `Measured ${on} · ${when}, a training block ago, so it is not where they are now.`
     : `Measured ${on} · ${when}`;
 }
 
@@ -392,8 +392,8 @@ export function seriesAgeLine(s: MetricSeries, todayISO: string): string {
 export const DIRECTION_CAVEAT =
   'Each change is shown with its sign and nothing else. Whether a figure moving ' +
   'down is progress depends on the metric and on what this client is working ' +
-  'toward — weight and skeletal muscle falling together mean something very ' +
-  'different from weight falling alone — and the scan does not record which, so ' +
+  'toward (weight and skeletal muscle falling together mean something very ' +
+  'different from weight falling alone), and the scan does not record which, so ' +
   'this screen does not colour it in.';
 
 // ── what the client typed, which is not what a machine measured ────────────
@@ -499,10 +499,10 @@ export function manualLine(
 ): string {
   const said = manualFigures(m, wu, who);
   if (latestScanISO == null) {
-    return `${said} Nothing was measured — there is no scan on record to compare it against.`;
+    return `${said} Nothing was measured. There is no scan on record to compare it against.`;
   }
   return manualIsCurrent(m, latestScanISO)
-    ? `${said} It is newer than their last scan, so this is the figure their own app is showing them — not the scan below.`
+    ? `${said} It is newer than their last scan, so this is the figure their own app is showing them, not the scan below.`
     : `${said} Their last scan is newer, so their own app is showing them the scan and this is only history.`;
 }
 

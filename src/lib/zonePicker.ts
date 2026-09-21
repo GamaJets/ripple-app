@@ -156,4 +156,4 @@ export function searchZones(
  * its zone correctly.
  */
 export const NO_ZONE_LIST_NOTE =
-  'This phone cannot list the world’s timezones, so there is nothing to search. Type the IANA name instead — Europe/London, Asia/Dubai, America/Los_Angeles — and it is checked before it is saved.';
+  'This phone cannot list the world’s timezones, so there is nothing to search. Type the IANA name instead (Europe/London, Asia/Dubai, America/Los_Angeles) and it is checked before it is saved.';

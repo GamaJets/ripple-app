@@ -188,7 +188,7 @@ export function myCurrencyLine(gap: MyCurrencyGap, consequence: string): string 
     case 'reading':
       return `Your currency is still being read, so ${c}.`;
     case 'unreadable':
-      return `Your currency could not be read, so ${c}. That is a read that failed rather than a setting nobody has made — try again in a moment.`;
+      return `Your currency could not be read, so ${c}. That is a read that failed rather than a setting nobody has made, so try again in a moment.`;
     case 'unavailable':
       return `Setting a currency of your own is not switched on yet, so ${c}. That is a change waiting to be applied to the database rather than anything you have done.`;
     case 'nowhere':
@@ -196,7 +196,7 @@ export function myCurrencyLine(gap: MyCurrencyGap, consequence: string): string 
     case 'gym-unset':
       return `Your gym has not set a currency, so ${c}. An owner sets one in the gym settings.`;
     case 'own-unset':
-      return `You have not said what you charge in, so ${c}. You are attached to no gym, so it is yours to choose — you set it once in Settings.`;
+      return `You have not said what you charge in, so ${c}. You are attached to no gym, so it is yours to choose. You set it once in Settings.`;
   }
 }
 

@@ -290,7 +290,7 @@ export function duplicateBlocker(status: LoadStatus): string | null {
     return 'Still reading your timetable. Adding classes now could put a second copy of one that is already scheduled, because this screen has not seen the whole schedule yet.';
   }
   if (status === 'partial') {
-    return 'Your timetable came back at its row limit, so the classes furthest ahead are the ones missing from this screen — and those are exactly the ones a repeat would land on top of. Nothing is added until the whole schedule can be read.';
+    return 'Your timetable came back at its row limit, so the classes furthest ahead are the ones missing from this screen, and those are exactly the ones a repeat would land on top of. Nothing is added until the whole schedule can be read.';
   }
   if (status === 'error') {
     return 'Your timetable could not be read, so there is no way to tell which slots are already taken. An empty schedule here means the read failed, not that the week is free.';
@@ -351,7 +351,7 @@ export function duplicateBrief(plan: DuplicatePlan): DuplicateBrief {
   const first = plan.toWrite[0].startsAt;
   const last = plan.toWrite[n - 1].startsAt;
   const skipped = plan.inPast > 0
-    ? ` ${num(plan.inPast)} of the dates in that run ${plan.inPast === 1 ? 'falls' : 'fall'} before today and ${plan.inPast === 1 ? 'is' : 'are'} skipped — a class in the past is on nobody’s timetable.`
+    ? ` ${num(plan.inPast)} of the dates in that run ${plan.inPast === 1 ? 'falls' : 'fall'} before today and ${plan.inPast === 1 ? 'is' : 'are'} skipped. A class in the past is on nobody’s timetable.`
     : '';
 
   return {
@@ -385,7 +385,7 @@ export function duplicateOutcome(title: string, wanted: number, saved: number): 
   if (saved === 0) {
     return {
       title: 'Not On The Timetable',
-      body: `None of the ${num(wanted)} classes reached the server, so they are on this phone only and nobody can book them. They will be gone when you reopen the app — try again once you have signal.`,
+      body: `None of the ${num(wanted)} classes reached the server, so they are on this phone only and nobody can book them. They will be gone when you reopen the app. Try again once you have signal.`,
     };
   }
   return {

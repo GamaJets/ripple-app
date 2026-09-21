@@ -393,15 +393,15 @@ export function occurrenceDetail(v: FeeVerdict, noticeHours: number): string {
   const w = noticeLabel(noticeHours);
   switch (v.kind) {
     case 'in-time':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is more than ${w} away, so no fee applies.`;
+      return `Frees this one only. The rest of the standing appointment is untouched. This is more than ${w} away, so no fee applies.`;
     case 'no-policy':
-      return 'Frees this one only — the rest of the standing appointment is untouched. Your coach doesn’t charge for a late cancellation.';
+      return 'Frees this one only. The rest of the standing appointment is untouched. Your coach doesn’t charge for a late cancellation.';
     case 'unknown':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w} and we couldn’t read your coach’s policy, so we can’t say whether a fee applies.`;
+      return `Frees this one only. The rest of the standing appointment is untouched. This is inside ${w} and we couldn’t read your coach’s policy, so we can’t say whether a fee applies.`;
     case 'unpriced':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w}, so your coach’s policy applies; they haven’t set an amount, so ask them.`;
+      return `Frees this one only. The rest of the standing appointment is untouched. This is inside ${w}, so your coach’s policy applies; they haven’t set an amount, so ask them.`;
     case 'fee':
-      return `Frees this one only — the rest of the standing appointment is untouched. This is inside ${w}, so a late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} is recorded. Repple doesn’t take this payment.${unstatedCurrency(v.currency)}`;
+      return `Frees this one only. The rest of the standing appointment is untouched. This is inside ${w}, so a late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} is recorded. Repple doesn’t take this payment.${unstatedCurrency(v.currency)}`;
   }
 }
 
@@ -421,7 +421,7 @@ export function occurrenceDetail(v: FeeVerdict, noticeHours: number): string {
 export function seriesDetail(later: number, nextStartsAt: string | null | undefined): string {
   const hasNext = typeof nextStartsAt === 'string' && nextStartsAt.trim().length > 0
     && Number.isFinite(Date.parse(nextStartsAt));
-  const keeps = ' The next session stays booked — cancel that one separately if you need to.';
+  const keeps = ' The next session stays booked. Cancel that one separately if you need to.';
   if (later <= 0) {
     return hasNext
       ? `Stops it repeating. There are no sessions after this one on the books, so nothing is removed and nothing is charged.${keeps}`
@@ -456,7 +456,7 @@ export const RECURRING_END_RULE =
  */
 export const RECURRING_CREDIT_NOTE =
   'A standing appointment books the time, not the sessions. Nothing comes off a session pack when the dates '
-  + 'are put in the diary — a credit is drawn as each session is marked done, one at a time, so weeks that '
+  + 'are put in the diary. A credit is drawn as each session is marked done, one at a time, so weeks that '
   + 'have not happened yet are not paid for in advance.';
 
 /** What happens to a date the coach was already busy on. */

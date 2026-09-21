@@ -244,7 +244,7 @@ function createErrorMessage(raw: string | null | undefined): string {
   if (m.includes('already have a live code called')) return 'You already have a live code with that name. Turn it off first, or pick another name.';
   if (m.includes('20 live codes')) return 'You already have 20 live codes. Turn one off before making another.';
   if (m.includes('a code needs a name')) return 'Give the code a name, so you can tell later which one worked.';
-  if (m.includes('name is too long')) return 'That name is too long — keep it to 40 characters.';
+  if (m.includes('name is too long')) return 'That name is too long. Keep it to 40 characters.';
   if (m.includes('no trainer profile')) return 'This account is not set up as a coach, so it cannot issue codes.';
   if (m.includes('not signed in')) return 'Sign in to Repple to make a code.';
   return raw?.trim() ? `${raw.trim()} No code was made.` : 'The code could not be made.';

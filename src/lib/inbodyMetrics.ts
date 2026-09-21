@@ -279,7 +279,7 @@ export function compositionInsights(scans: ScanLike[], unit: WeightUnit = 'kg'):
     const pair = (l?: number, r?: number, name?: string) => {
       if (l == null || r == null || l === 0 || r === 0) return;
       const diff = Math.abs(l - r) / Math.max(l, r);
-      if (diff >= 0.1) balance.push(`${name}: ${l < r ? 'left' : 'right'} ${Math.round(diff * 100)}% behind — train the weaker side.`);
+      if (diff >= 0.1) balance.push(`${name}: ${l < r ? 'left' : 'right'} ${Math.round(diff * 100)}% behind. Train the weaker side.`);
     };
     pair(m.leanArmLKg, m.leanArmRKg, 'Arms');
     pair(m.leanLegLKg, m.leanLegRKg, 'Legs');

@@ -234,7 +234,7 @@ export const STAFF_LABEL: Record<StaffPart, string> = {
 export const STAFF_COST: Record<StaffPart, string> = {
   trainers: 'there is no roster, so this page cannot name anybody',
   sessions: 'what was delivered and what is owed are unknown, and nobody can be judged on delivery',
-  shifts: 'rostered hours are unknown, not nil — no trainer can be shown against the hours they were booked for',
+  shifts: 'rostered hours are unknown, not nil, so no trainer can be shown against the hours they were booked for',
   clients: 'nobody\'s book can be counted, so client load is unknown rather than empty',
   activity: 'no client can be assessed for drift, so a silent book looks the same as a steady one',
   classes: 'class hours are missing, so a trainer who teaches will look under-used',
@@ -288,7 +288,7 @@ export function staffTruncationWarning(rec: StaffRecord): string | null {
   const costs = cut.map((p) => STAFF_COST[p]).join('; ');
   return (
     `Read the first rows of ${list} and there are more. ${one ? 'That part is' : 'Those parts are'} ` +
-    `a PREFIX, not the whole record — ${costs}. Every figure over ${one ? 'it' : 'them'} is withheld ` +
+    `a PREFIX, not the whole record: ${costs}. Every figure over ${one ? 'it' : 'them'} is withheld ` +
     `rather than shown as a subtotal.`
   );
 }
@@ -324,7 +324,7 @@ export function staffWarning(rec: StaffRecord): string | null {
   const list = names.length === 1
     ? names[0]
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `Could not read ${list}. This page is partial, not empty — ${broken.map((b) => b.cost).join('; ')}.`;
+  return `Could not read ${list}. This page is partial, not empty: ${broken.map((b) => b.cost).join('; ')}.`;
 }
 
 /* ── one member of staff ───────────────────────────────────────────────────── */
@@ -488,7 +488,7 @@ export function bandTitle(status: StatusLevel): string {
 export function bandNote(status: StatusLevel): string {
   switch (status) {
     case 'at_risk': return 'Carrying clients and not delivering, on the record as it stands.';
-    case 'idle': return 'No evidence either way. Not the same as fine — find out which.';
+    case 'idle': return 'No evidence either way. Not the same as fine. Find out which.';
     case 'watch': return 'Delivering, but something about the pattern is off.';
     default: return 'Clients on the book and confirmed sessions behind them.';
   }
@@ -977,19 +977,19 @@ function verdict(v: VerdictInput): { status: StatusLevel; unknown: boolean; reas
   //    that will be contradicted in a second.
   if (v.sessions == null) {
     return unknown(v.rec.sessions.state === 'failed'
-      ? 'The one-to-ones could not be read, so there is no record of delivery to judge — this is unknown, not nil.'
+      ? 'The one-to-ones could not be read, so there is no record of delivery to judge. This is unknown, not nil.'
       : 'Still reading the one-to-ones. Nothing is claimed about delivery yet.');
   }
   if (v.clients == null) {
     return unknown(v.rec.clients.state === 'failed'
-      ? 'The client book could not be read, so how much this trainer is carrying is unknown — and a trainer with no clients reads very differently from one whose clients did not load.'
+      ? 'The client book could not be read, so how much this trainer is carrying is unknown, and a trainer with no clients reads very differently from one whose clients did not load.'
       : 'Still reading the client book.');
   }
 
   // 2. Nothing at all on record. Same fact `trainerHealth` calls idle, said in
   //    this page's words.
   if (v.clients === 0 && v.sessions === 0) {
-    return unknown(`No client on their book and no one-to-one on record in the last ${v.windowDays} days. Nothing to assess — which is not the same as nothing wrong.`);
+    return unknown(`No client on their book and no one-to-one on record in the last ${v.windowDays} days. Nothing to assess, which is not the same as nothing wrong.`);
   }
 
   // 3. THE one this module exists for. Sessions ran and not one carries an
@@ -1008,7 +1008,7 @@ function verdict(v: VerdictInput): { status: StatusLevel; unknown: boolean; reas
   //    clients and nothing marked is not failing to deliver.
   if (v.marked === 0 && v.observedDays != null && v.observedDays < NEW_TRAINER_DAYS) {
     const d = v.observedDays;
-    return unknown(`On the books ${d} day${s(d)} with nothing marked yet — too little record to say anything.`);
+    return unknown(`On the books ${d} day${s(d)} with nothing marked yet: too little record to say anything.`);
   }
 
   // 5. There is evidence. `trainerHealth` owns the judgement from here, and its
@@ -1045,7 +1045,7 @@ function hoursNote(x: {
   if (x.rosteredHours == null) {
     if (x.rec.shifts.state === 'failed') return 'The rota could not be read, so there is nothing to measure delivery against.';
     if (x.rec.shifts.state === 'loading') return null;
-    return 'No live shift on the rota in this window, so there are no rostered hours to measure against — which is not the same as a trainer who worked none.';
+    return 'No live shift on the rota in this window, so there are no rostered hours to measure against, which is not the same as a trainer who worked none.';
   }
   if (x.deliveredHours == null) {
     return 'No outcome is recorded against any of their one-to-ones, so no hours can be counted as delivered.';
@@ -1090,7 +1090,7 @@ function hoursNote(x: {
     missing.push(`${x.unmarkedHours} hour${s(x.unmarkedHours)} of one-to-ones nobody has marked`);
   }
   if (!missing.length) return null;
-  return `Confirmed one-to-ones only — ${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not in that figure.`;
+  return `Confirmed one-to-ones only: ${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not in that figure.`;
 }
 
 /* ── the gym-wide picture ──────────────────────────────────────────────────── */

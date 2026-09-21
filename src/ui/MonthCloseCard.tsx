@@ -152,7 +152,7 @@ export function MonthCloseCard({ close }: { close: OwnerMonthClose }) {
       {view.verdict !== 'unknown' && ratesUnread ? (
         <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
           Your coaches’ own pay rates could not be read, so every session in this month’s payroll is priced at
-          the gym’s standard fee — smaller than the truth for anybody on a rate of their own.
+          the gym’s standard fee, smaller than the truth for anybody on a rate of their own.
         </Flag>
       ) : null}
       {/* The floor, and WHICH of the two silences put it there. A gym that has
@@ -162,14 +162,14 @@ export function MonthCloseCard({ close }: { close: OwnerMonthClose }) {
       {view.verdict !== 'unknown' && policy.kind === 'unset' ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
           Your gym has not said what it pays for beyond delivered sessions, so this month was counted on
-          delivered sessions alone. That is the floor rather than your decision — no-shows and late
+          delivered sessions alone. That is the floor rather than your decision: no-shows and late
           cancellations are not in the payroll figure. It is set on the console, and Ops shows what is stored.
         </Text>
       ) : null}
       {view.verdict !== 'unknown' && policy.kind === 'unread' ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
           What your gym pays for beyond delivered sessions could not be read, so this month was counted on
-          delivered sessions alone. That is not a statement that none is set — if your gym pays for no-shows or
+          delivered sessions alone. That is not a statement that none is set. If your gym pays for no-shows or
           late cancellations, the payroll figure behind this verdict is smaller than the truth.
         </Text>
       ) : null}

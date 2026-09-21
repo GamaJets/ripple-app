@@ -49,7 +49,7 @@ for (const [gap, line] of lines) {
   ok(line.trim().endsWith('.'), `${gap} is a finished sentence`);
   const blamesOwner = /gym settings/.test(line);
   eq(blamesOwner, gap === 'unset', `${gap} names the gym owner only when it is their setting`);
-  const saysRetry = /try again/.test(line);
+  const saysRetry = /try again/i.test(line);
   eq(saysRetry, gap === 'unreadable' || gap === 'incomplete', `${gap} says to try again only when that would help`);
 }
 

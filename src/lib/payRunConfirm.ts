@@ -105,7 +105,7 @@ export function payRunBody(r: PayRun): string {
   return [
     `This stamps ${stamped(r)} as settled for ${r.periodLabel}. Those exact rows leave the run `
       + `and will not appear in another one.`,
-    `It records that the money went out by ${r.methodLabel}. It does not send it — the transfer `
+    `It records that the money went out by ${r.methodLabel}. It does not send it. The transfer `
       + `is yours to make, and a run marked paid before the money moves reads afterwards as a `
       + `coach who has been paid.`,
     `Undoing it takes a written reason and leaves the settlement on the record, marked reversed.`,
@@ -114,7 +114,7 @@ export function payRunBody(r: PayRun): string {
 
 /** The last thing pressed, carrying the figure. */
 export function payRunYesLabel(r: PayRun): string {
-  return r.amountText ? `Yes — record ${r.amountText} paid` : 'Yes — record this run paid';
+  return r.amountText ? `Yes, record ${r.amountText} paid` : 'Yes, record this run paid';
 }
 
 /** The way out. Deliberately not "Cancel": on a screen where Reverse, void and

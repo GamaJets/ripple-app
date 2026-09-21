@@ -137,7 +137,7 @@ export function goalsEmptyLine(status: LoadStatus, revenue: number, clients: num
   if (revenue > 0 || clients > 0) return null;
   if (status === 'loading') return 'Reading your targets…';
   if (status === 'error') {
-    return 'Your targets could not be read, so this is not "none set" — leave the screen and open it again once you have signal. Typing new ones now would save over whatever is already there.';
+    return 'Your targets could not be read, so this is not "none set". Leave the screen and open it again once you have signal. Typing new ones now would save over whatever is already there.';
   }
   return 'No targets set. Tap Edit to give yourself a monthly revenue or client number to work towards.';
 }
@@ -167,8 +167,8 @@ export type GoalSaveOutcome = 'saved' | 'device-only' | 'failed';
 export function goalSaveLine(outcome: GoalSaveOutcome): string | null {
   if (outcome === 'saved') return null;
   if (outcome === 'device-only') {
-    return 'Your targets are set on this phone only. They could not be read from your account earlier in this session, so nothing has been written there — '
-      + 'saving over targets we could not read would be a guess. Open this screen again once you have signal and set them once more.';
+    return 'Your targets are set on this phone only. They could not be read from your account earlier in this session, so nothing has been written there. '
+      + 'Saving over targets we could not read would be a guess. Open this screen again once you have signal and set them once more.';
   }
   return 'Your targets are set on this phone, and they did NOT reach your account. The bars below are measured against them either way, '
     + 'but they will not be here on another phone or after a reinstall. Try again in a moment.';
@@ -264,7 +264,7 @@ export function cooldownText(value: number | null | undefined): string {
  */
 export function cooldownNote(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) {
-    return 'Not set, so the app paces each client off how often they used to train — never closer than a week, never further than four.';
+    return 'Not set, so the app paces each client off how often they used to train: never closer than a week, never further than four.';
   }
   const n = Math.round(value);
   return `Never inside ${n} day${n === 1 ? '' : 's'}. Each client is still paced off their own rhythm above that, so somebody who trained fortnightly is left longer than somebody who trained daily.`;

@@ -580,7 +580,7 @@ export async function issueInvoice(draft: InvoiceDraft, clientId?: string | null
     // The function returns the row it inserted. Nothing came back means nothing
     // was written, whatever the absence of an error suggests.
     const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
-    if (!row?.id) return { ok: false, error: 'That invoice was not issued — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That invoice was not issued. Nothing came back from the server.' };
     const invoice = toInvoice(row);
     return { ok: true, invoice, notified: await tellTheClient(invoice) };
   } catch (e) {
@@ -635,7 +635,7 @@ export async function remindInvoice(id: string): Promise<IssueResult> {
     // coach is told went out, that did not, is a client who hears nothing and a
     // coach who stops asking.
     const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
-    if (!row?.id) return { ok: false, error: 'That reminder was not recorded — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That reminder was not recorded. Nothing came back from the server.' };
     const invoice = toInvoice(row);
     return { ok: true, invoice, notified: await tellTheClientAgain(invoice) };
   } catch (e) {
@@ -707,7 +707,7 @@ export async function settleInvoice(id: string, settledOn: string, note?: string
     // Nothing back means nothing was written, whatever the absence of an error
     // suggests — and an invoice the coach believes came off their chase list
     // and did not is one part 613's nightly pass keeps telling them about.
-    if (!row?.id) return { ok: false, error: 'That settlement was not recorded — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That settlement was not recorded. Nothing came back from the server.' };
     return { ok: true, invoice: toInvoice(row) };
   } catch (e) {
     reportError('coachInvoices.settle', e);
@@ -740,7 +740,7 @@ export async function setInvoiceChaseFrom(id: string, from: string | null): Prom
       return { ok: false, error: error.message || 'That was not changed.' };
     }
     const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
-    if (!row?.id) return { ok: false, error: 'That was not changed — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That was not changed. Nothing came back from the server.' };
     return { ok: true, invoice: toInvoice(row) };
   } catch (e) {
     reportError('coachInvoices.chaseFrom', e);
@@ -767,7 +767,7 @@ export async function voidInvoice(id: string, reason: string): Promise<IssueResu
       return { ok: false, error: error.message || 'That invoice was not voided.' };
     }
     const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
-    if (!row?.id) return { ok: false, error: 'That invoice was not voided — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That invoice was not voided. Nothing came back from the server.' };
     return { ok: true, invoice: toInvoice(row) };
   } catch (e) {
     reportError('coachInvoices.void', e);

@@ -165,12 +165,12 @@ export interface SalesTotals {
 /** What a table built without the price book is, and is not. */
 export const BOOK_UNREAD_NOTE =
   'The pass price book could not be read, so this table is the types that have actually been SOLD and nothing else. '
-  + 'A pass type the gym offers and nobody has bought has no row here — not a row reading zero. That is the row this table '
+  + 'A pass type the gym offers and nobody has bought has no row here, not a row reading zero. That is the row this table '
   + 'exists to show, so read this as an incomplete list rather than as the gym’s product list.';
 
 /** Why some sales have no product name against them. */
 export const LOST_TYPE_NOTE =
-  'These passes were sold, and the pass type behind them could not be read — either it was deleted or the lookup did not come back. '
+  'These passes were sold, and the pass type behind them could not be read. Either it was deleted or the lookup did not come back. '
   + 'They are kept on their own row rather than dropped, because money missing from a revenue table with nothing saying it is missing '
   + 'is worse than money nobody can name, and they are never added to a named product.';
 

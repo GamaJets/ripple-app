@@ -89,7 +89,7 @@ eq(val(parseCancelFee('-5', 'GBP')), 'refused', 'a negative fee is a credit, not
 
 eq(val(parseCancelFee(String(MAX_CANCEL_FEE), 'GBP')), MAX_CANCEL_FEE, 'the largest amount numeric(8,2) holds still saves');
 eq(val(parseCancelFee('1000000', 'GBP')), 'refused', 'one unit beyond it is refused here, not by a 22003 after the write');
-ok(/check the zeros/.test(why(parseCancelFee('2000000', 'GBP'))), 'and the refusal suggests the thing that is usually actually wrong');
+ok(/check the zeros/i.test(why(parseCancelFee('2000000', 'GBP'))), 'and the refusal suggests the thing that is usually actually wrong');
 
 /* ── fee: a gym that has not set a currency ──────────────────────────────── */
 

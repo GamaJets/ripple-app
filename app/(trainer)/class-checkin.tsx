@@ -363,10 +363,10 @@ export default function ClassCheckin() {
       // did not save, invites the coach to tap them again — and it would be
       // refused again, for the same reason, for as long as the screen is open.
       setSaveFailed(refusedLine(
-        `${m.name} is still marked ${m.attended ? 'present' : 'absent'} — that change`,
+        `${m.name} is still marked ${m.attended ? 'present' : 'absent'}, and that change`,
         classId === UNLINKED_CLASS
           ? 'This screen was opened without a class.'
-          : `The usual cause is that ${m.name} no longer holds a place on this class — a cancelled booking is removed, and there is nothing left to mark. This register is being read again now.`,
+          : `The usual cause is that ${m.name} no longer holds a place on this class. A cancelled booking is removed, and there is nothing left to mark. This register is being read again now.`,
       ));
       if (classId !== UNLINKED_CLASS) void loadRoster();
       return;
@@ -375,7 +375,7 @@ export default function ClassCheckin() {
     // change this phone refused to hold is the same lie as one drawn against a
     // change the server refused, and it is the lie a trainer is paid on.
     if (out === 'full') {
-      setSaveFailed(floorFullLine(`${m.name} is still marked ${m.attended ? 'present' : 'absent'} — that change`));
+      setSaveFailed(floorFullLine(`${m.name} is still marked ${m.attended ? 'present' : 'absent'}, and that change`));
       return;
     }
     setRoster((p) => (p ?? []).map((x) => (x.userId === m.userId ? { ...x, attended: next } : x)));
@@ -405,7 +405,7 @@ export default function ClassCheckin() {
         {(() => {
           const arc = counted ? registerArc(reg) : null;
           const pct = arc == null ? null : Math.round(Math.max(0, Math.min(1, arc)) * 100);
-          const note = unlinked ? 'No class was passed to this screen — this is not a count.' : loading ? 'Still reading the roster.' : registerLine(reg, counted);
+          const note = unlinked ? 'No class was passed to this screen, so this is not a count.' : loading ? 'Still reading the roster.' : registerLine(reg, counted);
           return (
             <Section>
               <SectionHead title="Checked In" note={counted ? `${fig(booked)} booked` : undefined} />
@@ -462,14 +462,14 @@ export default function ClassCheckin() {
             // this the missing total reads as a broken screen rather than as a
             // number the app cannot make sense of. Nothing is saved either.
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
-              That is not a rate this can multiply yet — digits and at most one decimal point. Nothing has been saved.
+              That is not a rate this can multiply yet: digits and at most one decimal point. Nothing has been saved.
             </Text>
           ) : rate.trim() ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
               {unlinked
                 ? 'No class was passed to this screen, so there is nobody checked in to multiply by.'
                 : loading ? 'Waiting on the roster before this is worth anything.'
-                : 'The roster could not be read, so there is no check-in count to multiply — this is not zero attendees.'}
+                : 'The roster could not be read, so there is no check-in count to multiply. This is not zero attendees.'}
             </Text>
           ) : null}
           {/* This sentence used to say "Repple is not told your rate", which
@@ -478,7 +478,7 @@ export default function ClassCheckin() {
               untouched — the number has no currency attached, nothing is paid
               from it, and nobody else can read it. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            Your own arithmetic. Your rate is kept on your account so you don't retype it — nobody else can see it, no currency is attached to it, and Repple does not process this payment. Your gym owner pays from the attendance below.
+            Your own arithmetic. Your rate is kept on your account so you don't retype it. Nobody else can see it, no currency is attached to it, and Repple does not process this payment. Your gym owner pays from the attendance below.
           </Text>
         </Section>
 
@@ -488,7 +488,7 @@ export default function ClassCheckin() {
             the tap — and a queue that could not be READ is not an empty one. */}
         {!queue.queueRead ? (
           <Flag tone={t.warn} style={{ paddingTop: sp.sm }}>
-            What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost — it is not being written over either.
+            What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost, and it is not being written over either.
           </Flag>
         ) : floorPendingNote(queue.unsent) ? (
           <>
@@ -521,7 +521,7 @@ export default function ClassCheckin() {
           <SectionHead title="Members" note={counted && roster?.length ? String(roster.length) : undefined} />
           {unlinked ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              This screen was opened without a class. Nothing can be read or checked in here — open a
+              This screen was opened without a class. Nothing can be read or checked in here. Open a
               class from your schedule and use its Check in button.
             </Text>
           ) : loading ? (
@@ -529,11 +529,11 @@ export default function ClassCheckin() {
           ) : readFailed || roster === null ? (
             <Flag tone={t.crit}>
               This class's roster could not be read, so nobody can be checked in here yet. This is
-              not the same as an empty class — do not treat it as one. Leave the screen and open it
+              not the same as an empty class. Do not treat it as one. Leave the screen and open it
               again once you have signal.
             </Flag>
           ) : roster.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No one has booked this class yet — members appear here as they book.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>No one has booked this class yet. Members appear here as they book.</Text>
           ) : (<>
             {/* The instruction every booked row used to repeat, said once. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.xs, marginBottom: sp.xs }}>Tap a name when they arrive</Text>
@@ -577,7 +577,7 @@ export default function ClassCheckin() {
             them is that a queue which could not be READ cannot say either. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           {unlinked
-            ? 'Nothing on this screen is being saved — it was not told which class it is checking in.'
+            ? 'Nothing on this screen is being saved. It was not told which class it is checking in.'
             : registerVisibilityLine(queue.unsent, queue.queueRead)}
         </Text>
 

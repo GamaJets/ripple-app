@@ -95,7 +95,7 @@ export const REST_BANDS = { yesterday: 1, twoToThree: 3, fourToSix: 6 } as const
 /** The sentence that goes with any rest figure this file produces. */
 export const REST_MEANS =
   'This is the time since you last logged a set for this muscle. It is not a '
-  + 'measure of how recovered you are — nothing here knows how hard the session '
+  + 'measure of how recovered you are. Nothing here knows how hard the session '
   + 'was, how you slept, or how you feel.';
 
 /** One muscle's elapsed time, with the direction of its uncertainty. */
@@ -288,7 +288,7 @@ export function restLine(r: MuscleRest): string {
     case 'atMost': {
       const d = r.days ?? 0;
       const when = d === 0 ? 'today' : d === 1 ? 'yesterday' : `${plural(d)} ago`;
-      return `Last trained ${when} in the part of your log we could read — it may be more recent.`;
+      return `Last trained ${when} in the part of your log we could read. It may be more recent.`;
     }
     default: {
       const d = r.days ?? 0;

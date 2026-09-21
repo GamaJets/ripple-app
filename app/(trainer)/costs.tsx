@@ -428,7 +428,7 @@ export default function Costs() {
               ))}
               {biggest.top.length > 1 ? (
                 <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                  One for each currency. These are separate amounts of money and are deliberately not ranked against one another — there is no rate in this app that could put them in an order.
+                  One for each currency. These are separate amounts of money and are deliberately not ranked against one another. There is no rate in this app that could put them in an order.
                 </Flag>
               ) : null}
               {/* Counted out rather than quietly ignored. A line with no

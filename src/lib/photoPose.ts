@@ -107,7 +107,7 @@ export function poseMismatchNote(a: Pose | null, b: Pose | null): string | null 
   if (posesMatch(a, b) !== 'different') return null;
   const from = poseLabel(a), to = poseLabel(b);
   if (!from || !to) return null;
-  return `These are two different views — ${from.toLowerCase()} and ${to.toLowerCase()}. The readings underneath are true of both days, but the shapes in the pictures are not directly comparable: some of what looks changed is the angle.`;
+  return `These are two different views: ${from.toLowerCase()} and ${to.toLowerCase()}. The readings underneath are true of both days, but the shapes in the pictures are not directly comparable: some of what looks changed is the angle.`;
 }
 
 /* ── I/O ──────────────────────────────────────────────────────────────────

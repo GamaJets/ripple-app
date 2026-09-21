@@ -192,7 +192,7 @@ export const FOOD_READ_SAY: Record<FoodReadFailure | 'none-named', ReaderSay> = 
   },
   'unreadable-answer': {
     title: 'The answer could not be read',
-    body: 'The reader answered, but this app could not read what it sent back. Nothing has been filled in — try again, or type the figures in yourself.',
+    body: 'The reader answered, but this app could not read what it sent back. Nothing has been filled in. Try again, or type the figures in yourself.',
   },
   'unexpected-shape': {
     title: 'That was not what this app expected',

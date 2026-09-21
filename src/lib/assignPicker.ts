@@ -127,7 +127,7 @@ export function seedDecision(o: {
         action: 'hold',
         note:
           `What is in the builder is your own work, so picking ${o.firstName} has not replaced it. `
-          + `It is not what ${o.firstName} is currently training — load their program if you would rather start from that.`,
+          + `It is not what ${o.firstName} is currently training. Load their program if you would rather start from that.`,
         replaceLabel: `Load What ${o.firstName} Is On`,
       };
     }

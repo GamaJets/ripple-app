@@ -589,8 +589,8 @@ export default function Bookings() {
     const failed = () => Alert.alert(
       it.waitlist ? 'Still on the Waitlist' : 'Not Cancelled',
       it.waitlist
-        ? `You are still on the waitlist for ${it.title} — that did not save, so nothing has changed. ${retryLine(reach)}`
-        : `${it.title} on ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)} is still booked — that did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
+        ? `You are still on the waitlist for ${it.title}. That did not save, so nothing has changed. ${retryLine(reach)}`
+        : `${it.title} on ${dayLabel(it.startsAt)} at ${timeLabel(it.startsAt)} is still booked. That did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
       [{ text: 'OK' }],
     );
     const doCancel = async () => {
@@ -701,7 +701,7 @@ export default function Bookings() {
       Alert.alert(
         'Nothing to Add',
         queued > 0
-          ? `You are in the queue for ${queued} ${queued === 1 ? 'class' : 'classes'} and have nothing booked. A place in a queue is not a booking, so it is not written into your calendar — if one comes to you, it appears here as a booking and you can add it then.`
+          ? `You are in the queue for ${queued} ${queued === 1 ? 'class' : 'classes'} and have nothing booked. A place in a queue is not a booking, so it is not written into your calendar. If one comes to you, it appears here as a booking and you can add it then.`
           : calledOff > 0
           ? `${calledOff === 1 ? 'The class you had booked has' : `The ${calledOff} classes you had booked have`} been called off by the gym, so there is nothing to add to your calendar.`
           : 'You have nothing booked yet, so there is nothing to add to your calendar.',
@@ -716,11 +716,11 @@ export default function Bookings() {
       location: it.location,
       notes: it.sub,
     }));
-    await shareIcs(buildIcs(evts, `${appName} — My Bookings`), 'my-bookings.ics', 'Add to Calendar');
+    await shareIcs(buildIcs(evts, `${appName} · My Bookings`), 'my-bookings.ics', 'Add to Calendar');
     if (queued > 0 || calledOff > 0) {
       const left: string[] = [];
-      if (queued > 0) left.push(`the ${queued} ${queued === 1 ? 'place' : 'places'} you are waiting for — a queue is not a booking, and a calendar entry saying otherwise would still be there long after the class had run`);
-      if (calledOff > 0) left.push(`${calledOff === 1 ? 'the class the gym called off' : `the ${calledOff} classes the gym called off`} — ${calledOff === 1 ? 'it is' : 'they are'} not running`);
+      if (queued > 0) left.push(`the ${queued} ${queued === 1 ? 'place' : 'places'} you are waiting for (a queue is not a booking, and a calendar entry saying otherwise would still be there long after the class had run)`);
+      if (calledOff > 0) left.push(`${calledOff === 1 ? 'the class the gym called off' : `the ${calledOff} classes the gym called off`} (${calledOff === 1 ? 'it is' : 'they are'} not running)`);
       Alert.alert(
         'What Went into the File',
         `${booked.length} booked ${booked.length === 1 ? 'session is' : 'sessions are'} in it. Left out: ${left.join('; and ')}.`,
@@ -958,7 +958,7 @@ export default function Bookings() {
               <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not read' : waitStatus === 'ready' && myQueue.length > 0 ? `${myQueue.length} slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
               {waitStatus === 'error' ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  We couldn’t read your waitlists. This is not a statement that you are on none — any place you hold still stands, and a slot that frees can still be booked for you.
+                  We couldn’t read your waitlists. This is not a statement that you are on none. Any place you hold still stands, and a slot that frees can still be booked for you.
                 </Text>
               ) : (
                 myQueue.map((q, i) => (
@@ -975,7 +975,7 @@ export default function Bookings() {
                               moved past them, or the coach opened the hour up
                               rather than it being cancelled into the list. */}
                           {!q.stillTaken
-                            ? 'This slot is open again and did not come to you — book it from the Book screen if you still want it.'
+                            ? 'This slot is open again and did not come to you. Book it from the Book screen if you still want it.'
                             : q.position == null
                               /* `MyWaitlistRow.position` is `number | null` in
                                  src/ui/sessions.tsx now, and the mapper there
@@ -989,7 +989,7 @@ export default function Bookings() {
                                  the unknown, and it is reachable today: it is
                                  what a member sees when the row came back and
                                  the place in it did not. */
-                              ? 'You’re on the waitlist for this hour. Your place in the queue didn’t come back, so we can’t say where in it you are — it still stands, in the order you joined.'
+                              ? 'You’re on the waitlist for this hour. Your place in the queue didn’t come back, so we can’t say where in it you are. It still stands, in the order you joined.'
                               : waitlistLine(q.position, q.waiting)}
                         </Text>
                       </View>

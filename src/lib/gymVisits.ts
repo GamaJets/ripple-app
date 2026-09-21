@@ -489,7 +489,7 @@ export function admissionCheck(input: {
     const mins = Math.max(0, Math.round((now - freshestOpen) / 60000));
     return {
       verdict: 'refuse', code: 'already-inside',
-      reason: `They are already checked in — ${mins} ${mins === 1 ? 'minute' : 'minutes'} ago, with no check-out. A second row would put the same person in the evacuation headcount twice.`,
+      reason: `They are already checked in, ${mins} ${mins === 1 ? 'minute' : 'minutes'} ago, with no check-out. A second row would put the same person in the evacuation headcount twice.`,
     };
   }
 
@@ -503,7 +503,7 @@ export function admissionCheck(input: {
   if (input.memberships === null) {
     return {
       verdict: 'refuse', code: 'unknown',
-      reason: 'Their membership could not be read, so nothing here knows whether it is live. That is a failed query rather than a member who has not paid — record the visit anyway if you can see they are in good standing.',
+      reason: 'Their membership could not be read, so nothing here knows whether it is live. That is a failed query rather than a member who has not paid. Record the visit anyway if you can see they are in good standing.',
     };
   }
 
@@ -538,7 +538,7 @@ export function admissionCheck(input: {
       // ask `gymDay()` with.
       return {
         verdict: 'warn', code: 'stale-open',
-        reason: `Their membership is live. They also have a visit from ${isoDay(new Date(stalestOpen))} that nobody closed — it is not a person in the building and it is counted nowhere.`,
+        reason: `Their membership is live. They also have a visit from ${isoDay(new Date(stalestOpen))} that nobody closed. It is not a person in the building and it is counted nowhere.`,
       };
     }
     return { verdict: 'ok', code: 'active', reason: null };
@@ -1090,7 +1090,7 @@ export function pendingNote(list: PendingDoorWrite[]): string | null {
   const parts: string[] = [];
   if (waiting > 0) {
     parts.push(
-      `${waiting} ${waiting === 1 ? 'arrival is' : 'arrivals are'} held on this machine and not yet on the record — they go up on their own as soon as the connection is back, stamped with the minute the person actually came in.`,
+      `${waiting} ${waiting === 1 ? 'arrival is' : 'arrivals are'} held on this machine and not yet on the record. They go up on their own as soon as the connection is back, stamped with the minute the person actually came in.`,
     );
   }
   // Said separately from the arrivals, because the cost is the other way round

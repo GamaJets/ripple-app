@@ -178,7 +178,7 @@ export function tickLabel(tick: SetTick, movement: string, loadText: string | nu
   }
   if (tick.state === 'later') return `Set ${tick.n} of ${movement}, still to come.`;
   if (!tick.records) {
-    return `Set ${tick.n} of ${movement}. Type what you did — the plan does not say a single figure, so this cannot be ticked off.`;
+    return `Set ${tick.n} of ${movement}. Type what you did. The plan does not say a single figure, so this cannot be ticked off.`;
   }
   return tick.records.kind === 'hold'
     ? `Log set ${tick.n} of ${movement}: a ${tick.records.secs} second hold${at}.`

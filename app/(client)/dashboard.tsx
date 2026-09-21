@@ -410,7 +410,7 @@ export default function Home() {
     // must not be one the screen itself was refusing to print.
     try { id = await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + streak + '-day streak going.', when, { route: '/(client)/workouts' }, 'motivation'); } catch { id = null; }
     if (!id) {
-      Alert.alert('Nothing Scheduled', 'That reminder could not be set — this phone may not be allowing notifications from us. Nothing has changed about your streak.');
+      Alert.alert('Nothing Scheduled', 'That reminder could not be set. This phone may not be allowing notifications from us. Nothing has changed about your streak.');
       return;
     }
     Alert.alert('Reminder Set', `We will nudge you at ${when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} tonight. Log a session before then and you can ignore it.`);
@@ -577,7 +577,7 @@ export default function Home() {
   // `dayCal.net` for the figure itself, which is only ever read where there is
   // a target behind it.
   const today = readiness != null && readiness.tone === 'low'
-    ? { headline: 'Recover Today', tip: 'Under-recovered — keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
+    ? { headline: 'Recover Today', tip: 'Under-recovered. Keep it light or take a rest day.', cta: 'Recovery', route: '/(client)/recovery', tone: t.warn }
     : !trainedToday
     ? { headline: 'Ready to Train', tip: readiness?.tip ?? 'Log tonight’s sleep and your readiness appears here.', cta: 'Start Workout', route: '/(client)/workouts', tone: t.brand }
     // Trained, and no target to judge the eating against. The session is a fact
@@ -706,11 +706,11 @@ export default function Home() {
     : !isWhole(wearables.todayStatus)
       ? (wearables.todayStatus === 'loading'
         ? 'Reading today’s steps from your device…'
-        : 'Your device could not be read just now — that is not a count of nought.')
+        : 'Your device could not be read just now. That is not a count of nought.')
     : wToday.steps == null ? 'Your device has no step count for today yet.'
     : c.stepGoal == null
       ? (isWhole(c.profileStatus)
-        ? 'No step goal set — set one on Daily Habits and this fills against it.'
+        ? 'No step goal set. Set one on Daily Habits and this fills against it.'
         : 'Your step goal could not be read, so this is not filling against one.')
     : null;
   const stepsCounted = wearableConnected && isWhole(wearables.todayStatus) && wToday.steps != null;
@@ -960,7 +960,7 @@ export default function Home() {
 
           {sevInj ? (
             <Notice tone={t.crit} kicker="From Your Coach" title="Your plan is adjusted for your injury"
-              note={`I've eased off ${sevInj.groups.join(' & ').toLowerCase()} while your ${sevInj.areas.join(' & ').toLowerCase()} ${sevInj.areas.length > 1 ? 'are' : 'is'} severe — risky moves are swapped or paused. Let's train safely around it.`}>
+              note={`I've eased off ${sevInj.groups.join(' & ').toLowerCase()} while your ${sevInj.areas.join(' & ').toLowerCase()} ${sevInj.areas.length > 1 ? 'are' : 'is'} severe. Risky moves are swapped or paused. Let's train safely around it.`}>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flexGrow: 2, flexBasis: 180 }}><Cta label="Get a Safe Plan" wide onPress={() => router.push('/(client)/coach?ask=injury')} /></View>
                 <View style={{ flexGrow: 1, flexBasis: 110 }}><Ghost label="Update" onPress={() => router.push('/(client)/injuries')} /></View>
@@ -971,7 +971,7 @@ export default function Home() {
           {myInvites.length === 0 && invitesStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Coaching Invitations"
               title="Could not check for invitations"
-              note="This is not the same as having none. If a coach has invited you, it will appear here once this loads — pull down to try again." />
+              note="This is not the same as having none. If a coach has invited you, it will appear here once this loads. Pull down to try again." />
           ) : null}
 
           {myInvites.length > 0 ? (
@@ -987,7 +987,7 @@ export default function Home() {
                     // the link; a refused accept used to move the whole app
                     // into coached mode with no coach behind it.
                     const { mode, ok } = await acceptCoachInvite(iv.id);
-                    if (!ok) { Alert.alert('Not Connected Yet', 'We could not link you to that coach. The invitation is still here — try again in a moment.'); return; }
+                    if (!ok) { Alert.alert('Not Connected Yet', 'We could not link you to that coach. The invitation is still here. Try again in a moment.'); return; }
                     c.setCoachingMode(mode);
                   }} />
                 </View>
@@ -1066,7 +1066,7 @@ export default function Home() {
             <ChartShell status={logStatus} points={weekBars.length}
               emptyLine="Nothing logged yet this week."
               loadingLine="Reading your training log…"
-              errorLine="We couldn’t read your training log, so this week and your streak are not shown — not because they’re zero. Nothing has been lost."
+              errorLine="We couldn’t read your training log, so this week and your streak are not shown. That does not mean they are zero. Nothing has been lost."
               partialLine="You have more training logged than we can read at once, so this week and your streak are held back rather than counted over part of it. Nothing is missing from your log.">
               <DayBars days={weekBars} spoken={`Movements logged each day this week. ${weekSpoken}.`} />
               {/* A goal is a floor, not a quota — past it the count is still
@@ -1136,8 +1136,8 @@ export default function Home() {
           {remoteCoached ? (
             <ListRow icon="message" tone="blue" title="Weekly Check-in"
               note={booksSessions
-                ? 'How the weeks you train alone went — your coach reads it'
-                : 'How the week went — your coach only sees what you send'}
+                ? 'How the weeks you train alone went. Your coach reads it'
+                : 'How the week went. Your coach only sees what you send'}
               onPress={() => router.push('/(client)/checkin')} />
           ) : null}
         </Section>
@@ -1156,7 +1156,7 @@ export default function Home() {
                 kicker={protectedTonight ? 'Streak Protected' : 'Streak at Risk'}
                 title={protectedTonight ? `A freeze is holding your ${streak}-day streak` : `Your ${streak}-day streak is on the line`}
                 note={protectedTonight
-                  ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve — tonight is covered, but training keeps it growing.`
+                  ? `${freezes} freeze${freezes > 1 ? 's' : ''} in reserve. Tonight is covered, but training keeps it growing.`
                   : 'Log one session today to keep it alive.'}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.lg }}>
                   <View style={{ flexGrow: 1, flexBasis: 140 }}><Cta label="Start Now" wide onPress={() => router.push(trainIntent('/(client)/workouts') as any)} /></View>
@@ -1171,7 +1171,7 @@ export default function Home() {
                   <Icon name="sparkle" size={20} color={t.brand} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.head, color: t.ink }}>Personalise Your Plan</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>One minute — tailors your workouts and meals to you.</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Takes one minute and tailors your workouts and meals to you.</Text>
                   </View>
                   <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                 </View>
@@ -1375,7 +1375,7 @@ export default function Home() {
               title={solo ? 'Work with a Coach' : 'Find Your Coach'}
               note={solo
                 ? "Enter your coach's code, or browse trainers"
-                : "Not linked yet — enter their code, accept an invitation, or browse"}
+                : "Not linked yet. Enter their code, accept an invitation, or browse"}
               onPress={() => router.push('/(client)/trainers')} />
           ) : null}
 

@@ -174,7 +174,7 @@ export default function TrainerBilling() {
     try { await Linking.openURL(url); }
     catch (e) {
       reportError('billing.invoices.open', e);
-      Alert.alert('Couldn’t Open It', 'This device would not open that invoice. Nothing about it has changed — try Manage Billing for the same page.');
+      Alert.alert('Couldn’t Open It', 'This device would not open that invoice. Nothing about it has changed. Try Manage Billing for the same page.');
     }
   };
 
@@ -274,7 +274,7 @@ export default function TrainerBilling() {
             <SectionHead title="Current Plan" />
             <Flag tone={t.crit}>
               We could not read your subscription, so nothing below tells you whether you have one.
-              If you are already subscribed you still are — do not subscribe again from this screen.
+              If you are already subscribed, you still are. Do not subscribe again from this screen.
             </Flag>
             <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.xs }}>{subErr}</Text>
           </Section>
@@ -316,7 +316,7 @@ export default function TrainerBilling() {
             {sub.status === 'past_due' || sub.status === 'unpaid' ? (
               <Flag tone={t.crit} style={{ marginTop: sp.md }}>
                 A payment for this plan has not gone through. Stripe will try the card again, and updating it
-                in Manage Billing is what settles it — your clients see nothing about any of this.
+                in Manage Billing is what settles it. Your clients see nothing about any of this.
               </Flag>
             ) : null}
             <View style={{ height: sp.lg }} />
@@ -476,7 +476,7 @@ export default function TrainerBilling() {
 
         <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.lg }}>
           Plan prices are stated without a currency because Repple&apos;s plan config does not record
-          one — Stripe shows the exact amount and currency before you pay. This is your Repple
+          one. Stripe shows the exact amount and currency before you pay. This is your Repple
           subscription; what your own clients pay you is on Payments.
         </Text>
         <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>

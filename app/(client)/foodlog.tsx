@@ -445,7 +445,7 @@ export default function FoodLog() {
   *    here; the member needs to know which day now has nothing in it.
   */
  const sayBackdated = (what: string, out: WriteOutcome, day: string) => {
-  if (out === 'stored') { toast.say(`${what} — ${backdatedStoredNote(day, today)}`); return; }
+  if (out === 'stored') { toast.say(`${what}. ${backdatedStoredNote(day, today)}`); return; }
   if (out === 'unsent') { Alert.alert('Saved on This Phone', `${what}: ${backdatedUnsentNote(day, today)}`); return; }
   Alert.alert('Not Logged',
    `${what} was rejected by your food log, so it is not saved and nothing was added to ${dayLongLabel(day, today)}. Adding it again as it is will be rejected again.`);
@@ -556,7 +556,7 @@ export default function FoodLog() {
     const missing = namedGaps(short[0].notGiven);
     setPendingNote(`Read from what you typed, and the figures are the reader’s estimate rather than anything measured. ${missing
       ? `It did not give ${missing} for this one, so ${short[0].notGiven.length === 1 ? 'that box is' : 'those boxes are'} blank rather than nought`
-      : 'Some of the figures did not come back, so they are blank rather than nought'} — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
+      : 'Some of the figures did not come back, so they are blank rather than nought'}. Fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
     setPendingPhoto(null);
     setPending(gaps[0]);
     setQueue(gaps.slice(1));
@@ -586,7 +586,7 @@ export default function FoodLog() {
     // Not said on a backdated write, where the toast is already carrying
     // which day the food went to. That is the more urgent fact and a second
     // `say()` would replace it rather than queue behind it (src/ui/toast.tsx).
-    if (!stamp.backdated) toast.say('Logged from what you typed. The figures are the reader’s estimate rather than anything measured — tap a meal to correct one.');
+    if (!stamp.backdated) toast.say('Logged from what you typed. The figures are the reader’s estimate rather than anything measured. Tap a meal to correct one.');
    }
    // Nothing landed in the log at all — every food the reader named went to
    // the sheet with a gap in it — and some of what was typed could not be read
@@ -622,7 +622,7 @@ export default function FoodLog() {
   // are still the ones of record. The sheet stays open with what was typed:
   // closing it would throw the correction away AND imply it had been taken.
   if (!saved) {
-   Alert.alert('Not Saved', 'Your correction did not reach the server, so the meal still reads as it did. Nothing has been changed on this phone either — check your connection and try again.');
+   Alert.alert('Not Saved', 'Your correction did not reach the server, so the meal still reads as it did. Nothing has been changed on this phone either. Check your connection and try again.');
    return;
   }
   setEditing(null);
@@ -657,7 +657,7 @@ export default function FoodLog() {
     // moment, which is the truth: it is still in the log.
     if (!gone) {
      putBack();
-     Alert.alert('Not Removed', `${fe.name} is still in your log — we could not reach the server to remove it. It is still counting toward today.`);
+     Alert.alert('Not Removed', `${fe.name} is still in your log. We could not reach the server to remove it. It is still counting toward today.`);
     }
    },
   });
@@ -994,7 +994,7 @@ export default function FoodLog() {
  // the feature doing what the member asked: the photo is on screen, it went
  // nowhere, and the meal logs the same. See PHOTO_REFUSED_NOTE.
  setPendingNote(read
-  ? 'Read from your photo — check every figure before logging it. The picture itself is not kept: it is here to read the meal from and to check against, and the numbers are what go into your log.'
+  ? 'Read from your photo. Check every figure before logging it. The picture itself is not kept: it is here to read the meal from and to check against, and the numbers are what go into your log.'
   : outcome === 'refused' ? PHOTO_REFUSED_NOTE.meal
   : outcome === 'off' ? PHOTO_OFF_NOTE.meal
   : PHOTO_UNREAD_NOTE.meal);
@@ -1056,7 +1056,7 @@ export default function FoodLog() {
      behind this — a native alert, because they are three short lines and a
      fourth sheet on this screen would be a fourth modal to keep right. */}
  <PageHead title="Food Log" trailing={<Ghost icon="info" a11yLabel="How the food log works" onPress={() => Alert.alert('How the Food Log Works',
-  'Tap a logged meal to correct what it was worth.\n\nUnder Log It Again, tap a food to log the same again — the sheet still asks how much — and tap the heart to keep one at the top.\n\nCommon and restaurant figures are typical portions, not a measurement of yours. A branded row is the product’s own label.')} />} />
+  'Tap a logged meal to correct what it was worth.\n\nUnder Log It Again, tap a food to log the same again (the sheet still asks how much), and tap the heart to keep one at the top.\n\nCommon and restaurant figures are typical portions, not a measurement of yours. A branded row is the product’s own label.')} />} />
 
  {/* ── the figure: what is left in the day ────────────────────────────
      The board's figure card where the old Hero block was: the label as the
@@ -1100,7 +1100,7 @@ export default function FoodLog() {
      thing. */}
  {burnStale ? (
  <Flag tone={t.warn} style={{ marginTop: sp.md }}>
- Calories burned is the last figure we had — your device could not be reached. Pull down to try again.
+ Calories burned is the last figure we had. Your device could not be reached. Pull down to try again.
  </Flag>
  ) : null}
  </Section>
@@ -1200,7 +1200,7 @@ export default function FoodLog() {
  Common and restaurant figures are typical portions; a branded row is the product’s own label.
  </Text>
  {q.trim().length > 0 && q.trim().length < 3 ? (
- <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>Keep typing — three letters or more.</Text>
+ <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>Keep typing: three letters or more.</Text>
  ) : null}
  {/* Said whether or not local rows came back. The old version showed this only
      when the list was empty, so a throttled branded search with a couple of
@@ -1210,7 +1210,7 @@ export default function FoodLog() {
  <Text style={{ ...ty.label, color: t.ink3, paddingTop: sp.md }}>
  {results.length
    ? "Branded products could not be reached just now, so these are the common foods and restaurant dishes only. Scan the barcode for a packet's own figures."
-   : 'Food search could not be reached just now — this says nothing about whether the food is in there. Scan the barcode or describe it in the meantime.'}
+   : 'Food search could not be reached just now. This says nothing about whether the food is in there. Scan the barcode or describe it in the meantime.'}
  </Text>
  ) : null}
  {q.trim().length >= 3 && !searching && !searchDown && results.length === 0 ? (
@@ -1239,7 +1239,7 @@ export default function FoodLog() {
      portion of whatever basis the source used, so half a packet and two
      packets were the same entry — see src/ui/LogFoodSheet.tsx. */}
  <Pressable onPress={() => { setPendingTitle(undefined); setPendingNote(null); setPendingPhoto(null); setPendingVia('search'); setPending({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, basis: r.basis }); }}
- accessibilityRole="button" accessibilityLabel={mark ? `Log ${r.name} — ${r.label}. ${mark}` : `Log ${r.name} — ${r.label}`} accessibilityHint="Opens a sheet to say how much of it you had"
+ accessibilityRole="button" accessibilityLabel={mark ? `Log ${r.name}, ${r.label}. ${mark}` : `Log ${r.name}, ${r.label}`} accessibilityHint="Opens a sheet to say how much of it you had"
  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{r.name}</Text>
@@ -1372,7 +1372,7 @@ export default function FoodLog() {
  {!target && !adjustUnknown && foodRulesUnknown ? (
   <Text style={{ ...ty.label, color: t.ink3 }}>
    {foodRulesReading
-    ? 'Reading what you are training for and how you eat — your protein, carb and fat targets are worked out from both.'
+    ? 'Reading what you are training for and how you eat. Your protein, carb and fat targets are worked out from both.'
     : 'Your goal and diet could not be read, and your macro targets are worked out from both, so the bars are left out. Pull down to try again.'}
   </Text>
  ) : null}
@@ -1408,7 +1408,7 @@ export default function FoodLog() {
      their breakfast would reasonably conclude it had been lost. */}
  {favsUnknown ? (
  <Flag tone={t.warn}>
- We couldn’t check your account just now, so we can’t show your pinned foods or let you pin one. Nothing has been unpinned — this is our end rather than your sign-in.
+ We couldn’t check your account just now, so we can’t show your pinned foods or let you pin one. Nothing has been unpinned. This is our end rather than your sign-in.
  </Flag>
  ) : null}
 
@@ -1476,14 +1476,14 @@ export default function FoodLog() {
    { label: 'Fat', value: fig(hist.average.fat), unit: 'g' },
   ]} />
   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-   Over the {hist.average.overDays} day{hist.average.overDays === 1 ? '' : 's'} you logged in the last fortnight — empty days are left out, not counted as nothing eaten.
+   Over the {hist.average.overDays} day{hist.average.overDays === 1 ? '' : 's'} you logged in the last fortnight. Empty days are left out, not counted as nothing eaten.
   </Text>
  </>) : (
   <Text style={{ ...ty.label, color: t.ink3 }}>
    {hist.status === 'loading' ? 'Reading the last fortnight…'
     : hist.status === 'partial' ? 'More is logged in the last fortnight than can be read in one go, so no average is taken. The days below are real; the earliest is left out rather than half-counted.'
     : hist.status === 'error' ? 'We couldn’t read the last fortnight, so we can’t say what you have been eating. Nothing has been lost.'
-    : 'Nothing logged in the last fortnight yet — a few days of meals and your average shows up here.'}
+    : 'Nothing logged in the last fortnight yet. A few days of meals and your average shows up here.'}
   </Text>
  )}
 
@@ -1633,7 +1633,7 @@ export default function FoodLog() {
  </Pressable>
  </View>
  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
- Today's totals and the calories you have left follow this straight away. It stays on today — correcting a meal does not move it to another day.
+ Today's totals and the calories you have left follow this straight away. It stays on today. Correcting a meal does not move it to another day.
  </Text>
  <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Meal Name</Text>
  <TextInput value={edN} onChangeText={setEdN} placeholder="What was it?" placeholderTextColor={t.ink3} style={{ ...field, marginBottom: sp.md }} />

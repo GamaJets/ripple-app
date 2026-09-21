@@ -197,8 +197,8 @@ export function classOffWaitingNotification(
     title: many ? CLASS_OFF_WAITING_TITLE_MANY : CLASS_OFF_WAITING_TITLE,
     body: clip(
       many
-        ? `${num(Math.floor(classes))} of the “${name}” classes you were waiting for have been called off${why}. You were on the waiting list, so there is nothing to cancel — your Classes screen has the rest of the timetable.`
-        : `“${name}” has been called off${why}. You were on the waiting list for it, so there is nothing to cancel — your Classes screen has the rest of the timetable.`,
+        ? `${num(Math.floor(classes))} of the “${name}” classes you were waiting for have been called off${why}. You were on the waiting list, so there is nothing to cancel. Your Classes screen has the rest of the timetable.`
+        : `“${name}” has been called off${why}. You were on the waiting list for it, so there is nothing to cancel. Your Classes screen has the rest of the timetable.`,
       NOTICE_BODY_MAX,
     ),
     route: CLASS_OFF_ROUTE,

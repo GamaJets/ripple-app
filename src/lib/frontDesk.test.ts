@@ -690,7 +690,7 @@ const mem = (id: string, status: string, lastSeenDays: number | null): SegmentMe
     emergencyName: 'Ada', emergencyPhone: '050 111 2222', medicalNote: null, ...over,
   });
 
-  eq(emergencyLine(rec()), 'Ada — 050 111 2222', 'both halves read as one line');
+  eq(emergencyLine(rec()), 'Ada · 050 111 2222', 'both halves read as one line');
   eq(emergencyLine(rec({ emergencyPhone: null })), 'Ada', 'one half is still worth printing');
   eq(emergencyLine(rec({ emergencyName: null, emergencyPhone: null })), null,
     'and nothing recorded is null, so the sheet prints its own words rather than an empty cell');

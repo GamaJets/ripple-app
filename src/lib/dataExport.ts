@@ -184,7 +184,7 @@ export const DELETION_FILES_NOTE =
   'Your records are deleted with your account. The files behind them go separately, on a queue: your progress '
   + 'photographs, your profile photo, anything you sent or received in messages and any injury documents you '
   + 'uploaded are all queued for deletion the moment the account goes, and a scheduled job sends each one within '
-  + 'minutes. None of them is marked done until the file store confirms the file has gone — asked to be deleted '
+  + 'minutes. None of them is marked done until the file store confirms the file has gone, because asked to be deleted '
   + 'and deleted are not the same claim, and only the second one is recorded. If anything sticks in that queue '
   + 'for more than a day, a daily check fails loudly in our own logs, which is somewhere we look rather than an '
   + 'alert that reaches anybody. One thing is not on that queue: a document your gym filed about you, such as a '
@@ -251,7 +251,7 @@ export const COACH_DELETION_FILES_NOTE =
   + 'document you published, any exercise clip you recorded, your profile photo and anything you sent or received '
   + 'in messages are all queued for deletion the moment the account goes, and a scheduled job sends each one '
   + 'within minutes. Progress photographs you took for yourself go through their own scheduled job. Nothing is '
-  + 'marked done until the file store confirms the file has gone — asked to be deleted and deleted are not the '
+  + 'marked done until the file store confirms the file has gone, because asked to be deleted and deleted are not the '
   + 'same claim, and only the second one is recorded. And if a client has ever accepted or been sent one of your '
   + 'documents, the deletion now completes on its own: erasing your account is the only thing that can release '
   + 'those acceptances, nothing else can, and it takes the record that your clients accepted your document with '
@@ -337,7 +337,7 @@ export const EXPORT_FILE_STORES: readonly ExportFileStore[] = [
   // nothing to do with the export. So it says the part that is unconditionally
   // true of every one of these files and points at where the per-document
   // answer lives, which the member can open and read for themselves.
-  { bucket: 'injury-docs', what: 'An injury document you uploaded. It is stored where only you can open it, and your coach never sees the file. If you agreed to have one read, a copy of that document also went to OCR.space — the Injuries screen in the app says, against each document, which of yours those were.', depth: 1 },
+  { bucket: 'injury-docs', what: 'An injury document you uploaded. It is stored where only you can open it, and your coach never sees the file. If you agreed to have one read, a copy of that document also went to OCR.space. The Injuries screen in the app says, against each document, which of yours those were.', depth: 1 },
   { bucket: 'message-media', what: 'A photo or video in your conversation with your coach', depth: 2 },
   // Added with supabase/parts/961, which is where a profile photo started
   // being a file at all. Before that the column held a path inside the
@@ -345,7 +345,7 @@ export const EXPORT_FILE_STORES: readonly ExportFileStore[] = [
   { bucket: 'avatars', what: 'Your profile photo, as your coach and your gym see it', depth: 1 },
   // ── the three the coach note promises and the walk did not visit ────────
   { bucket: 'coach-logos', what: 'Your logo, as it appears on your invoices and on your clients’ app', depth: 1, coachOnly: true },
-  { bucket: 'coach-docs', what: 'A document you published to your clients — a waiver, a par-form, your terms', depth: 1, coachOnly: true },
+  { bucket: 'coach-docs', what: 'A document you published to your clients: a waiver, a par-form, your terms', depth: 1, coachOnly: true },
   { bucket: 'exercise-videos', what: 'An exercise clip you recorded', depth: 1, coachOnly: true },
 ];
 

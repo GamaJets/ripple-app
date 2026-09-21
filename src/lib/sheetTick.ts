@@ -133,10 +133,10 @@ export function sheetTick(target: string | null | undefined, reps: string | null
 
   const t = String(target ?? '').trim();
   if (held != null) {
-    return { state: 'manual', reason: `${t} is a hold — this sheet records repetitions, so type what they did.` };
+    return { state: 'manual', reason: `${t} is a hold. This sheet records repetitions, so type what they did.` };
   }
-  if (span) return { state: 'manual', reason: `You wrote ${t} — type what they actually did.` };
-  if (t) return { state: 'manual', reason: `You wrote ${t} — type what they actually did.` };
+  if (span) return { state: 'manual', reason: `You wrote ${t}. Type what they actually did.` };
+  if (t) return { state: 'manual', reason: `You wrote ${t}. Type what they actually did.` };
   return { state: 'manual', reason: 'Type the reps to save this set.' };
 }
 

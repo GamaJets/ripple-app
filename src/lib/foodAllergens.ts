@@ -69,7 +69,7 @@ export function dishAllergenMark(found: Allergen[]): string | null {
  * without this reads the other way round to the person who most needs it.
  */
 export const DISH_MARK_CAVEAT =
-  'These marks are read off the dish name only. An unmarked dish has not been checked — this app does not know what is in a restaurant kitchen, so ask them if it matters.';
+  'These marks are read off the dish name only. An unmarked dish has not been checked. This app does not know what is in a restaurant kitchen, so ask them if it matters.';
 
 /** The same caveat for a food search, where the rows come from labels and from
  *  other members' own entries rather than from a menu. */
@@ -129,12 +129,12 @@ export interface DishMarkNotice {
 
 /** The read is in flight. Not "no exclusions" and not "we could not find out". */
 export const DISH_MARK_LOADING =
-  'Reading your exclusions — nothing below is marked against them yet.';
+  'Reading your exclusions. Nothing below is marked against them yet.';
 
 /** The read failed. The strongest of the four, because this is the one that
  *  used to be drawn as a clear list. */
 export const DISH_MARK_UNKNOWN =
-  'Your exclusions could not be read, so nothing below is marked against them. An unmarked dish here has not been checked against anything — pull down to try again, and ask the kitchen if it matters.';
+  'Your exclusions could not be read, so nothing below is marked against them. An unmarked dish here has not been checked against anything. Pull down to try again, and ask the kitchen if it matters.';
 
 export function dishMarkNotice(status: LoadStatus, avoidCount: number): DishMarkNotice {
   if (status === 'loading') return { state: 'checking', text: DISH_MARK_LOADING, marked: false };

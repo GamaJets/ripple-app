@@ -220,7 +220,7 @@ export function gapLengthLabel(minutes: number): string {
  */
 export function gapNote(g: DayGap): string {
   if (g.openMin <= 0) {
-    return 'Nobody can book this — there is no open slot across it. Add a session or open the hour so a client can take it.';
+    return 'Nobody can book this: there is no open slot across it. Add a session or open the hour so a client can take it.';
   }
   return `${gapLengthLabel(g.openMin)} of this is already open for booking; the rest of it nobody can take.`;
 }

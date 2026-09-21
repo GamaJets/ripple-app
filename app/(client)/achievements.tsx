@@ -225,9 +225,9 @@ export default function Achievements() {
               <Text style={{ ...ty.section, color: t.ink }}>Unlocked</Text>
               <Text style={{ ...ty.caption, color: t.ink3 }}>
                 {logStatus === 'loading' ? 'Reading your training log…'
-                  : !logKnown ? 'We couldn’t read your training log — badges you have earned are not shown below.'
+                  : !logKnown ? 'We couldn’t read your training log, so badges you have earned are not shown below.'
                   : !countable ? 'You have trained more times than this screen can read in one go, so the count is left blank. Anything marked Earned below really is.'
-                  : bodyReading ? 'Reading your weight history — the badges priced from your bodyweight sets are blank until it lands.'
+                  : bodyReading ? 'Reading your weight history. The badges priced from your bodyweight sets are blank until it lands.'
                   : bodyUnknown ? 'Your weight history could not be read, so the badges priced from your bodyweight sets are left blank rather than shown as locked.'
                   : earnedCount === 0 ? 'Log a workout to unlock your first badge' : `${badges.length - earnedCount} left to earn`}
               </Text>

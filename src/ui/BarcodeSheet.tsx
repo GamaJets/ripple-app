@@ -139,11 +139,11 @@ export function BarcodeSheet({
       // one being reported as the second.
       const scanned = from === 'camera' ? `That barcode read as ${raw}. ` : '';
       const said = out.reason === 'busy'
-        ? { title: 'Could Not Check', body: `${scanned}The food database is busy right now, so we could not look this up. That says nothing about whether the product is in there — try again in a moment, or use “Describe it”.` }
+        ? { title: 'Could Not Check', body: `${scanned}The food database is busy right now, so we could not look this up. That says nothing about whether the product is in there. Try again in a moment, or use “Describe it”.` }
         : out.reason === 'offline'
         ? { title: 'Could Not Check', body: `${scanned}We could not reach the food database, so we could not look this up. Nothing has been logged, and this says nothing about whether the product is in there. Try again when you have signal, or use “Describe it”.` }
         : out.reason === 'no-nutrition'
-        ? { title: 'No Figures for It', body: `${scanned}That product is in the Open Food Facts database, but it has no nutrition recorded — so there is nothing to log from it. Enter it with “Describe it” instead.` }
+        ? { title: 'No Figures for It', body: `${scanned}That product is in the Open Food Facts database, but it has no nutrition recorded, so there is nothing to log from it. Enter it with “Describe it” instead.` }
         : out.reason === 'bad-code'
         ? { title: 'Not a Barcode', body: 'That is not an 8 to 13 digit barcode. Type the number printed under the bars.' }
         : { title: 'Not Found', body: `${scanned}There is no match for it in the Open Food Facts database. Try “Describe it” instead.` };
@@ -187,8 +187,8 @@ export function BarcodeSheet({
           <Text style={{ ...ty.title, color: t.ink }}>Scan a Barcode</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
             {scanning
-              ? 'Point the camera at the barcode — we look it up in Open Food Facts and add the real macros.'
-              : 'Type the number under the barcode — we look it up in Open Food Facts and add the real macros.'}
+              ? 'Point the camera at the barcode. We look it up in Open Food Facts and add the real macros.'
+              : 'Type the number under the barcode. We look it up in Open Food Facts and add the real macros.'}
           </Text>
 
           {scanning ? (<>

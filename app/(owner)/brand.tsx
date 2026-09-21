@@ -169,7 +169,7 @@ export default function OwnerBrand() {
       const saved = await updateTenant({ brandColor: color });
       if (!saved) {
         Alert.alert('Colour Not Saved',
-          'The colour changed on this device only — your gym still has the colour it had, and other owners will not see this one.');
+          'The colour changed on this device only. Your gym still has the colour it had, and other owners will not see this one.');
       }
     } finally { setColorBusy(false); }
   };
@@ -257,7 +257,7 @@ export default function OwnerBrand() {
             // An empty field under a failed read is not an unnamed gym, and
             // saving over it would write a name derived from a failure.
             <Flag tone={t.warn}>
-              Your gym could not be read, so its name is not known — this is not a gym without one.
+              Your gym could not be read, so its name is not known. This is not a gym without one.
               Nothing here can be changed until it can be read.
             </Flag>
           ) : !tenant ? (
@@ -306,7 +306,7 @@ export default function OwnerBrand() {
                   ? 'This account is not attached to a gym, so there is no gym record to hold a colour. A colour picked here changes this device only.'
                   : !gymColor
                     ? 'Your gym has not chosen a colour yet, so the app is drawn in its own. Tap one and it becomes the gym’s.'
-                    : 'Tap a colour — the whole app rethemes instantly, and the gym keeps it.'}
+                    : 'Tap a colour. The whole app rethemes instantly, and the gym keeps it.'}
           </Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
             {palettes.map((p) => {
@@ -444,10 +444,10 @@ export default function OwnerBrand() {
                 {([
                   [textOk, onBrand == null
                     ? 'Button text on your colour could not be measured, so nothing here says it is readable.'
-                    : `Button text on your colour · ${num1(onBrand)} to 1 · ${textOk ? 'reads clearly' : 'hard to read — the app already uses the better of black and white, so a lighter or darker colour is the fix'}`],
+                    : `Button text on your colour · ${num1(onBrand)} to 1 · ${textOk ? 'reads clearly' : 'hard to read. The app already uses the better of black and white, so a lighter or darker colour is the fix'}`],
                   [markOk, asMark == null
                     ? 'Your colour as an icon could not be measured.'
-                    : `Your colour as an icon on a row · ${num1(asMark)} to 1 · ${markOk ? 'stands out' : 'faint against the row — icons and selected states will be hard to find'}`],
+                    : `Your colour as an icon on a row · ${num1(asMark)} to 1 · ${markOk ? 'stands out' : 'faint against the row, so icons and selected states will be hard to find'}`],
                   [brightOk, onBright == null
                     ? 'The hero button could not be measured.'
                     : `Hero button text on your bright colour · ${num1(onBright)} to 1 · ${brightOk ? 'reads clearly' : 'hard to read on the night hero'}`],
@@ -508,7 +508,7 @@ export default function OwnerBrand() {
               green, and then opens the member app expecting to see it has been
               told a false thing by the screen that sold them the feature. */}
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            The name and the colour are the whole of the branding today, and they do not reach the same places. The name is the gym’s everywhere — every owner’s device, and what your members and coaches see their app called. The colour is drawn by this app and by the web console only; a member’s app and a coach’s app keep their own accent.
+            The name and the colour are the whole of the branding today, and they do not reach the same places. The name is the gym’s everywhere: every owner’s device, and what your members and coaches see their app called. The colour is drawn by this app and by the web console only; a member’s app and a coach’s app keep their own accent.
           </Text>
         </Expandable>
       </ScrollView>

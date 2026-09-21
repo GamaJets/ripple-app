@@ -117,7 +117,7 @@ export function RangeBars({ data, prior, labels, unit = '', max, what, priorNote
       <View
         accessible
         accessibilityRole="adjustable"
-        accessibilityLabel={`${what}, ${axisLabel(labels[drawn[0].i])} to ${axisLabel(labels[last.i])}${pair ? `, each beside the same period of ${priorNote ?? 'the window before'}` : ''} — touch to read a bar`}
+        accessibilityLabel={`${what}, ${axisLabel(labels[drawn[0].i])} to ${axisLabel(labels[last.i])}${pair ? `, each beside the same period of ${priorNote ?? 'the window before'}` : ''}. Touch to read a bar`}
         accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
         onAccessibilityAction={(e) => {
           const act = e.nativeEvent.actionName;

@@ -162,7 +162,7 @@ const r = (id: string, clientId: string, at: string, body = 'come at 7'): Refuse
 
   const note = refusedBodyNote(list[1], NOW);
   ok(/Not delivered/.test(note), 'the line above the words says they did not go');
-  ok(/copy them/.test(note), 'and that they are about to be lost if nothing is done');
+  ok(/copy them/i.test(note), 'and that they are about to be lost if nothing is done');
   const empty = refusedBodyNote({ ...list[1], body: '   ' }, NOW);
   ok(/not recoverable/.test(empty), 'a message whose words could not be read says so rather than drawing a blank line');
 }

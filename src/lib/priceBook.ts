@@ -194,7 +194,7 @@ export const PRICE_STATE_MEANS: Record<PriceState, string> = {
   'above-list': 'The last bill is more than the plan says. Usually the price book is behind what the desk is actually charging.',
   'other-currency': 'The bill and the plan are in different currencies. This app holds no exchange rate and will not invent one, so both are shown and neither is subtracted from the other.',
   'not-billed': 'No invoice has ever been raised against this membership, so nothing in this database says what this member is charged. This is not the list price; it is silence.',
-  'amount-unstated': 'One side of the comparison cannot be read — an invoice with no amount, a plan with no price, or a currency written as something that is not a three-letter code. Nothing can be compared to a blank, and a currency this app cannot name is a blank with writing on it: two rows both reading "pounds" are not thereby in the same money.',
+  'amount-unstated': 'One side of the comparison cannot be read: an invoice with no amount, a plan with no price, or a currency written as something that is not a three-letter code. Nothing can be compared to a blank, and a currency this app cannot name is a blank with writing on it: two rows both reading "pounds" are not thereby in the same money.',
   'bills-unread': 'The invoices could not be read, or came back as a prefix. Every membership is unplaced while that is true, because the bill that would place it may be one of the rows that did not arrive.',
   'no-plan': 'This membership carries no plan. A plan retired with memberships still running leaves them pointing at nothing, so there is no list price to hold it against.',
   'plan-unread': 'The price book could not be read, or this membership points at a plan that is not in it.',

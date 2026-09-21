@@ -209,7 +209,7 @@ export function standingNote(s: StandingFee): string {
   }
   if (s.fee != null && !code(s.currency)) {
     return 'Your gym has a standing session fee and has not set a currency, so there is no amount to '
-      + 'show you — the figure is real and there is nothing that could say what money it is in.';
+      + 'show you. The figure is real and there is nothing that could say what money it is in.';
   }
   return 'Your gym has not set a standing session fee either, so a session with no rate of its own is '
     + 'UNPRICED. That is not the same as free: payroll refuses to total a period containing one rather '
@@ -228,7 +228,7 @@ export const NO_GYM_PAY_NOTE =
  *  that is a statement about the coach's employment made from a failure. */
 export const PAY_TERMS_UNREAD_NOTE =
   'Your pay terms could not be read, so nothing about them is shown here. This is not a statement that '
-  + 'none are set — whatever your gym has agreed with you is unchanged and still what payroll uses.';
+  + 'none are set. Whatever your gym has agreed with you is unchanged and still what payroll uses.';
 
 /** Said when a rate exists and no currency does. */
 export const RATE_UNSTATED_NOTE =
@@ -298,12 +298,12 @@ export function policyView(link: GymLink, status: LoadStatus, stored: string | n
  */
 export function policyDetail(v: PolicyView): string {
   if (v.kind === 'no_gym') {
-    return 'There is no gym attached to this account, so there is no pay policy — nobody else decides '
+    return 'There is no gym attached to this account, so there is no pay policy. Nobody else decides '
       + 'what a cancelled session is worth to you.';
   }
   if (v.kind === 'unread') return PAY_TERMS_UNREAD_NOTE;
   if (v.kind === 'unset') {
-    return `A delivered session is paid. Beyond that, ${NO_PAY_POLICY_NOTE} — so no-shows and late `
+    return `A delivered session is paid. Beyond that, ${NO_PAY_POLICY_NOTE}, so no-shows and late `
       + 'cancellations are not something this app can tell you the answer for. Ask your gym rather than '
       + 'reading the conservative case into the silence.';
   }
@@ -311,6 +311,6 @@ export function policyDetail(v: PolicyView): string {
   const lateCancel = v.code === 'late_cancellations' || v.code === 'no_shows_and_late_cancellations';
   return `A delivered session is paid. A no-show ${noShow ? 'is paid' : 'is not paid'}, and a late `
     + `cancellation ${lateCancel ? 'is paid' : 'is not paid'}. A session nobody has marked is never paid `
-    + 'under any policy — that is not your gym’s decision, it is the outcome still being unrecorded, and '
+    + 'under any policy. That is not your gym’s decision, it is the outcome still being unrecorded, and '
     + 'marking it is what makes it count.';
 }

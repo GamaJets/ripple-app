@@ -133,7 +133,7 @@ export default function JoinLanding() {
             screens later, which is how the two came to disagree on the app's
             own name inside one journey. */}
         {badCode
-          ? `That link was missing a usable code — opening ${appName} so you can enter the code yourself.`
+          ? `That link was missing a usable code. Opening ${appName} so you can enter the code yourself.`
           : `Opening ${appName}…`}
       </Text>
     </View>

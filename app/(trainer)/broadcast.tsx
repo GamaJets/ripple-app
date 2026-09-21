@@ -462,7 +462,7 @@ export default function Broadcast() {
       // reaching here threw AFTER them, and "nothing was written" is a figure
       // we would be inventing.
       setOutcome(null);
-      Alert.alert('Not Sent', 'Something went wrong on the way to your clients’ threads, and this screen cannot say how far it got. Open a thread to check before sending it again — a second send would put the same words there twice.');
+      Alert.alert('Not Sent', 'Something went wrong on the way to your clients’ threads, and this screen cannot say how far it got. Open a thread to check before sending it again. A second send would put the same words there twice.');
     } finally { setBusy(false); }
   };
   /**
@@ -596,13 +596,13 @@ export default function Broadcast() {
               note="Nobody is listed below because the roster did not come back. This is not an empty book, and nothing can be sent until it loads." />
           ) : bookShort ? (
             <Notice tone={t.warn} kicker="Roster" title="This Is Part of Your Book"
-              note="Your roster came back at its row limit, so anyone past the point it stopped is not in this list and would not receive the message. The send is held rather than going to the part that loaded — a message cannot be taken back, and nothing afterwards would say who had been left out." />
+              note="Your roster came back at its row limit, so anyone past the point it stopped is not in this list and would not receive the message. The send is held rather than going to the part that loaded: a message cannot be taken back, and nothing afterwards would say who had been left out." />
           ) : segUnreliable ? (
             <Notice tone={t.warn} kicker={sel.kind === 'tag' ? 'Tags' : 'Segment'}
               title="This Segment Could Not Be Read in Full"
               note={sel.kind === 'tag'
                 ? 'Your client tags did not all come back, so somebody in this segment may be missing from the list below and the send is held until they load.'
-                : `What decides ${segmentLabel} did not all come back, so this list is the size of the read rather than the size of the segment — and there is nothing on it to say which. The send is held until it loads.`} />
+                : `What decides ${segmentLabel} did not all come back, so this list is the size of the read rather than the size of the segment, and there is nothing on it to say which. The send is held until it loads.`} />
           ) : null}
 
           {/* What the band actually means, said before the names rather than
@@ -685,7 +685,7 @@ export default function Broadcast() {
               has none. See src/lib/broadcastOutcome.ts. */}
           {failed.length ? (
             <Notice tone={t.warn} kicker="Not Written" title={`${failed.length} Did Not Get the Last One`}
-              note={`${listNames(failed.map(nameOf))} — nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
+              note={`${listNames(failed.map(nameOf))}: nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
           ) : null}
         </Section>
 
@@ -770,7 +770,7 @@ export default function Broadcast() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: G, paddingBottom: sp.xxl, maxHeight: '70%' }}>
           <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
-            Tapping one puts it in your box. Nothing is sent until you press Send, and a client’s name is not filled in — everybody gets the same words.
+            Tapping one puts it in your box. Nothing is sent until you press Send, and a client’s name is not filled in. Everybody gets the same words.
           </Text>
           <ScrollView>
             {saved.rows.length === 0 ? (

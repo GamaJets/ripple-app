@@ -458,7 +458,7 @@ export function unmatchedReasonNote(reason: UnmatchReason): string {
     case 'no-code':
       return 'This ad’s link does not carry a code. Set its destination to one of your join links and its spend will be counted from the next sync.';
     case 'unknown-code':
-      return 'This ad’s link carries a code that is not one of yours — usually a typo in the destination, or a code that was deleted.';
+      return 'This ad’s link carries a code that is not one of yours. Usually it is a typo in the destination, or a code that was deleted.';
     case 'no-amount':
       return 'What this ad cost came back in a form we could not read, so its spend is unknown rather than nothing.';
   }
@@ -469,7 +469,7 @@ export function unmatchedReasonNote(reason: UnmatchReason): string {
  * numbers has to know what they do not include.
  */
 export const UNMATCHED_NOTE =
-  'Money spent on ads whose destination does not carry one of your join links cannot be credited to a code. It is listed below with what it cost, because it is money you spent — it is not missing, and it is not nothing.';
+  'Money spent on ads whose destination does not carry one of your join links cannot be credited to a code. It is listed below with what it cost, because it is money you spent. It is not missing, and it is not nothing.';
 
 /** Why a sync that ran can still be unusable. Both are stated, never guessed. */
 export const CURRENCY_CONFLICT_NOTE =

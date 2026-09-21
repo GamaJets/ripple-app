@@ -273,7 +273,7 @@ export function denominate(currency: string | null | undefined, status: LoadStat
     return {
       ok: false,
       why: 'unread',
-      note: 'We couldn’t read what currency you charge in, so amounts that depend on it are withheld rather than printed in one we picked. Nothing is missing from your settings — the read failed. Open this again in a moment.',
+      note: 'We couldn’t read what currency you charge in, so amounts that depend on it are withheld rather than printed in one we picked. Nothing is missing from your settings. The read failed. Open this again in a moment.',
     };
   }
   const stated = (currency || '').trim();
@@ -288,7 +288,7 @@ export function denominate(currency: string | null | undefined, status: LoadStat
     return {
       ok: false,
       why: 'unusable',
-      note: `What is recorded as your currency — “${stated}” — is not a three-letter currency code, so amounts that depend on it are withheld rather than printed under a label that is not money. Nothing here is lost: the amounts are still on record and will read correctly the moment the code is. Your gym owner corrects it in the gym settings.`,
+      note: `What is recorded as your currency, “${stated}”, is not a three-letter currency code, so amounts that depend on it are withheld rather than printed under a label that is not money. Nothing here is lost: the amounts are still on record and will read correctly the moment the code is. Your gym owner corrects it in the gym settings.`,
     };
   }
   // No currency in hand. Whether that is a fact about the settings or a fact
@@ -347,7 +347,7 @@ export function ledgerEmptyLine(side: LedgerSide, status: LoadStatus): string {
  * figure reads as an omission unless somebody says it was a decision.
  */
 export const NO_NET_NOTE =
-  'What comes in and what goes out are kept apart and are never subtracted from each other. They are recorded in different places, in currencies that may differ, and neither is complete on its own — a single net figure would be a number about neither question.';
+  'What comes in and what goes out are kept apart and are never subtracted from each other. They are recorded in different places, in currencies that may differ, and neither is complete on its own. A single net figure would be a number about neither question.';
 
 /**
  * What Stripe knows, and the one piece of it this app is now told.
@@ -369,7 +369,7 @@ export const NO_NET_NOTE =
  * src/lib/coachPayouts.ts carries the long form.
  */
 export const STRIPE_AUTHORITY_NOTE =
-  'These are amounts clients were charged, before Stripe’s fee and the platform fee. What actually reached your bank is a different figure from a different source, shown separately under what landed — a payout is a balance rather than the proceeds of a sale, so the two are never subtracted from each other. Your Stripe dashboard is the record of what moved.';
+  'These are amounts clients were charged, before Stripe’s fee and the platform fee. What actually reached your bank is a different figure from a different source, shown separately under what landed. A payout is a balance rather than the proceeds of a sale, so the two are never subtracted from each other. Your Stripe dashboard is the record of what moved.';
 
 /** What a period figure counts, said next to the period. A total with no
  *  stated span is read as "all time" by half its readers and "this month" by

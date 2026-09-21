@@ -503,8 +503,8 @@ export default function ShareKit() {
       Alert.alert(
         'Card Sent to Your Share Sheet',
         r.captionCopied
-          ? 'Your caption is on the clipboard — paste it into the post. A share sheet cannot carry an image and its words to the same place, so they travel separately.'
-          : 'Copy your caption from the box on this screen before you post — this version of the app could not put it on the clipboard for you.',
+          ? 'Your caption is on the clipboard. Paste it into the post. A share sheet cannot carry an image and its words to the same place, so they travel separately.'
+          : 'Copy your caption from the box on this screen before you post. This version of the app could not put it on the clipboard for you.',
       );
       return;
     }
@@ -515,7 +515,7 @@ export default function ShareKit() {
       'Sent as Text Instead',
       moduleReason
         ? `${moduleReason}\n\nYour caption has gone to the share sheet.`
-        : 'Your phone could not turn the card into an image just now, so the caption has gone to the share sheet on its own. Nothing has been posted — you still choose where it goes.',
+        : 'Your phone could not turn the card into an image just now, so the caption has gone to the share sheet on its own. Nothing has been posted; you still choose where it goes.',
     );
   };
 
@@ -655,7 +655,7 @@ export default function ShareKit() {
     setIgBusy(false);
     setPages(withIg);
     ig.reload();
-    Alert.alert('Choose the Account', 'Your Meta login reaches more than one Instagram account. Pick the one you post from — nothing posts anywhere until you do.');
+    Alert.alert('Choose the Account', 'Your Meta login reaches more than one Instagram account. Pick the one you post from. Nothing posts anywhere until you do.');
   };
 
   const choose = async (p: PageChoice) => {
@@ -759,7 +759,7 @@ export default function ShareKit() {
             // the coach they are not, and this is the line they read.
             build.reason === 'unread' && sessionsPending ? (
               <Notice kicker="Reading Your Sessions" title="No Card Yet"
-                note="Still reading what you have delivered. Nothing has failed — the figures for a card appear here once the read lands." />
+                note="Still reading what you have delivered. Nothing has failed. The figures for a card appear here once the read lands." />
             ) : (
             <Notice tone={build.reason === 'unread' ? undefined : t.brand}
               kicker={build.reason === 'unread' ? 'Could Not Read Your Sessions' : build.reason === 'consent' ? 'Their Call, Not Yours' : 'Nothing to Put on It Yet'}
@@ -793,7 +793,7 @@ export default function ShareKit() {
             <Section>
               <SectionHead title="The Result" note="You type it" />
               <TextInput value={spanText} onChangeText={setSpanText} placeholder="12 weeks in" placeholderTextColor={t.ink3} style={field} accessibilityLabel="The period, in your words" />
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>The headline on the card — the period, in your words.</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>The headline on the card: the period, in your words.</Text>
 
               <View style={{ marginTop: sp.lg, gap: sp.sm }}>
                 {figures.map((f, i) => (
@@ -807,7 +807,7 @@ export default function ShareKit() {
                   expects the app to fill these in should understand that the
                   refusal is deliberate rather than missing. */}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Type the figures your client agreed you could post. Repple will not pull them from their record — those are theirs, not yours to publish.
+                Type the figures your client agreed you could post. Repple will not pull them from their record. Those are theirs, not yours to publish.
               </Text>
 
               <TextInput value={note} onChangeText={setNote} placeholder="Add a line of your own (optional)" placeholderTextColor={t.ink3} multiline accessibilityLabel="A line of your own, optional"
@@ -821,7 +821,7 @@ export default function ShareKit() {
                 on={okFigures}
                 onPress={() => setOkFigures((v) => !v)}
                 title="They Agreed These Figures Can Be Posted Publicly"
-                note="Without this there is no card to share — not a warning you can tap past."
+                note="Without this there is no card to share. This is not a warning you can tap past."
               />
               <Check
                 on={okName}
@@ -832,7 +832,7 @@ export default function ShareKit() {
               {okName ? (
                 <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} accessibilityLabel="Their name" />
               ) : (
-                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name — used to keep it OFF the card" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} accessibilityLabel="Their name — typed here so it can be kept off the card" />
+                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name, used to keep it OFF the card" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} accessibilityLabel="Their name, typed here so it can be kept off the card" />
               )}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {okName
@@ -883,7 +883,7 @@ export default function ShareKit() {
                     <View style={{ marginTop: sp.md }}>
                       <Flag tone={t.warn}>
                         Your book came back short, so these are not all of your clients. A client you
-                        cannot find here has not withdrawn anything — pull to refresh and look again.
+                        cannot find here has not withdrawn anything. Pull to refresh and look again.
                       </Flag>
                     </View>
                   ) : null}
@@ -913,7 +913,7 @@ export default function ShareKit() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                       You added this client to your book by hand, so they have no Repple account, no
                       Progress screen and no photos here. This is not a client who has refused and it
-                      is not a read that failed — there is nothing yet to agree to. The card is made
+                      is not a read that failed. There is nothing yet to agree to. The card is made
                       without a photo.
                     </Text>
                   ) : sentStatus === 'error' ? (

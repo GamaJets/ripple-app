@@ -127,7 +127,7 @@ export function receiptBlocker(
   if (!RECEIPT_KINDS.includes(kind)) {
     // Not "invalid kind". The reason is the whole point and an owner who is
     // told it will not try to work around it.
-    return 'A receipt can only be filed as a kind the floor cannot read. What the gym pays in rent, and to whom, is the owner’s record — filing it as a photograph or a certificate would put it in front of every trainer.';
+    return 'A receipt can only be filed as a kind the floor cannot read. What the gym pays in rent, and to whom, is the owner’s record. Filing it as a photograph or a certificate would put it in front of every trainer.';
   }
   return documentBlocker(title, file);
 }
@@ -147,7 +147,7 @@ export function receiptBlocker(
  */
 export function receiptTitle(cost: { description: string; paidOn: string }): string {
   const d = (cost.description ?? '').trim();
-  return d ? `${d} — ${cost.paidOn}` : `Cost paid ${cost.paidOn}`;
+  return d ? `${d} · ${cost.paidOn}` : `Cost paid ${cost.paidOn}`;
 }
 
 /* ── what is attached ─────────────────────────────────────────────────────── */
@@ -354,7 +354,7 @@ export async function recordCostReceipt(
   if (!row?.id || row.cost_id !== d.costId) {
     throw new Error(
       'That file was uploaded and the record of it did not come back, so nothing on this gym’s '
-      + 'books is pointing at it. Reload this screen before attaching it again — a second attempt '
+      + 'books is pointing at it. Reload this screen before attaching it again. A second attempt '
       + 'would put the same document in the bucket twice.',
     );
   }

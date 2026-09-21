@@ -240,5 +240,5 @@ export function closeYearNote(y: CloseYear): string | null {
  *  in it, and the sentence has to say which of the two it is. */
 export const CLOSE_YEAR_UNREAD_NOTE =
   'This gym’s record of closed months could not be read, so there is no year to '
-  + 'show. That is not a year in which nothing was closed — it is a query that '
+  + 'show. That is not a year in which nothing was closed. It is a query that '
   + 'did not come back, and nothing below has been worked out from it.';

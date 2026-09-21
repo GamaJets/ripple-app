@@ -233,13 +233,13 @@ export function scanConsentWho(rs: readonly ScanRecipient[]): string {
   // One sentence shape for one company and for two. The negation is spelled out
   // both times — "neither is part of your gym" drops the word a member is
   // scanning for, and this is the line they are scanning.
-  return `To read the numbers off your sheet the app sends a photo of it to ${recipientNames(rs)} — ${rs.map((r) => `${r.vendor}, ${r.role}`).join('; ')}. They are not part of this app and not part of your gym.`;
+  return `To read the numbers off your sheet the app sends a photo of it to ${recipientNames(rs)}: ${rs.map((r) => `${r.vendor}, ${r.role}`).join('; ')}. They are not part of this app and not part of your gym.`;
 }
 
 /** WHAT. The whole page, and what is printed on a page like this — which is the
  *  part people get wrong: they picture the app sending "82.4 kg". */
 export const SCAN_CONSENT_WHAT =
-  'What goes is the whole sheet, as a picture — not just the three figures this screen keeps. That picture carries whatever the machine printed: your name, your age or date of birth, your height, the gym or clinic at the top, the date you stood on it, and every line of the breakdown down the side.';
+  'What goes is the whole sheet, as a picture, not just the three figures this screen keeps. That picture carries whatever the machine printed: your name, your age or date of birth, your height, the gym or clinic at the top, the date you stood on it, and every line of the breakdown down the side.';
 
 /** What this app cannot promise once a copy has gone. Not softened, and not a
  *  claim in either direction — see the retention note in the header. */
@@ -252,7 +252,7 @@ export function scanConsentRetention(rs: readonly ScanRecipient[]): string {
  *  standing in front of the printout, and typing three numbers off a page in
  *  your hand is how this screen worked before any reader existed. */
 export const SCAN_CONSENT_IF_YOU_DECLINE =
-  'If you say no, nothing is sent anywhere. You type the weight, body fat and muscle off the sheet yourself — it is three numbers, they go in exactly the same, and the scan counts exactly the same as one we had read.';
+  'If you say no, nothing is sent anywhere. You type the weight, body fat and muscle off the sheet yourself. It is three numbers, they go in exactly the same, and the scan counts exactly the same as one we had read.';
 
 export const SCAN_CONSENT_SEND_LABEL = 'Send It to Be Read';
 export const SCAN_CONSENT_TYPE_LABEL = 'I’ll Type the Numbers';
@@ -262,7 +262,7 @@ export function scanConsentSendA11y(rs: readonly ScanRecipient[]): string {
   return `Send a photo of this sheet to ${recipientNames(rs)} to be read`;
 }
 export const SCAN_CONSENT_TYPE_A11Y =
-  'Do not send anything — type the numbers off the sheet myself';
+  'Do not send anything. Type the numbers off the sheet myself';
 export const SCAN_CONSENT_CANCEL_A11Y = 'Do not photograph the sheet at all';
 
 /* ── the outcome the member lands on ────────────────────────────────────── */
@@ -271,7 +271,7 @@ export const SCAN_CONSENT_CANCEL_A11Y = 'Do not photograph the sheet at all';
  *  is the feature working the way they asked for it to. */
 export const SCAN_REFUSED_TITLE = 'Sent nowhere';
 export const SCAN_REFUSED_NOTE =
-  'Nothing about your sheet left this phone, so there is nothing to fill the boxes in with. Type the weight, body fat and muscle off the printout and save it — it counts exactly the same.';
+  'Nothing about your sheet left this phone, so there is nothing to fill the boxes in with. Type the weight, body fat and muscle off the printout and save it. It counts exactly the same.';
 
 /**
  * Shown when the member said YES and the agreement could not be written down.
@@ -312,7 +312,7 @@ export type SheetSendState = 'granted' | 'refused' | 'no-record' | 'unknown';
  * the member is asked each time.
  */
 export function scanScreenPromise(rs: readonly ScanRecipient[]): string {
-  return `The photo of your sheet is not kept and your coach never sees it — only the figures you save. Reading a sheet means sending a picture of it to ${recipientNames(rs)}, outside this app, and we ask you about that every time before anything leaves. Say no and you type the three numbers in yourself.`;
+  return `The photo of your sheet is not kept and your coach never sees it, only the figures you save. Reading a sheet means sending a picture of it to ${recipientNames(rs)}, outside this app, and we ask you about that every time before anything leaves. Say no and you type the three numbers in yourself.`;
 }
 
 /**

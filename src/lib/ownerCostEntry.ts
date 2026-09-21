@@ -54,7 +54,7 @@ import { isWhole, type LoadStatus } from '../ui/loadStatus';
  * row will be read months later as evidence that this money went out.
  */
 export const COST_IS_A_CLAIM_ABOUT_YOUR_BANK =
-  'Recording this says the gym paid it — that money left the account, on the day you give, in that currency. '
+  'Recording this says the gym paid it: that money left the account, on the day you give, in that currency. '
   + 'Nothing checks it against a bank, a card or the supplier, and no receipt is stored behind it. Somebody '
   + 'reconciling a statement in eleven months has this line and nothing else.';
 
@@ -85,7 +85,7 @@ const CLOSED_MONTH_PREFIX = 'That day is inside a month that has been closed. ';
  */
 export const CLOSED_MONTH_UNKNOWN_NOTE =
   'Whether the month you are dating this into has already been signed off could not be read. If it has, the '
-  + 'recording will be refused — nothing will be half-written, and you would then reopen the month on the console.';
+  + 'recording will be refused. Nothing will be half-written, and you would then reopen the month on the console.';
 
 /* ── the day to offer ─────────────────────────────────────────────────────── */
 
@@ -186,5 +186,5 @@ export function findRecordedCost(
  */
 export const COST_UNCONFIRMED_NOTE =
   'The recording was sent and no error came back, but the list could not be read afterwards to confirm the line is '
-  + 'there. Check the list before entering it again — two identical rows look exactly like two identical purchases, '
+  + 'there. Check the list before entering it again. Two identical rows look exactly like two identical purchases, '
   + 'and nothing can tell them apart afterwards.';

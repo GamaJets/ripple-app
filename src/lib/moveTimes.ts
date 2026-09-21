@@ -333,7 +333,7 @@ export function emptyMoveTimesLine(
         ? `Every hour of ${dayLabel} already has something of yours in it, so there is nowhere to move this to `
           + 'on that day. Try another day.'
         : `Every hour of ${dayLabel} already has something of yours in it. You have not set working hours for `
-          + 'that day, so only the daytime was looked at — set them in Weekly Availability, or try another day.';
+          + 'that day, so only the daytime was looked at. Set them in Weekly Availability, or try another day.';
   }
 }
 
@@ -470,7 +470,7 @@ export function moveAtConfirmBody(who: string, from: string, to: string, inHours
   return `${who} moves from ${from} to ${to}.\n\n`
     + `${to} is not one of your open slots, so this puts the session straight into your diary at that time. `
     + (inHours ? '' : 'It is outside the working hours you have set for that day. ')
-    + 'Nothing is charged and no session comes off their pack — it is the same session at a different time. '
+    + 'Nothing is charged and no session comes off their pack. It is the same session at a different time. '
     + `${from} goes back on your calendar, or straight to whoever is first in line for it. `
     + 'They are notified once it has moved.';
 }

@@ -290,7 +290,7 @@ export function gapPhrase(days: number): string {
  */
 export function rhythmLine(r: ScanRhythm | null): string | null {
   if (!r) return null;
-  const gap = r.typicalGapDays != null ? ` — ${gapPhrase(r.typicalGapDays)}` : '';
+  const gap = r.typicalGapDays != null ? `, ${gapPhrase(r.typicalGapDays)}` : '';
   // The span is given in whole days under a fortnight and in weeks above it:
   // "over 3 days" is a fact, "over 27 weeks" is the one a coach can hold.
   const over = r.spanDays < 14 ? `${r.spanDays} days` : `${Math.round(r.spanDays / 7)} weeks`;
@@ -314,5 +314,5 @@ export function stoppedNote(r: ScanRhythm | null, since: SinceScan | null): stri
   if (!r || !since || r.typicalGapDays == null) return null;
   if (since.days <= r.typicalGapDays * 2) return null;
   return `Nothing has been recorded for ${since.days} days, against a usual ${r.typicalGapDays}. `
-    + 'That is a gap in what this app was told — it does not say where they have or have not been measured.';
+    + 'That is a gap in what this app was told. It does not say where they have or have not been measured.';
 }

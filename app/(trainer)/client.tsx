@@ -1282,7 +1282,7 @@ export default function ClientScreen() {
     setLogBusy(false);
     if (error || !data || data.length !== 1) {
       if (error) reportError('client.logContact', error, { clientId: id });
-      setLogErr('That contact was not recorded, so nobody else can see it. Nothing has changed — try again.');
+      setLogErr('That contact was not recorded, so nobody else can see it. Nothing has changed. Try again.');
       return;
     }
     setLogging(null);
@@ -1815,14 +1815,14 @@ export default function ClientScreen() {
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               {adherencePct != null ? 'Adherence is from their latest check-in. ' : `No check-in carries an adherence rating for ${who}, so the ring is empty rather than at nought. `}
               {deltaKg == null
-                ? `No second scan on record for ${who}, so there is no change to state — a dash rather than a nil movement nobody measured. `
+                ? `No second scan on record for ${who}, so there is no change to state: a dash rather than a nil movement nobody measured. `
                 : `The weight change is across the scans on record; the line is the last dozen. `}
               Days Trained counts days with anything logged, and its line is the last eight weeks.
               {unasked
                 ? ''
                 : seen == null
                 ? ' Their ticks could not be read, so the days they were in the app are unknown rather than none.'
-                : ` In the app is days out of the last ${seen.windowDays} they ticked something — evidence they stood in front of their list, not a score.`}
+                : ` In the app is days out of the last ${seen.windowDays} they ticked something. It is evidence they stood in front of their list, not a score.`}
               {!unasked && drift && drift.status !== 'on_track'
                 ? ` ${DRIFT_LABEL[drift.status]} is judged on check-ins, logged workouts, completed sessions and gym visits over the last ${DEFAULT_WINDOWS.historyDays} days.`
                 : ''}
@@ -1851,7 +1851,7 @@ export default function ClientScreen() {
           <SectionHead title="Needs You" />
           {unasked ? (
             <Flag tone={t.ink3}>
-              {unasked} Nothing is outstanding on this screen because nothing was asked for — which
+              {unasked} Nothing is outstanding on this screen because nothing was asked for, which
               is not the same as there being nothing.
             </Flag>
           ) : null}
@@ -1895,7 +1895,7 @@ export default function ClientScreen() {
         ) : !client && r.status === 'error' ? (
           <Section>
             <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Everything below is still read for this person directly. What is missing is the roster row — their goal, delivery, weight and unread count come from it." />
+              note="Everything below is still read for this person directly. What is missing is the roster row. Their goal, delivery, weight and unread count come from it." />
           </Section>
         ) : !client && r.status !== 'loading' ? (
           <Section>
@@ -1988,7 +1988,7 @@ export default function ClientScreen() {
                 a checked-in client is the moment logging is for. */}
             {justCheckedIn ? (
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
-                {who} is checked in. Log Session takes the exercises as you go — it lands in their own record and shows up in their app.
+                {who} is checked in. Log Session takes the exercises as you go. It lands in their own record and shows up in their app.
               </Text>
             ) : null}
           </View>
@@ -2012,7 +2012,7 @@ export default function ClientScreen() {
             <ListRow icon="grid" title={program ? 'Their Program' : `Build ${who} a Program`}
               note={programLine(ap.status, program?.title ?? null, program?.days.length ?? null, who)
                 + (client?.injuries && client.injuries.length
-                  ? ` ${client.injuries.length === 1 ? 'One injury is' : `${client.injuries.length} injuries are`} disclosed — they are the next card down; read ${client.injuries.length === 1 ? 'it' : 'them'} before you change this.`
+                  ? ` ${client.injuries.length === 1 ? 'One injury is' : `${client.injuries.length} injuries are`} disclosed. They are the next card down; read ${client.injuries.length === 1 ? 'it' : 'them'} before you change this.`
                   : '')}
               tone={ap.status === 'error' ? t.warn : 'brand'}
               onPress={() => { if (id) router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient' } } as any); }} />
@@ -2074,7 +2074,7 @@ export default function ClientScreen() {
               // it for a reason that has nothing to do with what they have
               // disclosed. `isWhole` is the rule; this is the branch it needs.
               <Flag tone={t.warn}>
-                Only part of your roster came back, and {who} is not in the part that did — so
+                Only part of your roster came back, and {who} is not in the part that did, so
                 anything they have disclosed was not read either. This is not a statement that they
                 have disclosed nothing.
               </Flag>
@@ -2105,7 +2105,7 @@ export default function ClientScreen() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   Their own words. Their program cannot be assigned until you have read these, and
                   their app already flags or swaps movements that load them. Only {who} can add,
-                  change or remove one — you cannot, deliberately, because a gate the coach can edit
+                  change or remove one. You cannot, deliberately, because a gate the coach can edit
                   their way out of is not a gate.
                 </Text>
               </>
@@ -2353,7 +2353,7 @@ export default function ClientScreen() {
             ) : gl.sharedWithCoach === false ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
                 {who} has not shared their glucose readings. Whether they have any is not
-                something this screen can tell you — they choose, in their own app, under Blood
+                something this screen can tell you. They choose, in their own app, under Blood
                 Sugar.
               </Text>
             ) : gl.status === 'error' || gl.sharedWithCoach === null ? (
@@ -2385,7 +2385,7 @@ export default function ClientScreen() {
                 {who} has more readings on record than one request returns, so an average, a
                 highest, a share in range and a count of them would each be arithmetic over
                 whichever part came back. None of the four is shown. Their readings are real and
-                there are more of them than this — it is not a fortnight that went badly.
+                there are more of them than this. It is not a fortnight that went badly.
               </Text>
             ) : gl.readings.length === 0 ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
@@ -2435,7 +2435,7 @@ export default function ClientScreen() {
                   // distinction their own copy draws in the same place.
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
                     More is on record than one request returns, so what sits around {who}&rsquo;s
-                    meals cannot be shown — a meal missing from below may simply be on the other
+                    meals cannot be shown. A meal missing from below may simply be on the other
                     side of that limit.
                   </Text>
                 ) : gl.paired.filter((x) => x.rise != null).length === 0 ? (
@@ -2468,7 +2468,7 @@ export default function ClientScreen() {
 
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   What their monitor recorded, nothing more. Repple does not turn these into dietary
-                  advice and neither should this screen — targets are set with their clinician, and
+                  advice and neither should this screen. Targets are set with their clinician, and
                   {' '}{who} can withdraw this at any time, which hides the history as well.
                 </Text>
               </>
@@ -2534,7 +2534,7 @@ export default function ClientScreen() {
                   {attSince
                     ? `Last recorded at a gym on ${fmtDay(attSince.since)}. `
                     : att.status === 'ready' && attHasGym === true
-                      ? `Your gym has nothing on record for ${who} — which for plenty of gyms means it does not scan the door and its registers are not marked, rather than that they have stayed away. `
+                      ? `Your gym has nothing on record for ${who}, which for plenty of gyms means it does not scan the door and its registers are not marked, rather than that they have stayed away. `
                       : `How long it has been since ${who} was in could not be established, which is not the same as them not coming. `}
                   {attLongest
                     ? `The longest they have gone between visits is ${attLongest.days} days, from ${fmtDay(attLongest.from)} to ${fmtDay(attLongest.to)}.`
@@ -2552,7 +2552,7 @@ export default function ClientScreen() {
                 <View style={{ marginTop: sp.md }}>
                   <Flag tone={t.warn}>
                     That is already longer than {who} has ever gone between visits in the record you
-                    can see. It is the gap, not a verdict — the record starts where it starts.
+                    can see. It is the gap, not a verdict. The record starts where it starts.
                   </Flag>
                 </View>
               ) : null}
@@ -2578,7 +2578,7 @@ export default function ClientScreen() {
               {attMix.unreadable ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                   {attMix.unreadable} more {attMix.unreadable === 1 ? 'attendance was' : 'attendances were'} at a class
-                  this app could not open — usually a gym they are no longer with. The attendance is real; only the
+                  this app could not open, usually a gym they are no longer with. The attendance is real; only the
                   class is missing, so it is counted here rather than under a name we would be guessing at.
                 </Text>
               ) : null}
@@ -2745,7 +2745,7 @@ export default function ClientScreen() {
               ) : subs.status === 'ready' ? (
                 <Text style={{ ...ty.label, color: t.ink2 }}>
                   {sub
-                    ? `On a subscription to you — ${statusLabel(sub.status)}.`
+                    ? `On a subscription to you (${statusLabel(sub.status)}).`
                     : `${who} is not on a subscription to you. What they have paid is one-off sales, cash, or both.`}
                 </Text>
               ) : (
@@ -2916,7 +2916,7 @@ export default function ClientScreen() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   Readiness questions, training history, what they want, what they have already
                   tried, when they can train, and who to call. You cannot fill any of it in for
-                  them — the database refuses it — which is what makes it worth reading.
+                  them (the database refuses it), which is what makes it worth reading.
                 </Text>
               </>
             )}
@@ -3021,7 +3021,7 @@ export default function ClientScreen() {
                 id goes with it for the same reason the rows above pass it; open
                 from Explore and client-report asks who the report is for. */}
             <ListRow icon="pencil" title={`Write ${who} a Report`}
-              note={`The handover document at the end of a block — read from ${who}'s record, not from memory.`}
+              note={`The handover document at the end of a block, read from ${who}'s record, not from memory.`}
               onPress={go('/(trainer)/client-report')} />
             {/* Sending paperwork starts here, on the screen of the person it is
                 for, because that is where a coach is standing when they decide to
@@ -3032,7 +3032,7 @@ export default function ClientScreen() {
                 not read would be a parameter that looks like it does something.
                 The picker on that screen names every client, this one included. */}
             <ListRow icon="pencil" title="Send Them a Document"
-              note="Your own waivers, agreements and forms — pick one and send it to a single client."
+              note="Your own waivers, agreements and forms. Pick one and send it to a single client."
               onPress={() => router.push('/(trainer)/documents')} />
           </Section>
         ) : null}
@@ -3111,7 +3111,7 @@ export default function ClientScreen() {
               </View>
             ) : null}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Shared with everybody on your gym’s staff. A contact recorded here is not attendance and does not move anybody’s retention verdict — it is the record of what was tried, so the next person to look does not try it again.
+              Shared with everybody on your gym’s staff. A contact recorded here is not attendance and does not move anybody’s retention verdict. It is the record of what was tried, so the next person to look does not try it again.
             </Text>
           </>)}
         </Section>
@@ -3159,7 +3159,7 @@ export default function ClientScreen() {
                 ) : modeUnsaved ? (
                   <View style={{ marginTop: sp.md }}>
                     <Flag tone={t.warn}>
-                      Not saved. {COACHED_MODE_SHORT[modeUnsaved]} is on this phone only — the server
+                      Not saved. {COACHED_MODE_SHORT[modeUnsaved]} is on this phone only. The server
                       kept the delivery it already had, so {who}&rsquo;s own app and your other devices
                       are still on that one and this screen is the only place the two disagree. Tap
                       it again to retry.
@@ -3200,7 +3200,7 @@ export default function ClientScreen() {
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Ask {who} to Record One</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-              You cannot add this for them — an injury has to come from the person who has it, or the
+              You cannot add this for them. An injury has to come from the person who has it, or the
               program gate it closes would mean nothing. This messages them and points them at the
               right screen.
             </Text>
@@ -3261,7 +3261,7 @@ export default function ClientScreen() {
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: G, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Log a Contact with {who}</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-              Everybody on your gym’s staff sees this. It records what was tried, not whether it worked — and it is not attendance, so it does not change how this client is assessed.
+              Everybody on your gym’s staff sees this. It records what was tried, not whether it worked, and it is not attendance, so it does not change how this client is assessed.
             </Text>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How did you contact them?</Text>

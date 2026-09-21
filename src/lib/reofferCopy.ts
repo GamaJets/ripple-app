@@ -96,17 +96,17 @@ export function reofferConfirmation(out: ReofferOutcome, when: string): string {
   // not waiting in an inbox for whoever missed the banner, because that is the
   // part a coach can act on.
   if (out.inboxKept === false) {
-    return `All ${offered} of your client${offered === 1 ? '' : 's'} ${offered === 1 ? 'was' : 'were'} sent a notification that ${when} is free — first to book takes it.${hedge} A freed slot is not kept in their notifications, so only whoever has their phone to hand will see it. ${tail}`;
+    return `All ${offered} of your client${offered === 1 ? '' : 's'} ${offered === 1 ? 'was' : 'were'} sent a notification that ${when} is free. First to book takes it.${hedge} A freed slot is not kept in their notifications, so only whoever has their phone to hand will see it. ${tail}`;
   }
 
   if (out.recorded == null) {
-    return `${when} is open, and the notification went out — but the server did not say how many of your ${offered} client${offered === 1 ? '' : 's'} it reached, so this is not a count.${hedge} Message anyone you particularly want in the slot.`;
+    return `${when} is open, and the notification went out, but the server did not say how many of your ${offered} client${offered === 1 ? '' : 's'} it reached, so this is not a count.${hedge} Message anyone you particularly want in the slot.`;
   }
 
   const told = n(out.recorded);
 
   if (told === 0) {
-    return `${when} is still open, and the server recorded the notification for nobody — so none of your ${offered} client${offered === 1 ? '' : 's'} has it in their notifications.${hedge} Message them yourself, or try again.`;
+    return `${when} is still open, and the server recorded the notification for nobody, so none of your ${offered} client${offered === 1 ? '' : 's'} has it in their notifications.${hedge} Message them yourself, or try again.`;
   }
 
   // Deliberately `>=` rather than `===`. A server that reports MORE rows than
@@ -114,7 +114,7 @@ export function reofferConfirmation(out: ReofferOutcome, when: string): string {
   // that is still "everybody we asked for" — never a negative remainder in a
   // sentence about how many people were missed.
   if (told >= offered) {
-    return `All ${offered} of your client${offered === 1 ? '' : 's'} ${offered === 1 ? 'was' : 'were'} sent a notification that ${when} is free — first to book takes it.${hedge} ${tail}`;
+    return `All ${offered} of your client${offered === 1 ? '' : 's'} ${offered === 1 ? 'was' : 'were'} sent a notification that ${when} is free. First to book takes it.${hedge} ${tail}`;
   }
 
   const missed = offered - told;

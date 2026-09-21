@@ -57,7 +57,7 @@ export const MUSCLE_GROUPS: readonly string[] = [
 /** The one line that says why the tap is being asked for. Shared so the two
  *  screens that ask say the same thing. */
 export const MUSCLE_GROUP_WHY =
-  'Pick the muscle group — it is what puts this movement on the body map and in the chips for that day.';
+  'Pick the muscle group. It is what puts this movement on the body map and in the chips for that day.';
 
 /**
  * The picker. `value` is the chosen group or null; there is no default, and

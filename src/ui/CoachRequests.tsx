@@ -263,7 +263,7 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
         // above is idempotent, so the roster is right either way; what is wrong
         // is claiming to have just done something somebody else already did.
         Alert.alert('Already Answered',
-          `${r.name}'s request had already been answered — from another device, or a second tap. Nothing has changed and they have not been told twice.`);
+          `${r.name}'s request had already been answered, from another device or by a second tap. Nothing has changed and they have not been told twice.`);
         setBusy(null); return;
       }
 
@@ -313,7 +313,7 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
       // has not been answered. That is the thing a coach can act on.
       Alert.alert(
         'Not sure that went through',
-        `We could not tell whether ${r.name}'s request was answered. Pull down to read the list again — if it is still there, they are still waiting.`,
+        `We could not tell whether ${r.name}'s request was answered. Pull down to read the list again. If it is still there, they are still waiting.`,
       );
     }
     setBusy(null);
@@ -331,8 +331,8 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
           <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching Requests</Text>
         </View>
         <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
-          We couldn’t check whether anyone has asked to be coached by you. Pull down to try again —
-          if a client is waiting, they can’t tell the difference between you declining and this.
+          We couldn’t check whether anyone has asked to be coached by you. Pull down to try again.
+          If a client is waiting, they can’t tell the difference between you declining and this.
         </Text>
       </Card>
     );
@@ -378,7 +378,7 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
             </Pressable>
             <Pressable disabled={busy === r.id} onPress={() => respond(r, true)}
               accessibilityRole="button"
-              accessibilityLabel={`Accept ${r.name}’s coaching request — this adds them to your roster`}
+              accessibilityLabel={`Accept ${r.name}’s coaching request. This adds them to your roster.`}
               accessibilityState={{ disabled: busy === r.id }}
               style={{ flex: 2, paddingVertical: 11, borderRadius: radius.sm, alignItems: 'center', backgroundColor: t.brand, opacity: busy === r.id ? 0.5 : 1 }}>
               <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Accept</Text>

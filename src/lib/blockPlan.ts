@@ -267,5 +267,5 @@ export function duplicateWeek<T>(
  */
 export function weekEditWarning(edit: WeekEdit<unknown> | null): string | null {
   if (!edit || !edit.movedWeekOne) return null;
-  return 'Week one is the week a client trains. This moves a different week into that position, and it is what they will see the next time you assign this — nothing changes for anybody already on it until you do.';
+  return 'Week one is the week a client trains. This moves a different week into that position, and it is what they will see the next time you assign this. Nothing changes for anybody already on it until you do.';
 }

@@ -32,7 +32,7 @@ import { BRAND_ID, DEFAULT_BRAND_ID } from '../src/lib/brands';
  *  reader has the wrong one of the three apps. */
 const ROLE_NOTE: Record<typeof VARIANT, string> = {
   client: 'Signing up to track your own training. Coaching clients instead? Get Repple Coach.',
-  trainer: 'Signing up as a coach — your clients use the Repple app, and gym owners use Repple Studio.',
+  trainer: 'Signing up as a coach. Your clients use the Repple app, and gym owners use Repple Studio.',
   owner: 'Signing up as a gym owner. Your coaches use Repple Coach and your members use Repple.',
 };
 
@@ -296,7 +296,7 @@ export default function Welcome() {
               // coming at all: an address that already has a confirmed account
               // gets nothing sent to it, and signUp cannot tell us that without
               // telling anybody who asks which addresses are registered.
-              note="No link to click, so nothing can use it before you do. If it has not arrived, check your junk folder — and if you already have an account at this address, go back and sign in instead."
+              note="No link to click, so nothing can use it before you do. If it has not arrived, check your junk folder. If you already have an account at this address, go back and sign in instead."
               changeLabel="Wrong Address? Go Back"
               onChange={() => {
                 // Back to the form with the address still in the field. The
@@ -439,7 +439,7 @@ export default function Welcome() {
               </Text>
             </View>
           ) : (
-            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>Not connected to {appName} — any email/password works and stays on this device. Real accounts activate when the backend is connected.</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl }}>Not connected to {appName}. Any email/password works and stays on this device. Real accounts activate when the backend is connected.</Text>
           )}
           </>
           )}

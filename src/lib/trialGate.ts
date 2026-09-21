@@ -182,7 +182,7 @@ export function readTrial(startedAt: string | null | undefined, status: LoadStat
     return {
       state: null,
       source: 'none',
-      note: 'Your account has no trial start date on it. That is not an expired trial — it is a record with nothing in that field, and nothing is gated on it.',
+      note: 'Your account has no trial start date on it. That is not an expired trial. It is a record with nothing in that field, and nothing is gated on it.',
     };
   }
   return {
@@ -233,7 +233,7 @@ export function trialDisagreement(reading: TrialReading, localDaysLeft: number |
   const account = reading.state;
   if (!account) return null;
   if (Math.abs(localDaysLeft - account.daysLeft) < 1) return null;
-  return `This phone has ${localDaysLeft} ${localDaysLeft === 1 ? 'day' : 'days'} recorded and your account has ${account.daysLeft}. Your account is the one that counts — the figure on a phone starts again whenever the app is reinstalled, which is why it is no longer what anything is decided on.`;
+  return `This phone has ${localDaysLeft} ${localDaysLeft === 1 ? 'day' : 'days'} recorded and your account has ${account.daysLeft}. Your account is the one that counts. The figure on a phone starts again whenever the app is reinstalled, which is why it is no longer what anything is decided on.`;
 }
 
 /**
@@ -296,8 +296,8 @@ export function trialCard(reading: TrialReading, billingOpen: boolean): TrialCar
     // so "upgrade to keep coaching" would be a false statement about what the
     // money buys — the sort a store reviewer opens the paid screen to check.
     note: billingOpen
-      ? (s.expired ? 'Nothing has been switched off. Subscribe when you are ready.' : 'Subscribe any time — see what each plan includes.')
-      : 'Subscriptions are not open yet — keep coaching, and we will be in touch before anything changes.',
+      ? (s.expired ? 'Nothing has been switched off. Subscribe when you are ready.' : 'Subscribe any time. See what each plan includes.')
+      : 'Subscriptions are not open yet. Keep coaching, and we will be in touch before anything changes.',
     expired: s.expired,
   };
 }

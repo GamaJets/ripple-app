@@ -165,7 +165,7 @@ export function doorBalance(
   if (!canRead) {
     return {
       state: 'withheld',
-      why: 'What a member owes is part of the gym’s own billing, which this login may not read. Nothing here says they are up to date — it says nobody has asked.',
+      why: 'What a member owes is part of the gym’s own billing, which this login may not read. Nothing here says they are up to date. It says nobody has asked.',
     };
   }
   if (status === 'loading') {
@@ -174,7 +174,7 @@ export function doorBalance(
   if (status === 'error' || invoices === null) {
     return {
       state: 'unreadable',
-      why: 'Whether they owe anything could not be read. That is a failed query and NOT a member who is up to date — do not tell them either way.',
+      why: 'Whether they owe anything could not be read. That is a failed query and NOT a member who is up to date. Do not tell them either way.',
     };
   }
   if (status === 'partial') {
@@ -276,7 +276,7 @@ function gapNote(b: Extract<DoorBalance, { state: 'owes' }>): string {
   if (b.unpriced) parts.push(`${b.unpriced} ${b.unpriced === 1 ? 'carries' : 'carry'} no amount at all`);
   if (b.unlabelled) parts.push(`${b.unlabelled} ${b.unlabelled === 1 ? 'carries' : 'carry'} an amount with no currency on it`);
   if (!parts.length) return '';
-  return ` Not in the figure above: ${parts.join(', and ')} — so more is outstanding than is shown.`;
+  return ` Not in the figure above: ${parts.join(', and ')}, so more is outstanding than is shown.`;
 }
 
 /**

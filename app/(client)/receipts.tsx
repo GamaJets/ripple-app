@@ -285,7 +285,7 @@ export default function Receipts() {
                 // one from four days ago, and only one of those is worth
                 // acting on.
                 ? (cachedAtLine(cachedAt) ?? 'What is listed below is what we had before the read failed. It is not confirmed current, and there may be payments missing from it.')
-                : 'This is not a record with nothing in it — it is a record we could not open. Pull down to try again, or ask your gym for a statement.'} >
+                : 'This is not a record with nothing in it. It is a record we could not open. Pull down to try again, or ask your gym for a statement.'} >
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void load(); }} /></View>
             </Notice>
           </Section>
@@ -351,7 +351,7 @@ export default function Receipts() {
         <Section>
           <SectionHead title="What You Have Been Billed" />
           <Text style={{ ...ty.label, color: t.ink3 }}>
-            This page is money that has already moved. What your gym has invoiced you for — including anything still outstanding — is its own record.
+            This page is money that has already moved. What your gym has invoiced you for, including anything still outstanding, is its own record.
           </Text>
           <View style={{ marginTop: sp.md }}>
             <Ghost label="Invoices from Your Gym" onPress={() => router.push('/(client)/invoices')} />
@@ -370,7 +370,7 @@ export default function Receipts() {
             // the page and this sentence never appears.
             isWhole(status) ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                Your gym has not recorded any payments against your account. If you have paid — at the desk, by card, by transfer — it has not been entered here, and reception can add it.
+                Your gym has not recorded any payments against your account. If you have paid (at the desk, by card, by transfer), it has not been entered here, and reception can add it.
               </Text>
             ) : null
           ) : (

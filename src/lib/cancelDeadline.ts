@@ -157,7 +157,7 @@ export function cancelDeadline(i: CancelDeadlineInput): CancelDeadline {
         kind: 'open',
         // No deadline is named, because there is not one. Naming a time here
         // would invent a cliff edge on a booking that has none.
-        note: 'You can cancel or move this at any time — your coach doesn’t charge for a late cancellation.',
+        note: 'You can cancel or move this at any time. Your coach doesn’t charge for a late cancellation.',
         deadlineAt: null,
         hoursLeft: null,
         closingSoon: false,
@@ -199,14 +199,14 @@ export function cancelDeadline(i: CancelDeadlineInput): CancelDeadline {
   const gone = 'Moving it is no longer offered.';
   if (!stated) {
     const why = unreadable
-      ? 'Your coach’s cancellation policy could not be read, so whether cancelling costs anything is not known here — check with them.'
-      : 'No cancellation policy is recorded for your coach, so whether cancelling costs anything is not known here — check with them.';
+      ? 'Your coach’s cancellation policy could not be read, so whether cancelling costs anything is not known here. Check with them.'
+      : 'No cancellation policy is recorded for your coach, so whether cancelling costs anything is not known here. Check with them.';
     return { kind: 'closed', note: `This is inside the ${w} this app assumes. ${gone} ${why}` };
   }
   if (v.kind === 'fee') {
     return {
       kind: 'closed',
-      note: `This is inside your coach’s ${w} notice. ${gone} Cancelling now records their late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} — Repple doesn’t take that payment, it is for the two of you to settle.${unstatedCurrency(v.currency)}`,
+      note: `This is inside your coach’s ${w} notice. ${gone} Cancelling now records their late-cancellation fee of ${feeAmountLine(v.amount, v.currency)}. Repple doesn’t take that payment; it is for the two of you to settle.${unstatedCurrency(v.currency)}`,
     };
   }
   return {

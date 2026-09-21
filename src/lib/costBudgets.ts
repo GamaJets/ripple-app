@@ -117,7 +117,7 @@ export interface CostBudgetDraft {
  * measurement against a guess somebody made in January.
  */
 export const BUDGET_IS_TYPED_NOT_MEASURED =
-  'A budget is a figure you typed. Nothing produced it and nothing has checked it, so a variance beside it measures this month against what you planned — not against what anything says this should cost. The spending side is the register’s: it is the costs somebody has entered, which in most months is not yet all of them.';
+  'A budget is a figure you typed. Nothing produced it and nothing has checked it, so a variance beside it measures this month against what you planned, not against what anything says this should cost. The spending side is the register’s: it is the costs somebody has entered, which in most months is not yet all of them.';
 
 /**
  * Why a category shows an actual and no variance.
@@ -126,7 +126,7 @@ export const BUDGET_IS_TYPED_NOT_MEASURED =
  * in it reads as a bug unless somebody states that each gap was a decision.
  */
 export const NO_VARIANCE_WITHOUT_BOTH_SIDES =
-  'A variance is only shown where both sides are real: a budget you set, and at least one cost recorded in that category this month, both in the same currency, over a read that came back whole. A category with nothing entered yet is not a category you spent nothing in — it is the commonest reason a month looks comfortably under budget on the day it is not.';
+  'A variance is only shown where both sides are real: a budget you set, and at least one cost recorded in that category this month, both in the same currency, over a read that came back whole. A category with nothing entered yet is not a category you spent nothing in. It is the commonest reason a month looks comfortably under budget on the day it is not.';
 
 /**
  * The sentence under an empty budget list, which depends entirely on the read.
@@ -139,7 +139,7 @@ export function budgetsEmptyLine(status: LoadStatus): string {
     return 'There are more budgets than could be read in one request, so this list is not all of them and no comparison below is complete.';
   }
   if (status === 'loading') return 'Still reading.';
-  return 'No budget is set for any category. Set one and this month’s spending is measured against it — rent, power, the cleaner and the music licence are the four most gyms start with, because they are the four that move without anybody deciding they should.';
+  return 'No budget is set for any category. Set one and this month’s spending is measured against it. Rent, power, the cleaner and the music licence are the four most gyms start with, because they are the four that move without anybody deciding they should.';
 }
 
 /* ── what a person typed, judged ──────────────────────────────────────────── */
@@ -154,7 +154,7 @@ export function budgetBlockers(d: CostBudgetDraft): string[] {
 
   const cur = (d.currency || '').trim();
   if (!cur) {
-    out.push('This gym has not set its currency, so a budget cannot be recorded in one. Repple is white-labelled and there is no default that is right for every gym — set one on the Gym screen.');
+    out.push('This gym has not set its currency, so a budget cannot be recorded in one. Repple is white-labelled and there is no default that is right for every gym. Set one on the Gym screen.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so no budget can be recorded in it.');
   } else {
@@ -167,7 +167,7 @@ export function budgetBlockers(d: CostBudgetDraft): string[] {
     else if (read.minorUnits < 0) {
       out.push('A budget cannot be negative.');
     } else if (read.minorUnits >= GYM_COST_MAX_MINOR) {
-      out.push('That is more than Repple will hold on one budget line — check the zeros.');
+      out.push('That is more than Repple will hold on one budget line. Check the zeros.');
     }
   }
 
@@ -435,7 +435,7 @@ export function budgetNote(l: BudgetLine, monthLabel: string): string {
       return `No budget covers this category in ${monthLabel}, so what was spent stands on its own.`;
     case 'unknown':
     default:
-      return `${monthLabel}’s costs did not come back in full, so what was spent in this category is unknown rather than nothing — and nothing here is compared against the budget.`;
+      return `${monthLabel}’s costs did not come back in full, so what was spent in this category is unknown rather than nothing, and nothing here is compared against the budget.`;
   }
 }
 

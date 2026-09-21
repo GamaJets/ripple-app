@@ -98,7 +98,7 @@ export function handOut(code: string): HandOut {
  * word, because none of the provider's reasons say "you still have a code".
  */
 export const UNREAD_NOTE =
-  'This is about the read, not about your code. You still have one, it has not changed, and every card and link you have already given out still works. Try again when you have a connection rather than issuing a new code — issuing one stops the old one working for everybody you have handed it to.';
+  'This is about the read, not about your code. You still have one, it has not changed, and every card and link you have already given out still works. Try again when you have a connection rather than issuing a new code. Issuing one stops the old one working for everybody you have handed it to.';
 
 /**
  * The provider's own reason, minus any part of it that claims there is no code.
@@ -238,7 +238,7 @@ export function namedCodesLine(status: LoadStatus, rows: readonly JoinCodeRow[])
   if (status === 'error') return 'Your named codes could not be read, so this is not the list of them. The one above is unaffected.';
   if (status === 'partial') return 'Not all of your codes could be read, so this is not all of them.';
   if (codesToHandOut(rows).length === 0) {
-    return 'None yet. A named code tells you which of the things you did brought somebody in — one for the gym flyer, one for your Instagram bio, both live at once.';
+    return 'None yet. A named code tells you which of the things you did brought somebody in: one for the gym flyer, one for your Instagram bio, both live at once.';
   }
   return 'Each of these works exactly like the one above, and counts separately, so you can tell later which one brought somebody.';
 }
@@ -290,14 +290,14 @@ export function namedCodesLine(status: LoadStatus, rows: readonly JoinCodeRow[])
  */
 export function codeUptakeLine(stats: { joined: number; pending: number } | null): string {
   if (!stats) {
-    return 'How many people have joined on your codes could not be read just now. Nothing is wrong with the code itself — pull down to ask again.';
+    return 'How many people have joined on your codes could not be read just now. Nothing is wrong with the code itself. Pull down to ask again.';
   }
   const joined = stats.joined === 1 ? '1 person has joined' : `${stats.joined} people have joined`;
-  if (stats.pending === 0) return `${joined} on your codes — this one and every named one. Nobody is waiting on you.`;
+  if (stats.pending === 0) return `${joined} on your codes, counting this one and every named one. Nobody is waiting on you.`;
   const waiting = stats.pending === 1
     ? '1 is waiting for you to accept them'
     : `${stats.pending} are waiting for you to accept them`;
-  return `${joined} on your codes — this one and every named one — and ${waiting}.`;
+  return `${joined} on your codes (this one and every named one), and ${waiting}.`;
 }
 
 /** Whether the uptake line is reporting somebody left waiting — which is the
@@ -308,7 +308,7 @@ export function uptakeNeedsAnswering(stats: { joined: number; pending: number } 
 
 export function copyBlockedNote(hasClipboard: boolean): string | null {
   if (hasClipboard) return null;
-  return 'This build cannot copy to the clipboard, so the link is written out above — press and hold to select it. Sharing still works.';
+  return 'This build cannot copy to the clipboard, so the link is written out above. Press and hold to select it. Sharing still works.';
 }
 
 /**
@@ -322,11 +322,11 @@ export function copyBlockedNote(hasClipboard: boolean): string | null {
  */
 export function copiedNote(label: string): string {
   return `Paste it into your bio, a caption or a description. Anybody who joins through it is attributed to ${label}, so you can see which post brought them.\n\n`
-    + 'Running an ad? Use this as the ad’s destination — not your profile. It is what lets what you spent be matched to the clients it actually brought.';
+    + 'Running an ad? Use this as the ad’s destination, not your profile. It is what lets what you spent be matched to the clients it actually brought.';
 }
 
 /** What a coach is told when the copy did not land. The address is in it, so
  *  the sentence is still useful to somebody holding a pen. */
 export function copyFailedNote(link: string): string {
-  return `The link could not be copied. It is ${link} — write it down, or share it instead.`;
+  return `The link could not be copied. It is ${link}. Write it down, or share it instead.`;
 }

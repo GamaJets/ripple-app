@@ -143,7 +143,7 @@ export function readRpe(text: string | null | undefined): ReadRpe {
   // this magnitude — 8.5 * 2 is 17, not 16.999999999999996. Tested rather than
   // trusted; see setIntensity.test.ts, which sweeps every tenth from 6 to 10.
   if (!Number.isInteger(n * 2)) {
-    return { ok: false, why: 'RPE is written in halves — 8 or 8.5, not 8.3.' };
+    return { ok: false, why: 'RPE is written in halves: 8 or 8.5, not 8.3.' };
   }
   return { ok: true, rpe: n };
 }
@@ -336,7 +336,7 @@ export function readTempo(text: string | null | undefined): ReadTempo {
   // in the regex, so a mixed spelling like "31-10" reaches the same place.
   const chars = parts.length === 1 ? parts[0].split('') : parts;
   if (chars.length !== 3 && chars.length !== 4) {
-    return { ok: false, why: 'A tempo is three or four numbers — down, pause, up, and a pause at the top if there is one. Like 3-1-1 or 3-0-X-1.' };
+    return { ok: false, why: 'A tempo is three or four numbers: down, pause, up, and a pause at the top if there is one. Like 3-1-1 or 3-0-X-1.' };
   }
   const slots = chars.length === 3 ? [...chars, '0'] : chars;
   for (let i = 0; i < slots.length; i++) {
@@ -347,7 +347,7 @@ export function readTempo(text: string | null | undefined): ReadTempo {
       // it is a coach typing in the wrong box, and storing it would render a
       // rep instruction nobody can follow.
       if (i !== 2) {
-        return { ok: false, why: 'X means "as fast as you can" and only fits the lifting phase — the third number.' };
+        return { ok: false, why: 'X means "as fast as you can" and only fits the lifting phase, the third number.' };
       }
       continue;
     }

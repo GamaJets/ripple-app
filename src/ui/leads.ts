@@ -318,7 +318,7 @@ export function useLeads(): LeadBook {
     // which is the one case where an unnamed campaign is most likely to be read
     // as broken attribution rather than as a failed read.
     if (codesStatus === 'ready' || status === 'loading' || status === 'error') return own;
-    return `${own} Your codes were not read, so none of these can be put against a campaign — the people below are real; where they came from is unknown until this reads again.`;
+    return `${own} Your codes were not read, so none of these can be put against a campaign. The people below are real; where they came from is unknown until this reads again.`;
   }, [status, codesStatus, rows]);
 
   const followUpsFor = useCallback(
@@ -348,7 +348,7 @@ export function useLeads(): LeadBook {
       return { ok: false, reason: 'That could not be saved, so this enquiry is still marked as it was.' };
     }
     if (!data || data.length === 0) {
-      return { ok: false, reason: 'Nothing was changed — this enquiry may have been removed. Pull to read the list again.' };
+      return { ok: false, reason: 'Nothing was changed. This enquiry may have been removed. Pull to read the list again.' };
     }
     await load();
     return { ok: true };
@@ -366,7 +366,7 @@ export function useLeads(): LeadBook {
       .select('id');
     if (error || !data || data.length === 0) {
       reportError('leads.followUp', error);
-      return { ok: false, reason: 'That could not be recorded. What you did still happened — it is this note that did not save, so write it down somewhere before you close this.' };
+      return { ok: false, reason: 'That could not be recorded. What you did still happened. It is this note that did not save, so write it down somewhere before you close this.' };
     }
     await load();
     return { ok: true };
@@ -389,7 +389,7 @@ export function useLeads(): LeadBook {
       return { ok: false, reason: 'That could not be removed, so this person’s details are still held. Try again.' };
     }
     if (!data || data.length === 0) {
-      return { ok: false, reason: 'There was nothing to remove — this enquiry has already gone.' };
+      return { ok: false, reason: 'There was nothing to remove. This enquiry has already gone.' };
     }
     await load();
     return { ok: true };

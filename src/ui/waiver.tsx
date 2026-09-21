@@ -163,7 +163,7 @@ function SignOutWay({ label }: { label: string }) {
     <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
       <Ghost label={label} onPress={() => Alert.alert(
         'Sign Out?',
-        'You have agreed to nothing and nothing is recorded either way. Sign out and you can sign back in — on this account or another one — and the release will be waiting exactly as it is now.',
+        'You have agreed to nothing and nothing is recorded either way. Sign out and you can sign back in (on this account or another one) and the release will be waiting exactly as it is now.',
         [
           { text: 'Stay', style: 'cancel' },
           { text: 'Sign Out', style: 'destructive', onPress: () => { void leave(() => router.replace('/welcome')); } },

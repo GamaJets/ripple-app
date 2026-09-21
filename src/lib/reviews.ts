@@ -257,7 +257,7 @@ export function reviewGateNote(g: ReviewGate): string | null {
     case 'allowed':      return null;
     case 'self':         return 'This is your own profile.';
     case 'not-a-client': return 'Reviews come from people this coach has actually trained, so only their current and former clients can leave one.';
-    case 'unknown':      return 'We couldn’t check whether you’ve trained with this coach, so we can’t open the review form. This is our end — try again in a moment.';
+    case 'unknown':      return 'We couldn’t check whether you’ve trained with this coach, so we can’t open the review form. This is our end. Try again in a moment.';
   }
 }
 
@@ -297,7 +297,7 @@ export const IDENTITY_NOTE =
 
 /** Rewriting clears the coach's answer. Said before saving, not after. */
 export const EDIT_NOTE =
-  'If you change a review your coach has already replied to, their reply is removed — it answered what you wrote before.';
+  'If you change a review your coach has already replied to, their reply is removed, since it answered what you wrote before.';
 
 /** What withdrawing does and does not do. */
 export const WITHDRAW_NOTE =
@@ -305,7 +305,7 @@ export const WITHDRAW_NOTE =
 
 /** The coach's side, on the screen where they answer. */
 export const REPLY_NOTE =
-  'Your reply is public, under the review, with your name on it. It is the only thing you can do about a review you disagree with — there is no way to take one down from inside the app.';
+  'Your reply is public, under the review, with your name on it. It is the only thing you can do about a review you disagree with. There is no way to take one down from inside the app.';
 
 export type WriteResult =
   | 'written' | 'not_a_client' | 'invalid_rating' | 'self' | 'signed_out'
@@ -332,7 +332,7 @@ export function writeOutcome(r: WriteResult, coachName: string | null): { title:
     case 'signed_out':
       return { title: 'Not saved', body: 'Sign in to Repple and try again.', saved: false };
     case 'failed':
-      return { title: 'Could not save', body: 'We could not reach the server, so nothing was written. Your review is still here — try again in a moment.', saved: false };
+      return { title: 'Could not save', body: 'We could not reach the server, so nothing was written. Your review is still here. Try again in a moment.', saved: false };
   }
 }
 
@@ -484,7 +484,7 @@ export interface AskCandidate {
  * "fix" somebody would otherwise reach for.
  */
 export const WHO_REVIEWED_IS_HIDDEN =
-  'Repple cannot tell you who has already written one. Reviews carry a name only where the reviewer put one, and which client wrote which is not something this app will hand a coach — so somebody who has already reviewed you may still appear here. They will say so.';
+  'Repple cannot tell you who has already written one. Reviews carry a name only where the reviewer put one, and which client wrote which is not something this app will hand a coach, so somebody who has already reviewed you may still appear here. They will say so.';
 
 /**
  * Whether now is a moment, and which.
@@ -549,14 +549,14 @@ export function reviewAskDraft(
 ): string {
   const who = firstWord(clientName);
   const me = firstWord(coachName);
-  const hi = who ? `Hi ${who} — ` : '';
+  const hi = who ? `Hi ${who},\n\n` : '';
   const sign = me ? `\n\n${me}` : '';
   const opener = m === 'goal-reached'
-    ? 'congratulations again on hitting that. '
+    ? 'Congratulations again on hitting that. '
     : '';
   return `${hi}${opener}If you have a couple of minutes, would you write a short review of the coaching in the app? `
     + `It is the main way people decide whether to work with me, and it helps far more than you would think. `
-    + `Say whatever you actually think — it goes up as written.${sign}`;
+    + `Say whatever you actually think. It goes up as written.${sign}`;
 }
 
 /** First word only, and never a fragment of an email address or a bare uuid: a
@@ -583,7 +583,7 @@ export function askListNote(rows: readonly { moment: AskMoment }[] | null): stri
   if (rows == null) return 'Working out who is worth asking…';
   const n = rows.filter((r) => r.moment !== 'none').length;
   if (n === 0) {
-    return 'Nobody on the part of your book that was read is at a moment worth asking at. That is a real answer — this list is not a monthly sweep, and asking everybody every month is how a good business collects bad reviews.';
+    return 'Nobody on the part of your book that was read is at a moment worth asking at. That is a real answer. This list is not a monthly sweep, and asking everybody every month is how a good business collects bad reviews.';
   }
   return `${n} ${n === 1 ? 'client is' : 'clients are'} at a moment worth asking at. Nothing is sent from here: you get a draft, you edit it, you send it yourself.`;
 }
@@ -596,4 +596,4 @@ export function askListNote(rows: readonly { moment: AskMoment }[] | null): stri
  * "only ask the happy ones" filter.
  */
 export const ASK_IS_UNFILTERED =
-  'Repple does not choose who to ask by how they are likely to rate you, and it never will — asking only the people who look happy is a lie told to everybody who reads the average afterwards. What decides this list is whether there is anything to review yet.';
+  'Repple does not choose who to ask by how they are likely to rate you, and it never will. Asking only the people who look happy is a lie told to everybody who reads the average afterwards. What decides this list is whether there is anything to review yet.';

@@ -314,7 +314,7 @@ export default function ClientCancellationsScreen() {
         {r.status === 'error' ? (
           <Section>
             <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-              note="This is not an empty book. Nobody is listed below because the list did not come back — go back and open this again once you are connected." />
+              note="This is not an empty book. Nobody is listed below because the list did not come back. Go back and open this again once you are connected." />
           </Section>
         ) : null}
 
@@ -349,7 +349,7 @@ export default function ClientCancellationsScreen() {
             <Rule />
             <Section>
               <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
-                note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to book an hour against and nothing of theirs has ever been in your calendar. This is not a clean cancellation record and it is not a failed read — there is nothing here to have a record of. Invite them from your client list and this screen starts from the day they join.`} />
+                note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to book an hour against and nothing of theirs has ever been in your calendar. This is not a clean cancellation record and it is not a failed read. There is nothing here to have a record of. Invite them from your client list and this screen starts from the day they join.`} />
             </Section>
             {client ? (
               <Section>
@@ -370,7 +370,7 @@ export default function ClientCancellationsScreen() {
             {!uid ? (
               <Section>
                 <Notice tone={t.warn} kicker="Not Read" title="We Could Not Tell Which Account You Are Signed in As"
-                  note="This record is read against your own coach account, so without it there is nothing below — that is a gap in what we could ask for, not a client with nothing on record." />
+                  note="This record is read against your own coach account, so without it there is nothing below. That is a gap in what we could ask for, not a client with nothing on record." />
               </Section>
             ) : null}
 
@@ -379,7 +379,7 @@ export default function ClientCancellationsScreen() {
                 <Notice tone={t.crit} kicker="Not Read" title="Their Cancellations Could Not Be Read"
                   note={c.rows.length
                     ? 'What is below is what we had before the read failed. It is not confirmed current, and there may be more that is missing from it.'
-                    : 'This is NOT a record of them never cancelling — it is a record we could not open.'}>
+                    : 'This is NOT a record of them never cancelling. It is a record we could not open.'}>
                   <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void c.reload(); }} /></View>
                 </Notice>
               </Section>
@@ -428,8 +428,8 @@ export default function ClientCancellationsScreen() {
                   <Expandable title="Hours and the Middle Notice">
                   <Text style={{ ...ty.caption, color: t.ink3 }}>
                     {tally.sessions === tally.actions
-                        ? 'One hour per cancellation — nothing here removed several at once. The middle notice is the middle of them, not the average: one cancellation made months ahead would drag an average past every real value in this list.'
-                        : 'Hours and cancellations differ because one decision can remove several hours at once — pausing a standing appointment for a fortnight is one action. Each is counted once below.'}
+                        ? 'One hour per cancellation. Nothing here removed several at once. The middle notice is the middle of them, not the average: one cancellation made months ahead would drag an average past every real value in this list.'
+                        : 'Hours and cancellations differ because one decision can remove several hours at once. Pausing a standing appointment for a fortnight is one action. Each is counted once below.'}
                   </Text>
                   </Expandable>
                   )}
@@ -459,7 +459,7 @@ export default function ClientCancellationsScreen() {
                       not added into one number because the one number is the one that misleads: a total
                       says nothing about whose diary changed.
                       {countable && tally.unattributed > 0
-                        ? ' Where it says not recorded, nobody was signed in when it happened — a job or the gym’s own system — so it is not known which of you it was.'
+                        ? ' Where it says not recorded, nobody was signed in when it happened (a job or the gym’s own system), so it is not known which of you it was.'
                         : ''}
                     </Text>
                     </Expandable>
@@ -486,7 +486,7 @@ export default function ClientCancellationsScreen() {
                     <Text style={{ ...ty.caption, color: t.ink3 }}>
                       Measured between the two times on the record and nothing else. Whether any of these
                       was inside your notice period, and whether a fee was charged, is on the charge
-                      itself — your notice period today is not the one that priced a cancellation last
+                      itself. Your notice period today is not the one that priced a cancellation last
                       spring, and this page will not judge one against the other.
                     </Text>
                     </Expandable>
@@ -540,7 +540,7 @@ export default function ClientCancellationsScreen() {
         {/* What this page is, said once and below the record: the board opens
             on the figure, not on a paragraph. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          Hours that were booked with you and then were not, newest first — who ended each one, and
+          Hours that were booked with you and then were not, newest first: who ended each one, and
           how long before it was due to start. {NOT_A_VERDICT_NOTE}
         </Text>
       </ScrollView>

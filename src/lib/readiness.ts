@@ -204,7 +204,7 @@ export function readinessScore(i: ReadinessInput): Readiness | null {
   let tone: ReadinessTone, label: string, tip: string;
   if (score >= 75) {
     tone = 'good'; label = 'Well Recovered';
-    tip = 'Great day to push — aim for a PR or add a little load.';
+    tip = 'Great day to push. Aim for a PR or add a little load.';
   } else if (score >= 50) {
     tone = 'moderate'; label = 'Moderately Recovered';
     tip = 'Train as planned, but listen to your body and don’t force it.';

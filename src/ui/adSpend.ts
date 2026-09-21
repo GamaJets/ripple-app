@@ -142,7 +142,7 @@ export const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
  * credentials and separate approvals, and neither is gated by this one.
  */
 export const APP_REVIEW_NOTE =
-  'Meta has to approve Repple for the ads_read permission before this can read a real ad account. Until it does, connecting works only for Meta accounts that have a role on Repple’s own Meta app — everyone else will sign in successfully and then be refused when we ask for the spend. Entering what you spent by hand works today and always will. This is about Meta only: Google Ads and TikTok are separate approvals and are not waiting on it.';
+  'Meta has to approve Repple for the ads_read permission before this can read a real ad account. Until it does, connecting works only for Meta accounts that have a role on Repple’s own Meta app. Everyone else will sign in successfully and then be refused when we ask for the spend. Entering what you spent by hand works today and always will. This is about Meta only: Google Ads and TikTok are separate approvals and are not waiting on it.';
 
 /** Said once, above all three. Every one of these reads and none of them
  *  writes, and a coach handing over an ad account is entitled to know it. */
@@ -628,7 +628,7 @@ export async function connectAdChannel(c: AdChannel): Promise<ConnectResult> {
 
   const WB = webBrowser();
   if (!WB?.openAuthSessionAsync) {
-    return { ok: false, reason: 'This version of the app cannot open a sign-in browser — updating to the latest build adds it. Entering what you spent by hand works now.' };
+    return { ok: false, reason: 'This version of the app cannot open a sign-in browser. Updating to the latest build adds it. Entering what you spent by hand works now.' };
   }
   if (WB.maybeCompleteAuthSession) { try { WB.maybeCompleteAuthSession(); } catch { /* ignore */ } }
 
@@ -649,7 +649,7 @@ export async function connectAdChannel(c: AdChannel): Promise<ConnectResult> {
     return { ok: false, reason: `The ${channelLabel(c)} sign-in could not be opened.` };
   }
   if (!result || result.type !== 'success' || !result.url) {
-    if (result?.type === 'dismiss' || result?.type === 'cancel') return { ok: false, reason: 'Sign-in cancelled — nothing was connected.' };
+    if (result?.type === 'dismiss' || result?.type === 'cancel') return { ok: false, reason: 'Sign-in cancelled. Nothing was connected.' };
     return { ok: false, reason: `The ${channelLabel(c)} sign-in did not come back, so nothing was connected.` };
   }
 

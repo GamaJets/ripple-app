@@ -58,12 +58,12 @@ export const INVOICE_STATUSES: readonly InvoiceStatus[] =
  * written by hand may carry it; it is not in the picker.
  */
 export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
-  draft: 'Draft — not sent',
-  open: 'Open — sent and unpaid',
+  draft: 'Draft · not sent',
+  open: 'Open · sent and unpaid',
   paid: 'Paid',
   overdue: 'Overdue',
-  void: 'Void — cancelled before payment',
-  written_off: 'Written off — not going to be paid',
+  void: 'Void · cancelled before payment',
+  written_off: 'Written off · not going to be paid',
 };
 
 /** The statuses an owner may choose. See the note on `overdue` above. */
@@ -134,7 +134,7 @@ export function parseAmount(
   // zero-decimal currency therefore gets a hundred times the headroom in whole
   // units, which is the arithmetic those currencies are quoted in.
   if (read.minorUnits > 2_147_483_647) {
-    return { kind: 'bad', reason: 'That is more than Repple will record on one invoice — check the zeros.' };
+    return { kind: 'bad', reason: 'That is more than Repple will record on one invoice. Check the zeros.' };
   }
   return { kind: 'amount', minorUnits: read.minorUnits };
 }
@@ -164,11 +164,11 @@ export function invoiceBlocker(d: InvoiceDraft, currency: string | null): string
   }
   const amt = parseAmount(d.amount, currency);
   if (amt.kind === 'bad') return amt.reason;
-  if (!isoDay(d.issuedOn)) return 'The issue date has to be a real date — YYYY-MM-DD.';
+  if (!isoDay(d.issuedOn)) return 'The issue date has to be a real date: YYYY-MM-DD.';
   // A due date is optional and its absence is a decision: an invoice with no
   // due date is never overdue, which is correct for a receipt and wrong for a
   // bill. The screen says so; this only refuses one that is unreadable.
-  if (d.dueOn && !isoDay(d.dueOn)) return 'The due date has to be a real date — YYYY-MM-DD, or empty for an invoice with no due date.';
+  if (d.dueOn && !isoDay(d.dueOn)) return 'The due date has to be a real date: YYYY-MM-DD, or empty for an invoice with no due date.';
   if (d.dueOn && d.dueOn < d.issuedOn) {
     return 'The due date is before the issue date, so this invoice would be overdue the moment it was raised.';
   }

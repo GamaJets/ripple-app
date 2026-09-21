@@ -415,8 +415,8 @@ export function unnamedPayeeNote(s: SupplierSpend): string | null {
   const bits: string[] = [];
   if (s.unnamed > 0) {
     bits.push(s.unnamed === 1
-      ? 'One cost names no payee, so it is not in this table — a payee is optional, because a cash purchase nobody wrote down is still a real cost.'
-      : `${s.unnamed} costs name no payee, so they are not in this table — a payee is optional, because a cash purchase nobody wrote down is still a real cost.`);
+      ? 'One cost names no payee, so it is not in this table. A payee is optional, because a cash purchase nobody wrote down is still a real cost.'
+      : `${s.unnamed} costs name no payee, so they are not in this table. A payee is optional, because a cash purchase nobody wrote down is still a real cost.`);
   }
   if (s.uncounted > 0) {
     bits.push(s.uncounted === 1

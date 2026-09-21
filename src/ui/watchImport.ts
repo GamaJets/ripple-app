@@ -261,12 +261,12 @@ export function readNote(r: RecentRead, windowLabel: string, sourceLabel: string
   if (r.reach === 'partial') {
     const who = failedNames(r);
     return r.samples.length
-      ? `${who} did not answer, so this list is not all of your training — it is what your other devices had. Nothing is missing from your log that was not already missing; try again in a moment.`
-      : `${who} did not answer, so nothing could be read from ${r.failed.length === 1 ? 'it' : 'them'}. Your other devices recorded nothing in the last ${windowLabel}. This is not "no workouts" — try again in a moment.`;
+      ? `${who} did not answer, so this list is not all of your training. It is what your other devices had. Nothing is missing from your log that was not already missing; try again in a moment.`
+      : `${who} did not answer, so nothing could be read from ${r.failed.length === 1 ? 'it' : 'them'}. Your other devices recorded nothing in the last ${windowLabel}. This is not "no workouts". Try again in a moment.`;
   }
   if (r.reach === 'none' && r.failed.length) {
     const who = failedNames(r);
-    return `${who} did not answer, so your workouts could not be read at all. This is not a list of nothing — it is no list. Try again in a moment.`;
+    return `${who} did not answer, so your workouts could not be read at all. This is not a list of nothing. It is no list. Try again in a moment.`;
   }
   if (r.reach === 'none') {
     // Nothing was asked. Say which wall it hit rather than "no workouts".

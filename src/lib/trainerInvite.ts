@@ -62,7 +62,7 @@ export function inviteBlocker(
   }
   const prior = existing.find((i) => i.email.trim().toLowerCase() === email);
   if (prior && prior.status === 'pending') {
-    return 'They already have an invite waiting. Nothing has been sent — ask them to check the address they were invited on.';
+    return 'They already have an invite waiting. Nothing has been sent. Ask them to check the address they were invited on.';
   }
   if (prior && prior.status === 'accepted') {
     return 'They have already accepted an invite and are on this gym. Nothing has been sent.';
@@ -79,7 +79,7 @@ export function inviteBlocker(
  * them will wait for somebody who was never contacted.
  */
 export function invitedLine(email: string): string {
-  return `${email} is invited. Repple does not email them — tell them yourself, and ask them to sign in with that exact address.`;
+  return `${email} is invited. Repple does not email them, so tell them yourself, and ask them to sign in with that exact address.`;
 }
 
 /** How an invite already on file reads on the list. */

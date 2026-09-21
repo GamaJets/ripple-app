@@ -278,7 +278,7 @@ export function datesNotes(current: MembershipTerm, next: DraftDates, today: str
   if (patch.endsOn !== undefined && isDay(current.frozenFrom) && isDay(current.frozenTo)) {
     out.push(
       'A pause is recorded on this membership, and the days it gave back are already inside the end date you are '
-      + 'replacing. Whatever you type here becomes the whole term — add those days on yourself if they are still owed.',
+      + 'replacing. Whatever you type here becomes the whole term. Add those days on yourself if they are still owed.',
     );
   }
 
@@ -292,7 +292,7 @@ export function datesNotes(current: MembershipTerm, next: DraftDates, today: str
   const live = current.status === 'active' || current.status === 'frozen';
   if (live && isDay(end) && isDay(today) && end < today) {
     out.push(
-      `This ends ${end}, which has already passed, and an end date does not close a membership by itself — the status `
+      `This ends ${end}, which has already passed, and an end date does not close a membership by itself. The status `
       + `still says ${current.status === 'frozen' ? 'Frozen' : 'Active'}. Cancel it as well if that is what you mean.`,
     );
   }

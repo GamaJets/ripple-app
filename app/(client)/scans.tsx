@@ -453,7 +453,7 @@ export default function Scans() {
     }
     if (muscleBoard7.status === 'error') {
       return { head: 'Could Not Read This', mark: t.crit,
-        body: 'Your training is not affected — this panel could not read it.' };
+        body: 'Your training is not affected. This panel could not read it.' };
     }
     if (muscleBoard7.status === 'partial') {
       return { head: 'Part of Your Week Is Missing', mark: t.warn,
@@ -535,7 +535,7 @@ export default function Scans() {
       'Summary for a Health Professional',
       reportShareBlurb(doc) + '\n\n'
       + (pdfExportAvailable()
-        ? 'It goes as a PDF through your phone\u2019s share sheet, so it can reach a physio, a doctor, a new coach — anyone you choose.'
+        ? 'It goes as a PDF through your phone\u2019s share sheet, so it can reach a physio, a doctor, a new coach, anyone you choose.'
         : 'This build cannot produce a PDF, so it goes as plain text instead. Nothing is left out of it: every figure and every caveat is in the text.'),
       [
         { text: 'Cancel', style: 'cancel' },
@@ -562,7 +562,7 @@ export default function Scans() {
     // A pounds reader is told which of the three is not in pounds, and told it
     // here rather than left to spot it in a column of numbers after the fact.
     // The columns are named `weight_kg` inside the file for the same reason.
-    const csvUnit = wu === 'lb' ? ' Figures in kg, as the column names say — a spreadsheet is read by another app, so the columns stay in one fixed unit.' : '';
+    const csvUnit = wu === 'lb' ? ' Figures in kg, as the column names say. A spreadsheet is read by another app, so the columns stay in one fixed unit.' : '';
     // TF build 35, "Why can't it share it?": this line used to end
     // "(this build cannot attach a file)", which named no cause and gave the
     // client nothing to do about it. `fileShareBlocker()` returns the actual
@@ -571,8 +571,8 @@ export default function Scans() {
     // sentence somebody can act on where a parenthetical apology is not.
     const blocker = fileShareBlocker();
     const csvLine = (blocker
-      ? 'Spreadsheet — the same rows, sent as text you can paste into a spreadsheet. ' + blocker
-      : 'Spreadsheet — a .csv file, one row per scan, for a coach or another app to import.') + csvUnit;
+      ? 'Spreadsheet: the same rows, sent as text you can paste into a spreadsheet. ' + blocker
+      : 'Spreadsheet: a .csv file, one row per scan, for a coach or another app to import.') + csvUnit;
     const options: { text: string; onPress?: () => void; style?: 'cancel' }[] = [];
     if (pdf) options.push({ text: 'PDF Report', onPress: () => { void sendPdf(); } });
     options.push({ text: 'Spreadsheet (CSV)', onPress: () => { void sendCsv(); } });
@@ -592,10 +592,10 @@ export default function Scans() {
       // word about the third. Silence about a missing feature reads as the
       // feature having been taken away. Said once, and only while it is true.
       + (pdf
-        ? 'PDF Report — a one-page document with every scan and the change since your first.\n'
-        : 'PDF report — the copy of the app on this phone can\u2019t make one. Update to the latest version and it will; the two below work either way.\n')
+        ? 'PDF Report: a one-page document with every scan and the change since your first.\n'
+        : 'PDF report: the copy of the app on this phone can\u2019t make one. Update to the latest version and it will; the two below work either way.\n')
       + csvLine + '\n'
-      + 'Short Summary — a few lines of text for a message, a story or a post.\n\n'
+      + 'Short Summary: a few lines of text for a message, a story or a post.\n\n'
       + `Whichever you pick opens your phone's share sheet, so it can go to your coach, Instagram, WhatsApp, anywhere. ${appName} posts nothing on its own.`,
       options,
     );
@@ -1064,7 +1064,7 @@ export default function Scans() {
       setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
       Alert.alert(
         'Saved on This Phone',
-        'Your scan is saved on this phone and has not reached your record yet — it goes up on its own next time you have signal. It is in your list and your targets here have moved with it in the meantime, and nobody else can see it until it sends.',
+        'Your scan is saved on this phone and has not reached your record yet. It goes up on its own next time you have signal. It is in your list and your targets here have moved with it in the meantime, and nobody else can see it until it sends.',
       );
       return;
     }
@@ -1075,22 +1075,22 @@ export default function Scans() {
     if (!historyKnown) {
       Alert.alert(
         'Scan Saved',
-        'Your scan is on your record. Your other scans could not be read just now, so this screen cannot say whether it is your most recent one or what it changed about your targets — pull down on Progress once you have signal and it will.',
+        'Your scan is on your record. Your other scans could not be read just now, so this screen cannot say whether it is your most recent one or what it changed about your targets. Pull down on Progress once you have signal and it will.',
       );
       return;
     }
     if (!isNewest) {
-      Alert.alert('Scan Saved to History', 'This scan is dated ' + fmt(newISO) + ', earlier than your most recent scan (' + fmt(curLatestISO) + '). It\'s added to your progress tracking and graphs — but your meal plan stays on your most recent scan. Only a newer scan re-tunes your plan.');
+      Alert.alert('Scan Saved to History', 'This scan is dated ' + fmt(newISO) + ', earlier than your most recent scan (' + fmt(curLatestISO) + '). It\'s added to your progress tracking and graphs, but your meal plan stays on your most recent scan. Only a newer scan re-tunes your plan.');
       return;
     }
     if (!before) {
-      Alert.alert('Scan Saved', 'Your first measurements are in — daily targets are now ' + after.kcal + ' kcal / ' + after.protein + 'g protein, and your meal plan is built from them.');
+      Alert.alert('Scan Saved', 'Your first measurements are in. Daily targets are now ' + after.kcal + ' kcal / ' + after.protein + 'g protein, and your meal plan is built from them.');
       return;
     }
     const dK = after.kcal - before.kcal, dP = after.protein - before.protein;
     const sign = (x: number) => (x > 0 ? '+' + x : String(x));
     const changed = Math.abs(dK) >= 5 || Math.abs(dP) >= 2;
-    Alert.alert(changed ? 'Scan Saved — Plan Auto-Tuned' : 'Scan Saved', changed
+    Alert.alert(changed ? 'Scan Saved · Plan Auto-Tuned' : 'Scan Saved', changed
       // Both weights are read out in the client's unit — each is a reading in
       // its own right, so each converts as a value rather than the pair being
       // treated as one span.
@@ -1255,7 +1255,7 @@ export default function Scans() {
       return true;
     } catch (e) {
       reportError('scans.photos.upload', e);
-      Alert.alert('Not Saved', 'That photo could not be saved, so it is not in your progress yet. The original in your camera roll is untouched — try again in a moment.');
+      Alert.alert('Not Saved', 'That photo could not be saved, so it is not in your progress yet. The original in your camera roll is untouched. Try again in a moment.');
       return false;
     } finally { setPhotoBusy(false); }
   };
@@ -1564,7 +1564,7 @@ export default function Scans() {
     const w = weightToKg(eWt, wu);
     const f = readNumber(eBf);
     if (w == null || !(w > 0) || f == null || !(f > 0)) {
-      Alert.alert('Check the Numbers', 'A scan needs a weight and a body-fat percentage. Clearing one is not the same as correcting it — delete the scan instead if it should not be there.');
+      Alert.alert('Check the Numbers', 'A scan needs a weight and a body-fat percentage. Clearing one is not the same as correcting it. Delete the scan instead if it should not be there.');
       return;
     }
     // Blank muscle means the report gave none, and clearing the box has to be
@@ -1622,7 +1622,7 @@ export default function Scans() {
       // The sheet stays open with the corrected numbers in it. Closing it would
       // leave a corrected figure on screen that is not on the server, which is
       // the state this whole screen's read-status handling exists to avoid.
-      Alert.alert('Not Saved', 'That correction could not be saved, so the scan on your record is unchanged and so are your targets. Your numbers are still here — try again in a moment.');
+      Alert.alert('Not Saved', 'That correction could not be saved, so the scan on your record is unchanged and so are your targets. Your numbers are still here. Try again in a moment.');
       return;
     }
     // A moved date changes the ORDER of the history, and the order is what
@@ -1665,7 +1665,7 @@ export default function Scans() {
             const ok = await cd.deleteScan(sc.id);
             setEBusy(false);
             if (!ok) {
-              Alert.alert('Not Deleted', 'That scan could not be removed, so it is still on your record and still visible to your coach. Nothing has been changed — try again in a moment.');
+              Alert.alert('Not Deleted', 'That scan could not be removed, so it is still on your record and still visible to your coach. Nothing has been changed. Try again in a moment.');
               return;
             }
             setEditId(null);
@@ -1901,9 +1901,9 @@ export default function Scans() {
             ) : (
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>
                 {scansReading ? 'Reading your scans…'
-                  : !scansWhole ? 'Your scans could not be read in full — this is not a body with nothing measured on it.'
-                  : progressMetric === 'weight' ? 'No weight on record yet — add a check-in or an InBody scan.'
-                  : 'No scans yet — add your InBody report to start tracking.'}
+                  : !scansWhole ? 'Your scans could not be read in full. This is not a body with nothing measured on it.'
+                  : progressMetric === 'weight' ? 'No weight on record yet. Add a check-in or an InBody scan.'
+                  : 'No scans yet. Add your InBody report to start tracking.'}
               </Text>
             )}
             {/* Where a figure is stale, how stale — said under the figure
@@ -1931,7 +1931,7 @@ export default function Scans() {
             ) : (
               <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.xs }}>
                 {scansReading ? 'Reading your history…'
-                  : progressReads.length > 1 ? `Nothing in the last ${progressRange === '1M' ? 'month' : progressRange === '3M' ? '3 months' : progressRange === '6M' ? '6 months' : 'year'} — widen the range to see the trend.`
+                  : progressReads.length > 1 ? `Nothing in the last ${progressRange === '1M' ? 'month' : progressRange === '3M' ? '3 months' : progressRange === '6M' ? '6 months' : 'year'}. Widen the range to see the trend.`
                   : `Add another ${progressMetric === 'weight' ? 'weight' : 'body-fat'} reading to draw this trend.`}
               </Text>
             )}
@@ -2064,7 +2064,7 @@ export default function Scans() {
             // rather than as the app contradicting itself.
             note={latest
               ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${bodyDayLabel(latest.takenAt)}${ago ? ` · ${ago}` : ''}`
-              : 'Snap or upload your report — the numbers are read for you.'}
+              : 'Snap or upload your report, and the numbers are read for you.'}
             cta={latest ? 'Add Scan' : 'Start'}
             onPress={() => setShowAdd(true)}
           />
@@ -2085,7 +2085,7 @@ export default function Scans() {
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {scansReading ? 'Reading your scans…'
                 : scansWhole ? 'No scans yet. Add your InBody report and it appears here.'
-                : 'Your scans could not be read — this list is empty for that reason, not because there are none.'}
+                : 'Your scans could not be read. This list is empty for that reason, not because there are none.'}
             </Text>
           ) : null}
           {shownScans.map((s, i) => (
@@ -2207,7 +2207,7 @@ export default function Scans() {
             {sharesErr ? (
               <View>
                 <Flag tone={t.warn}>
-                  {sharesErr} Nothing has changed either way — this screen just could not read the list, so it will not tell you these are private.
+                  {sharesErr} Nothing has changed either way. This screen just could not read the list, so it will not tell you these are private.
                 </Flag>
                 <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}><Ghost label="Try Again" onPress={loadShares} /></View>
               </View>
@@ -2219,7 +2219,7 @@ export default function Scans() {
               </Text>
             ) : shares.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                {coachSubject(coach.name)} cannot see any of your photos. Press and hold one to send it — one photo at a time, and only the one you pick.
+                {coachSubject(coach.name)} cannot see any of your photos. Press and hold one to send it: one photo at a time, and only the one you pick.
               </Text>
             ) : (
               <View>
@@ -2300,7 +2300,7 @@ export default function Scans() {
             photosErr ? (
               <View>
                 <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                  {photosErr} Nothing has been deleted — this screen only failed to read the list, so it cannot tell you what is there.
+                  {photosErr} Nothing has been deleted. This screen only failed to read the list, so it cannot tell you what is there.
                 </Text>
                 <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try Again" onPress={loadPhotos} /></View>
               </View>
@@ -2309,7 +2309,7 @@ export default function Scans() {
             )
           ) : photos.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              No photos yet — add one from your camera or library. They are saved privately to your account,
+              No photos yet. Add one from your camera or library. They are saved privately to your account,
               so they are here on any device you sign in to. Your coach cannot see any of them: the only way
               they ever see one is if you send that one photo, and you can take it back afterwards.
               {/* rtl-ok: "before → after" is time inside an English sentence.
@@ -2446,7 +2446,7 @@ export default function Scans() {
               <Text style={{ ...ty.caption, color: t.ink3 }}>
                 {wu === 'kg'
                   ? 'Read from your InBody sheet. The masses are in kilograms, as it printed them; the water is in litres and the level, score and BMR are its own.'
-                  : 'The masses are converted to pounds, so they read the way the rest of your app does — your sheet prints them in kilograms. Body water stays in litres, and the level, score and BMR are the sheet’s own figures.'}
+                  : 'The masses are converted to pounds, so they read the way the rest of your app does. Your sheet prints them in kilograms. Body water stays in litres, and the level, score and BMR are the sheet’s own figures.'}
               </Text>
               </Expandable>
             </View>
@@ -2582,7 +2582,7 @@ export default function Scans() {
           <View style={{ marginTop: sp.sm }}>
             <Expandable title="What It Leaves Out">
             <Text style={{ ...ty.caption, color: t.ink3, }}>
-              It carries no assessment and no advice of any kind — only what has been recorded, and when. Your
+              It carries no assessment and no advice of any kind, only what has been recorded, and when. Your
               progress photos are not in it, and neither is any injury document you have uploaded. If part of your
               record cannot be read when you make it, the document says so on its own front page rather than
               looking complete.
@@ -2723,7 +2723,7 @@ export default function Scans() {
                     <Flag tone={t.warn}>{SCAN_RECORD_FAILED_TITLE}. {SCAN_RECORD_FAILED_NOTE}</Flag>
                   </View>
                 ) : (
-                  <Text style={{ ...ty.caption, color: ocrMsg && ocrMsg.startsWith('Read') ? t.ink2 : t.ink3, marginTop: 6 }}>{ocrMsg || 'Scan attached — reading the numbers…'}</Text>
+                  <Text style={{ ...ty.caption, color: ocrMsg && ocrMsg.startsWith('Read') ? t.ink2 : t.ink3, marginTop: 6 }}>{ocrMsg || 'Scan attached. Reading the numbers…'}</Text>
                 )}
               </View>
             )}
@@ -2740,7 +2740,7 @@ export default function Scans() {
               >
                 <Icon name="scale" size={15} color={t.ink2} />
                 <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
-                  {devWeight.providerName} has you at {weightLabel(devWeight.weightKg, wu)} — tap to use it
+                  {devWeight.providerName} has you at {weightLabel(devWeight.weightKg, wu)}. Tap to use it
                 </Text>
               </Pressable>
             )}
@@ -2788,7 +2788,7 @@ export default function Scans() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>Checking…</Text>
               ) : consentStatus === 'error' ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
-                  We could not read your record just now, so this is not a list of nothing — it is a list we could not read.
+                  We could not read your record just now, so this is not a list of nothing. It is a list we could not read.
                 </Text>
               ) : consentRows.length === 0 ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
@@ -3091,12 +3091,12 @@ export default function Scans() {
                   ) : null}
                   {focusToGroups(phys.focusAreas).length > 0 ? (
                     <View style={{ marginTop: sp.lg }}>
-                      <Cta label="Emphasise These in My Plan" wide onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan Updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + ' — those exercises are tagged and prioritised until your next photo.'); }} />
+                      <Cta label="Emphasise These in My Plan" wide onPress={() => { cd.setFocusAreas(focusToGroups(phys.focusAreas)); setPhysOpen(false); Alert.alert('Plan Updated', 'Your Train tab now emphasises ' + focusToGroups(phys.focusAreas).join(', ') + '. Those exercises are tagged and prioritised until your next photo.'); }} />
                     </View>
                   ) : null}
                 </View>
               ) : null}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>AI estimate for training guidance only — not medical advice.</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>AI estimate for training guidance only, not medical advice.</Text>
             </View>
           ) : null}
         </View>

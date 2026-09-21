@@ -212,8 +212,8 @@ export default function OwnerEquipment() {
    */
   const clockNote = zoneUnread
     ? 'This gym’s timezone could not be read, so the dates and the “due” column below are your own device’s, '
-      + 'not the gym’s. That is a read that did not come back, not a gym with no timezone set — '
-      + 'nothing about the schedules has changed.'
+      + 'not the gym’s. That is a read that did not come back, not a gym with no timezone set. '
+      + 'Nothing about the schedules has changed.'
     : dayWindow.note;
   // The loader above already keeps a register that HAD come back when a later
   // read is refused. What it did not do is tell the screen apart from a screen
@@ -316,7 +316,7 @@ export default function OwnerEquipment() {
     if (next === 'out_of_service' && typeof Alert.prompt === 'function') {
       Alert.prompt(
         'What Is Wrong with It?',
-        `${e.name}${e.quantity > 1 ? ` (${e.quantity} units)` : ''} — this is what everyone else sees beside it until it is back.`,
+        `${e.name}${e.quantity > 1 ? ` (${e.quantity} units)` : ''}: this is what everyone else sees beside it until it is back.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Take Out', style: 'destructive', onPress: (v?: string) => { void write((v ?? '').trim() || null); } },
@@ -363,14 +363,14 @@ export default function OwnerEquipment() {
             ? 'This account is not attached to a gym, so there is no register to read. '
               + 'That is a fact about this account, not a gym with no equipment in it.'
             : tenantStatus === 'error'
-            ? 'Your gym could not be read, so its register was not asked for. Pull down to try again — '
-              + 'this is a read that failed, not a gym with nothing on its register.'
+            ? 'Your gym could not be read, so its register was not asked for. Pull down to try again. '
+              + 'This is a read that failed, not a gym with nothing on its register.'
             : tenantStatus === 'loading'
             ? 'Finding your gym…'
             : readSt === 'failed'
             // Nothing has ever landed, so the figure above is a dash and this
             // is the only thing on the screen worth reading.
-            ? 'The register could not be read, so nothing here is known — that is a failed read, not an all-clear.'
+            ? 'The register could not be read, so nothing here is known. That is a failed read, not an all-clear.'
             : readSt === 'stale'
             // Something DID land, and the count above is real as of the stamp
             // under the title. The old copy said "nothing here is known" over
@@ -379,7 +379,7 @@ export default function OwnerEquipment() {
             : !loaded
             ? 'Reading the register…'
             : list.length === 0
-              ? 'Nothing on the register yet — add your kit and this becomes the maintenance list.'
+              ? 'Nothing on the register yet. Add your kit and this becomes the maintenance list.'
               : queue.length === 0
                 ? 'Every scheduled item is in date.'
                 : `${sum?.overdue ?? 0} overdue · ${sum?.due ?? 0} due · ${sum?.unrecorded ?? 0} never serviced`;
@@ -463,12 +463,12 @@ export default function OwnerEquipment() {
             // below runs the same read.
             <Flag tone={t.crit}>
               {loaded
-                ? 'The register could not be read again just now. These are from the last read that came back — the stamp at the top says when.'
+                ? 'The register could not be read again just now. These are from the last read that came back. The stamp at the top says when.'
                 : 'These are blank because the read failed, not because the register is empty. Pull down, or read it again from the button below, before assuming nothing is due.'}
             </Flag>
           ) : loaded && list.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              An empty register is not an empty gym — these stay blank until the kit is entered.
+              An empty register is not an empty gym. These stay blank until the kit is entered.
             </Text>
           ) : null}
         </Section>
@@ -497,7 +497,7 @@ export default function OwnerEquipment() {
               <Flag tone={t.crit}>
                 {loaded
                   ? 'The register could not be read again just now. The kit below is the last read that came back, not a fresh one.'
-                  : 'The register could not be read. This is not a list of your kit — it is nothing at all. Check your connection and read it again.'}
+                  : 'The register could not be read. This is not a list of your kit. It is nothing at all. Check your connection and read it again.'}
               </Flag>
               {/* The control the two failure messages point at. Without it both
                   of them told an owner to try again and gave them nothing to
@@ -513,7 +513,7 @@ export default function OwnerEquipment() {
             // "Nothing recorded yet" is a claim about a read that succeeded.
             failed ? null : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing recorded yet. Add a treadmill, a rack, a set of bikes — anything you would
+              Nothing recorded yet. Add a treadmill, a rack, a set of bikes: anything you would
               notice missing.
             </Text>
             )
@@ -610,7 +610,7 @@ export default function OwnerEquipment() {
                 placeholderTextColor={t.ink3} returnKeyType="next" style={inp} accessibilityLabel="Equipment name" />
 
               <Text style={{ ...lab, marginTop: sp.md }}>Category</Text>
-              <TextInput value={category} onChangeText={setCategory} placeholder="e.g. Cardio — used by the class capacity check"
+              <TextInput value={category} onChangeText={setCategory} placeholder="e.g. Cardio (used by the class capacity check)"
                 placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Category" />
 
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>

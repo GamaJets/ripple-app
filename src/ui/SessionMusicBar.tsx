@@ -120,7 +120,7 @@ export function SessionMusicBar() {
   if (phase === 'off' || phase === 'reconnect') {
     const line = phase === 'off'
       ? 'Connect Spotify to control music without leaving the session.'
-      : 'Reconnect Spotify — this version needs playback permission, which the old sign-in did not grant.';
+      : 'Reconnect Spotify. This version needs playback permission, which the old sign-in did not grant.';
     return (
       <Pressable onPress={() => router.push('/(client)/music')} accessibilityRole="button" accessibilityLabel="Open music settings" style={shell}>
         <Icon name="play" size={17} color={t.ink3} />

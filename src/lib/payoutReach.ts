@@ -115,12 +115,12 @@ export function payoutNote(r: PayoutReach): string {
       return 'You can accept client payments, and Stripe is paying your balance out to your bank.';
     case 'held':
       return 'You can accept client payments and Stripe is holding the balance rather than paying it out. '
-        + 'Nothing is lost and nothing has failed — Stripe has something outstanding on this account, '
+        + 'Nothing is lost and nothing has failed. Stripe has something outstanding on this account, '
         + 'usually identity or bank details, and it lists what in your Stripe onboarding. Payouts start '
         + 'from the moment it is satisfied, including for money already taken.';
     case 'unrecorded':
       return 'You can accept client payments. Whether Stripe is paying your balance out to your bank has '
-        + 'not been recorded here, so it is not being claimed either way — this is a fact we have not '
+        + 'not been recorded here, so it is not being claimed either way. This is a fact we have not '
         + 'received from Stripe, not a No. Your own Stripe dashboard is the answer while it is missing.';
   }
 }
@@ -140,7 +140,7 @@ export function payoutNote(r: PayoutReach): string {
 export function transferNote(t: TransferState, raw: string | null | undefined): string | null {
   if (t !== 'not_active') return null;
   const word = (raw ?? '').trim();
-  return `Stripe has not activated transfers on your account${word ? ` — it reports them as “${word}”` : ''}. `
+  return `Stripe has not activated transfers on your account${word ? `. It reports them as “${word}”` : ''}. `
     + 'Where Repple passes a client payment on to you rather than your account taking it directly, that '
     + 'hop is the one this blocks. It is finished in the same Stripe onboarding.';
 }

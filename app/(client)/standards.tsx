@@ -223,7 +223,7 @@ export default function Standards() {
     <Notice tone={t.warn} kicker="Standards"
      title={logStatus === 'error' ? 'We Couldn’t Read Your Training Log' : 'Not All of Your Log Could Be Read'}
      note={logStatus === 'error'
-      ? 'Nothing below is a level you are at — it is a level we could not look up. Your lifts are on your record.'
+      ? 'Nothing below is a level you are at. It is a level we could not look up. Your lifts are on your record.'
       : 'You have logged more sessions than this screen can read in one go, so a best lift set before that is not counted here and the level beside it may be under-stated.'} />
    ) : null}
    {rows.map(({ lift, best, grade, lvl, nextTarget }, i) => (
@@ -277,7 +277,7 @@ export default function Standards() {
        {grade.kind === 'ungradable'
         ? (bodyWhole
            ? 'A level is this lift divided by your bodyweight, and we do not have a weight for you yet. Add one and this grades itself.'
-           : 'A level is this lift divided by your bodyweight, and your weight could not be read just now. This is not a level you are at — it is one we could not work out.')
+           : 'A level is this lift divided by your bodyweight, and your weight could not be read just now. This is not a level you are at. It is one we could not work out.')
         : liftsWhole ? 'Log this lift to see your level.'
         : logStatus === 'loading' ? 'Reading your log…'
         : 'Nothing read for this lift, so there is no level to show. That is not the same as never having done it.'}

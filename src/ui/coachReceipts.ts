@@ -179,7 +179,7 @@ export async function recordReceipt(draft: ReceiptDraft): Promise<RecordResult> 
     // body, and a coach told their cash is on record when it is not will not
     // record it again.
     const row = ((data ?? []) as unknown as ReceiptRow[])[0];
-    if (!row?.id) return { ok: false, error: 'That payment was not recorded — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That payment was not recorded. Nothing came back from the server.' };
     return { ok: true, receipt: toReceipt(row) };
   } catch (e) {
     reportError('coachReceipts.record', e);

@@ -121,7 +121,7 @@ export default function OwnerTrainers() {
     const sent = await sendTrainerInvite(parsed.value);
     setInvBusy(false);
     if (!sent) {
-      setInvErr(`${parsed.value} has not been invited. Nothing was sent and nothing was saved — check your connection and try again.`);
+      setInvErr(`${parsed.value} has not been invited. Nothing was sent and nothing was saved. Check your connection and try again.`);
       return;
     }
     setInvOpen(false); setInvEmail('');
@@ -133,7 +133,7 @@ export default function OwnerTrainers() {
   const revoke = async (id: string, email: string) => {
     const done = await revokeTrainerInvite(id);
     if (!done) {
-      Alert.alert('Not Cancelled', `The invitation to ${email} is still open. Nothing changed — try again in a moment.`);
+      Alert.alert('Not Cancelled', `The invitation to ${email} is still open. Nothing changed. Try again in a moment.`);
     }
   };
 
@@ -173,7 +173,7 @@ export default function OwnerTrainers() {
         <SectionHead title={onboarding ? 'Start Your Roster' : 'Add to the Roster'} />
         <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
           {onboarding
-            ? 'Nobody coaches at your gym in this app yet. Invite a trainer by email and they join when they accept in their own app — their clients and sessions start counting here from then.'
+            ? 'Nobody coaches at your gym in this app yet. Invite a trainer by email and they join when they accept in their own app. Their clients and sessions start counting here from then.'
             : 'Invite a trainer by email. They join your gym when they accept in their own app.'}
         </Text>
         <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />
@@ -198,7 +198,7 @@ export default function OwnerTrainers() {
           {invitesUnread ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Your sent invitations could not be read, so this cannot say who is waiting on you.
-              That is a failed read, not an empty list — nobody&rsquo;s invitation has been
+              That is a failed read, not an empty list. Nobody&rsquo;s invitation has been
               cancelled, and re-sending one on the strength of this screen would invite the same
               person twice.
             </Text>
@@ -254,7 +254,7 @@ export default function OwnerTrainers() {
         {trainersUnread ? (
           <Notice tone={t.warn} kicker="Roster Unread"
             title="Your Trainers Could Not Be Read"
-            note="Nothing below is a statement about your staff — an empty roster here means the read failed, not that nobody works for you.">
+            note="Nothing below is a statement about your staff. An empty roster here means the read failed, not that nobody works for you.">
             <View style={{ marginTop: sp.lg }}>
               <Cta label="Try Again" wide onPress={refresh} />
             </View>
@@ -327,7 +327,7 @@ export default function OwnerTrainers() {
             // email", which is the app telling a staffed gym it has no staff.
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Your roster could not be read, so nobody could be listed. This is a failed read,
-              not an empty gym — do not invite anyone on the strength of it.
+              not an empty gym. Do not invite anyone on the strength of it.
             </Text>
           ) : trainers.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>

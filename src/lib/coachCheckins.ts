@@ -230,7 +230,7 @@ export function checkInGapLine(status: LoadStatus, count: number, who: string): 
     case 'loading':
       return 'Reading their check-ins…';
     case 'error':
-      return `Their check-ins could not be read, so whether ${who} has sent any is not known. That is a read that failed rather than a client who has not written — try again in a moment.`;
+      return `Their check-ins could not be read, so whether ${who} has sent any is not known. That is a read that failed rather than a client who has not written. Try again in a moment.`;
     case 'partial':
       // A truncated read that came back with nothing is a contradiction — the
       // cap cannot bite on an empty set — but 'partial' can also arrive from a

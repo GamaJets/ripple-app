@@ -164,7 +164,7 @@ function linkProblem(raw: string): string | null {
   if (/[\s\\]/.test(url)) return 'That link has a space or a backslash in it, so it is not a web address. Paste the whole link again.';
   const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(url);
   if (!scheme) {
-    return 'That is not a full link. Paste the whole address, starting with https:// — Repple will not guess the missing half and store a link nobody has opened.';
+    return 'That is not a full link. Paste the whole address, starting with https://. Repple will not guess the missing half and store a link nobody has opened.';
   }
   const s = scheme[1].toLowerCase();
   if (s !== 'http' && s !== 'https') {
@@ -340,7 +340,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
     <View style={{ marginTop: sp.lg }}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>Shared With</Text>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
-        Anyone you name here can watch this clip whatever the setting above says — a name reaches even a clip set to “Only me”.
+        Anyone you name here can watch this clip whatever the setting above says. A name reaches even a clip set to “Only me”.
       </Text>
 
       {reading && peopleStatus !== 'error' ? (
@@ -360,7 +360,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
       {peopleStatus === 'ready' && grants?.status === 'error' ? (
         <View>
           <Text style={{ ...ty.label, color: t.ink2 }}>
-            We could not read who “{video.name}” is shared with, so we are not going to show you a list. This is not a list of nobody — check before you share it again.
+            We could not read who “{video.name}” is shared with, so we are not going to show you a list. This is not a list of nobody. Check before you share it again.
           </Text>
           <View style={{ height: sp.md }} />
           <Ghost label="Try Again" a11yLabel={`Try reading who ${video.name} is shared with again`} onPress={onRetryGrants} />
@@ -404,7 +404,7 @@ function SharedWith({ video, people, peopleStatus, handAdded, grants, busyKey, o
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
           {handAdded === 1
             ? 'One person on your roster was added by hand and has'
-            : `${handAdded} people on your roster were added by hand and have`} no Repple account, so they are not listed — there is no account for the clip to reach.
+            : `${handAdded} people on your roster were added by hand and have`} no Repple account, so they are not listed. There is no account for the clip to reach.
         </Text>
       ) : null}
     </View>
@@ -599,8 +599,8 @@ export default function TrainerVideos() {
       Alert.alert(
         on ? 'Not Removed' : 'Not Shared',
         on
-          ? `${person.name} can still watch “${v.name}”. The change did not reach the server — check your connection and try again.`
-          : `“${v.name}” has not been shared with ${person.name}. The change did not reach the server — check your connection and try again.`,
+          ? `${person.name} can still watch “${v.name}”. The change did not reach the server. Check your connection and try again.`
+          : `“${v.name}” has not been shared with ${person.name}. The change did not reach the server. Check your connection and try again.`,
       );
       return;
     }
@@ -660,7 +660,7 @@ export default function TrainerVideos() {
     // told that plainly instead of being told it was saved.
     Alert.alert(where === 'remote' ? 'Clip Added' : 'Clip Not Saved', where === 'remote'
       ? `Uploaded. ${visOf(chosen).note} You can change that any time from the clip's row.`
-      : 'The name is in your library on this phone, but the clip itself did not reach the server and has not been kept. The video is still on your phone — add it again when you have a connection.');
+      : 'The name is in your library on this phone, but the clip itself did not reach the server and has not been kept. The video is still on your phone. Add it again when you have a connection.');
   };
 
   // Adding by link goes through exactly the same `addVideo` as the upload above,
@@ -693,20 +693,20 @@ export default function TrainerVideos() {
     const where = await addVideo({ name, group: lGroup, url: lUrl.trim() });
     setLBusy(false);
     if (where === 'none') {
-      Alert.alert('Not Added', `“${name}” was not added to your library. Nothing was saved — check the name and try again.`);
+      Alert.alert('Not Added', `“${name}” was not added to your library. Nothing was saved. Check the name and try again.`);
       return;
     }
     setLinkOpen(false);
     Alert.alert(where === 'remote' ? 'Added' : 'Saved on This Phone Only', where === 'remote'
       ? `${name} is in the exercise library. ${visOf('clients').note} You can change that any time from the clip's row.`
-      : `${name} is in your library on this device only. It did not reach the server, so none of your clients can see it yet — remove it and add it again when you have a connection.`);
+      : `${name} is in your library on this device only. It did not reach the server, so none of your clients can see it yet. Remove it and add it again when you have a connection.`);
   };
 
   // Tap a recorded clip to watch it right here; tap a not-yet-recorded exercise
   // to add one.
   const tapRow = (v: VideoItem) => {
     if (v.uploaded) { setOpenId(openId === v.id ? null : v.id); return; }
-    Alert.alert(v.name, 'No video yet for this exercise — add one now:', [
+    Alert.alert(v.name, 'No video yet for this exercise. Add one now:', [
       { text: 'Record', onPress: () => upload(true, { name: v.name, group: v.group }) },
       { text: 'Upload from Library', onPress: () => upload(false, { name: v.name, group: v.group }) },
       { text: 'Cancel', style: 'cancel' },
@@ -721,7 +721,7 @@ export default function TrainerVideos() {
     const ok = await setVisibility(v.id, next);
     setVisBusy(null);
     if (!ok) {
-      Alert.alert('Not Changed', `“${v.name}” is still set to “${visOf(v.visibility).label}”. The change did not reach the server — check your connection and try again.`);
+      Alert.alert('Not Changed', `“${v.name}” is still set to “${visOf(v.visibility).label}”. The change did not reach the server. Check your connection and try again.`);
     }
   };
 
@@ -739,7 +739,7 @@ export default function TrainerVideos() {
         {
           text: 'Remove', style: 'destructive', onPress: async () => {
             const ok = await removeVideo(v.id);
-            if (!ok) { Alert.alert('Not Removed', `“${v.name}” is still in your library — the delete did not reach the server. Anyone you shared it with can still watch it. Try again when you have a connection.`); return; }
+            if (!ok) { Alert.alert('Not Removed', `“${v.name}” is still in your library. The delete did not reach the server. Anyone you shared it with can still watch it. Try again when you have a connection.`); return; }
             if (openId === v.id) setOpenId(null);
           },
         },
@@ -871,7 +871,7 @@ export default function TrainerVideos() {
               {coverage.academyOnly.length ? (
                 <View style={{ marginTop: sp.lg }}>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-                    Showing the Academy clip — record your own and yours is what your clients see instead.
+                    Showing the Academy clip. Record your own and yours is what your clients see instead.
                   </Text>
                   {coverage.academyOnly.slice(0, 6).map((nm, i) => (
                     <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
@@ -894,7 +894,7 @@ export default function TrainerVideos() {
               {coverage.localOnly.length ? (
                 <View style={{ marginTop: sp.lg }}>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-                    Filmed, but saved on this phone only — the clip never reached the server, so no client can watch it. Add it again from the library below.
+                    Filmed, but saved on this phone only. The clip never reached the server, so no client can watch it. Add it again from the library below.
                   </Text>
                   {coverage.localOnly.slice(0, 6).map((nm, i) => (
                     <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
@@ -976,7 +976,7 @@ export default function TrainerVideos() {
           {status === 'error' ? (
             <View style={{ marginBottom: vids.length ? sp.lg : 0 }}>
               <Text style={{ ...ty.label, color: t.ink2 }}>
-                Your library could not be read. Whatever you have uploaded is still there — it is missing from this list, not deleted.
+                Your library could not be read. Whatever you have uploaded is still there. It is missing from this list, not deleted.
                 {vids.length ? ' What follows is only what is saved on this phone.' : ''}
               </Text>
               <View style={{ height: sp.md }} />
@@ -986,7 +986,7 @@ export default function TrainerVideos() {
 
           {known && vids.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              No clips yet. Record one, upload one from your library, or paste a hosted link — then say who gets to watch it.
+              No clips yet. Record one, upload one from your library, or paste a hosted link, then say who gets to watch it.
             </Text>
           ) : null}
 
@@ -1120,7 +1120,7 @@ export default function TrainerVideos() {
                         {localOnly
                           ? 'This clip only exists on this phone, so there is nobody to share it with. Remove it and add it again when you have a connection.'
                           : platform
-                            ? 'A clip that ships with Repple, not one of yours — everyone you coach can already watch it.'
+                            ? 'A clip that ships with Repple, not one of yours. Everyone you coach can already watch it.'
                             : 'Another coach’s clip, shared publicly. You can use it in a program and your clients can watch it, but who else sees it is theirs to change, not yours.'}
                       </Text>
                     )}
@@ -1162,7 +1162,7 @@ export default function TrainerVideos() {
               it is uploaded. */}
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>Name This Clip</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library, and only the people you choose below can watch it.' : 'Saved to this device — turn on the backend to share it with anyone.'}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library, and only the people you choose below can watch it.' : 'Saved to this device. Turn on the backend to share it with anyone.'}</Text>
             <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Exercise name" />
             <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Muscle group" />
 

@@ -412,7 +412,7 @@ export function useNudges(): NudgeBook {
 
   const note = useMemo(() => {
     if (combined === 'error') {
-      return 'Could not work out who has gone quiet, so nothing is suggested. This is not a quiet week — it is a failed read.';
+      return 'Could not work out who has gone quiet, so nothing is suggested. This is not a quiet week. It is a failed read.';
     }
     if (combined === 'partial') {
       return 'Only part of the record came back, so no client is suggested: a gap in it looks exactly like silence.';
@@ -470,7 +470,7 @@ export function useNudges(): NudgeBook {
       return {
         ok: false,
         reason: action === 'sent'
-          ? 'Your message was sent, but we could not record it — so this client may be suggested again.'
+          ? 'Your message was sent, but we could not record it, so this client may be suggested again.'
           : 'That could not be recorded, so this client may be suggested again.',
       };
     }

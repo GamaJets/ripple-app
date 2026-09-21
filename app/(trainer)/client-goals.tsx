@@ -143,7 +143,7 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: 
   };
   switch (p.kind) {
     case 'reached':
-      return `${who} has reached this one. It is theirs to mark done — worth a message.`;
+      return `${who} has reached this one. It is theirs to mark done, so it is worth a message.`;
     case 'tooshort':
       return `Only ${p.days === 1 ? 'a day' : `${p.days} days`} between their readings so far. A finish date needs about ${MIN_TREND_DAYS} days of them; a shorter gap is noise, not a trend.`;
     case 'flat':
@@ -444,7 +444,7 @@ export default function ClientGoals() {
     const unit = goalUnit(g.kind, wu);
     const left = Math.abs(goalDelta(prog.remaining, g.kind, wu));
     return prog.reached
-      ? `Reached — ${fig(goalValue(prog.current, g.kind, wu))} ${unit} against a target of ${fig(goalValue(prog.target, g.kind, wu))}.`
+      ? `Reached: ${fig(goalValue(prog.current, g.kind, wu))} ${unit} against a target of ${fig(goalValue(prog.target, g.kind, wu))}.`
       : `${prog.pct}% of the way · ${fig(left)} ${unit} to go · now ${fig(goalValue(prog.current, g.kind, wu))} ${unit}`;
   };
 
@@ -615,7 +615,7 @@ export default function ClientGoals() {
             {r.status === 'error' ? (
               <Section>
                 <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-                  note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+                  note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
 
@@ -637,7 +637,7 @@ export default function ClientGoals() {
                 <Rule />
                 <Section>
                   <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
-                    note={`You added ${who} to your book by hand, so there is nothing of theirs on the server to read — no goals, no scans, no weigh-ins and no tape. That is not an empty record and not a failed read: goals are set in the app, and ${who} does not have it. Invite them from your client list and this screen fills in from the day they accept.`} />
+                    note={`You added ${who} to your book by hand, so there is nothing of theirs on the server to read: no goals, no scans, no weigh-ins and no tape. That is not an empty record and not a failed read: goals are set in the app, and ${who} does not have it. Invite them from your client list and this screen fills in from the day they accept.`} />
                 </Section>
               </View>
             ) : picked ? (
@@ -651,21 +651,21 @@ export default function ClientGoals() {
                 ) : board.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their Goals Could Not Be Read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has set none — that is a different screen and a different conversation.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has set none. That is a different screen and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
                     <SectionHead title={client?.name ?? 'Their Goals'} note="none set" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {who} hasn&rsquo;t set a goal yet. The read came back and it was empty, so this
-                      is about them rather than about the connection — which makes it worth raising.
+                      is about them rather than about the connection, which makes it worth raising.
                     </Text>
                   </Section>
                 ) : board.state === 'reached' ? (
                   <Section>
                     <SectionHead title={client?.name ?? 'Their Goals'} note="all reached" />
                     <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>
-                      Everything {who} set has been reached and marked done. Nothing is outstanding —
+                      Everything {who} set has been reached and marked done. Nothing is outstanding,
                       which is not the same as nothing being set, and is usually the moment to agree
                       the next one.
                     </Text>
@@ -804,14 +804,14 @@ export default function ClientGoals() {
                 ) : tape.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their Measurements Could Not Be Read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has never measured — the goals above came from a different read and are unaffected either way.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has never measured. The goals above came from a different read and are unaffected either way.`} />
                   </Section>
                 ) : tape.state === 'none' ? (
                   <Section>
                     <SectionHead title="Tape" note="none recorded" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {who} hasn&rsquo;t logged a tape measurement. The read came back and it was
-                      empty, so this is about them rather than about the connection — and it is the
+                      empty, so this is about them rather than about the connection, and it is the
                       one record that moves when the scale doesn&rsquo;t.
                     </Text>
                   </Section>
@@ -836,7 +836,7 @@ export default function ClientGoals() {
                         naming it as never measured would pick the wrong one. */}
                     {measStatus === 'ready' && unmeasuredSites(tape.sites).length ? (
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
-                        Nothing on record for {unmeasuredSites(tape.sites).join(', ').toLowerCase()} — the
+                        Nothing on record for {unmeasuredSites(tape.sites).join(', ').toLowerCase()}. The
                         client&rsquo;s own screen offers those boxes and they have been left empty.
                       </Text>
                     ) : null}
@@ -873,7 +873,7 @@ export default function ClientGoals() {
             on the figure, not on a paragraph. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           What each client is aiming at, in their own words and numbers, how far along they are,
-          and what the tape says. You can read these; you can&rsquo;t change them — a goal is theirs
+          and what the tape says. You can read these; you can&rsquo;t change them. A goal is theirs
           to set and theirs to call done, and a measurement is theirs to take.
         </Text>
       </ScrollView>

@@ -305,7 +305,7 @@ export function bodyHistoryNote(scans: readonly ScanReading[], now: number = Dat
   const cells = bodyMonthlyHistory(scans, now);
   const months = cells.filter((c) => c.measured).length;
   if (stageOf(span) === 'starting') {
-    return `Day ${span.days} — this is the start of your body history, and it fills out as the months go by.`;
+    return `Day ${span.days}. This is the start of your body history, and it fills out as the months go by.`;
   }
   const firstKey = monthKey(span.firstAt);
   const back = firstKey ? monthLabel(firstKey) : 'your first weigh-in';

@@ -361,7 +361,7 @@ export default function CoachProfile() {
   const copyPageUrl = async () => {
     if (!pageUrl) return;
     if (!(await copyToClipboard(pageUrl))) {
-      Alert.alert('Not Copied', `Your page address could not be copied. It is ${pageUrl} — write it down.`, [{ text: 'OK' }]);
+      Alert.alert('Not Copied', `Your page address could not be copied. It is ${pageUrl}. Write it down.`, [{ text: 'OK' }]);
       return;
     }
     Alert.alert('Copied', `${pageUrl} is on your clipboard. Paste it into your bio.`, [{ text: 'OK' }]);
@@ -568,7 +568,7 @@ export default function CoachProfile() {
               {trainerAccessNote(p.access) ?? 'There is no profile to preview on this app.'}
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Nothing is shown here until then. An empty preview is not what a client sees — it is what
+              Nothing is shown here until then. An empty preview is not what a client sees. It is what
               this screen knows so far, and the two are not the same page.
             </Text>
           </Card>
@@ -603,7 +603,7 @@ export default function CoachProfile() {
             </View>
           )}
 
-          <Text style={{ ...ty.body, color: p.bio ? t.ink2 : t.ink3, marginTop: sp.lg }}>{p.bio || 'No bio yet — clients read this first.'}</Text>
+          <Text style={{ ...ty.body, color: p.bio ? t.ink2 : t.ink3, marginTop: sp.lg }}>{p.bio || 'No bio yet. Clients read this first.'}</Text>
 
           {p.offers.length > 0 && (
             <View style={{ marginTop: sp.lg }}>
@@ -635,7 +635,7 @@ export default function CoachProfile() {
                 know what it is denominated in; the app does not, and says so by
                 not saying. */}
             {p.sessionFee == null
-              ? <Text style={{ ...ty.body, color: t.ink3 }}>— no rate set</Text>
+              ? <Text style={{ ...ty.body, color: t.ink3 }}>No rate set</Text>
               : <Text style={{ ...value(20), color: t.ink }}>{fig(p.sessionFee)}<Text style={{ ...ty.caption, color: t.ink3 }}> / session</Text></Text>}
           </View>
         </Card>
@@ -799,8 +799,8 @@ export default function CoachProfile() {
               description of the fallback, offered as the whole behaviour. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {p.sessionFee == null
-              ? 'Leave this empty and nothing quotes a rate for you — your figures show a dash rather than a zero.'
-              : 'Clients see this in the currency you charge in wherever Repple has been told what that is, and as a bare figure where it has not — never with a symbol nobody chose. If yours is showing bare, the currency is set once, for the gym or in Settings, and every amount in the app picks it up.'}
+              ? 'Leave this empty and nothing quotes a rate for you. Your figures show a dash rather than a zero.'
+              : 'Clients see this in the currency you charge in wherever Repple has been told what that is, and as a bare figure where it has not, never with a symbol nobody chose. If yours is showing bare, the currency is set once, for the gym or in Settings, and every amount in the app picks it up.'}
           </Text>
         </Section>
 
@@ -883,7 +883,7 @@ export default function CoachProfile() {
                   years ago, which is the whole of what this section is for. */}
               {payTerms.card.setOn ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                  {`Set by your gym on ${fmtFullDay(payTerms.card.setOn)}. You cannot change it here — this is what they agreed, shown to you.`}
+                  {`Set by your gym on ${fmtFullDay(payTerms.card.setOn)}. You cannot change it here. This is what they agreed, shown to you.`}
                 </Text>
               ) : null}
             </>
@@ -943,7 +943,7 @@ export default function CoachProfile() {
           <SectionHead title="Late Cancellations" />
           {lc.status === 'error' ? (
             <Notice tone={t.warn} kicker="Policy" title="We Couldn’t Read Your Cancellation Policy"
-              note="Nothing typed here would be stored, so the controls are withheld rather than accepting an edit that goes nowhere. Your existing policy is unchanged — clients are still held to whatever it already says." />
+              note="Nothing typed here would be stored, so the controls are withheld rather than accepting an edit that goes nowhere. Your existing policy is unchanged. Clients are still held to whatever it already says." />
           ) : lc.status === 'loading' ? (
             /* Withheld for the same reason the error branch is, and it used to
                fall straight through to the live control drawn from the empty
@@ -975,8 +975,8 @@ export default function CoachProfile() {
               <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>Charge for Late Cancellations</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {lc.applies
-                  ? `Cancelling inside ${noticeLabel(lc.noticeHours)} records a fee against the client. Repple does not take it — you settle it with them.`
-                  : 'Off — clients can cancel at any time and nothing is recorded against them.'}
+                  ? `Cancelling inside ${noticeLabel(lc.noticeHours)} records a fee against the client. Repple does not take it. You settle it with them.`
+                  : 'Off. Clients can cancel at any time and nothing is recorded against them.'}
               </Text>
             </View>
             <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: lc.applies ? t.brand : t.surface3, borderWidth: hairline, borderColor: lc.applies ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
@@ -1026,7 +1026,7 @@ export default function CoachProfile() {
                   this app picked. A coach with no gym sees the bare figure and
                   is told why, exactly as the session rate above does it. */}
               {lc.fee == null
-                ? 'No amount set. A policy with no amount cannot be switched on — a fee of nothing is a policy that does not apply.'
+                ? 'No amount set. A policy with no amount cannot be switched on. A fee of nothing is a policy that does not apply.'
                 : lc.currency
                   ? `Clients see ${feeAmountLine(lc.fee, lc.currency)} before they confirm a late cancellation, and again on the record afterwards.`
                   : `Clients see this figure as a number. Your gym hasn’t told us what it charges in, so Repple prints no symbol rather than guessing one.`}
@@ -1040,7 +1040,7 @@ export default function CoachProfile() {
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>{lc.blocker}</Flag>
           ) : (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              Repple records the fee and never collects it. Your client sees what they owe and who to pay — you.
+              Repple records the fee and never collects it. Your client sees what they owe and who to pay: you.
             </Text>
           )}
           {/* The same answer the fields above this section get, for the same
@@ -1076,7 +1076,7 @@ export default function CoachProfile() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>List Me in Find a Trainer</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.listed ? 'Clients browsing Repple can see your name, tagline, bio, specialties and rate, and can request coaching.' : 'Off — you are not visible to clients browsing for a coach.'}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.listed ? 'Clients browsing Repple can see your name, tagline, bio, specialties and rate, and can request coaching.' : 'Off. You are not visible to clients browsing for a coach.'}</Text>
             </View>
             <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: p.listed ? t.brand : t.surface3, borderWidth: hairline, borderColor: p.listed ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
               <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: p.listed ? t.brandInk : t.ink3, alignSelf: p.listed ? 'flex-end' : 'flex-start' }} />

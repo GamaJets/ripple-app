@@ -193,7 +193,7 @@ export function buildChecklist(input: ChecklistInput): Checklist {
   const gaps: ChecklistGap[] = [];
 
   const focus = (input.todaysTrainingFocus || '').trim();
-  if (focus) items.push({ id: 'train', label: `Train — ${focus}`, icon: '🏋️', source: 'plan' });
+  if (focus) items.push({ id: 'train', label: `Train · ${focus}`, icon: '🏋️', source: 'plan' });
 
   const kcal = target(input.kcalTarget);
   if (kcal != null) items.push({ id: 'kcal', label: `Eat to your ${num(kcal)} kcal target`, icon: '🔥', source: 'targets' });
@@ -205,7 +205,7 @@ export function buildChecklist(input: ChecklistInput): Checklist {
   // note covers them. Worth saying because the client CAN fix it: weight and
   // body fat are on their profile, and a scan fills both in.
   if (kcal == null && protein == null) {
-    gaps.push({ id: 'macros', note: 'Add your weight and body fat — your calorie and protein targets are worked out from them.' });
+    gaps.push({ id: 'macros', note: 'Add your weight and body fat. Your calorie and protein targets are worked out from them.' });
   }
 
   const water = target(input.waterGoalGlasses);

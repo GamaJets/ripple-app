@@ -134,7 +134,7 @@ export function threadSearchLine(o: {
     return 'This conversation could not be read, so this searches only what was already on this phone. There may be more.';
   }
   const more = o.hasOlder
-    ? ' Earlier messages are on the server and were not searched — load them to search further back.'
+    ? ' Earlier messages are on the server and were not searched. Load them to search further back.'
     : '';
   if (o.matched <= 0) {
     // Never "no matches" on its own. The set is named every time.

@@ -68,4 +68,4 @@ export const isDialable = (raw: string | null | undefined): boolean => telUrl(ra
  * because the coach reading this is the person who needs it now.
  */
 export const DIAL_UNAVAILABLE_NOTE =
-  'Your phone would not open its dialler for that. The number is on the screen behind this — read it out or type it in by hand.';
+  'Your phone would not open its dialler for that. The number is on the screen behind this. Read it out or type it in by hand.';

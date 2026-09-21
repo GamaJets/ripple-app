@@ -94,7 +94,7 @@ export const ATTRIBUTION_NOTE: Record<SignatureAttribution, string> = {
   member:
     'Given by the member from their own signed-in account, against this version of the wording. This is the strong form.',
   staff:
-    'A member of staff recorded this on the member’s behalf. It is a real business record — a staff attestation that the member agreed — but it is not the member’s own act, and it is not what a signature is usually taken to mean.',
+    'A member of staff recorded this on the member’s behalf. It is a real business record (a staff attestation that the member agreed), but it is not the member’s own act, and it is not what a signature is usually taken to mean.',
   unknown:
     'Written before this product recorded who typed a signature. It is not known whether the member gave it or a member of staff entered it for them, and nothing here will guess.',
 };
@@ -163,11 +163,11 @@ export interface MemberAgreement {
 }
 
 export const GUARDIAN_REFUSAL =
-  'This one has to be given by the adult responsible for you, in person at the gym. It cannot be given from this account — an account belonging to the person the consent is ABOUT is the wrong signature, however it is worded.';
+  'This one has to be given by the adult responsible for you, in person at the gym. It cannot be given from this account. An account belonging to the person the consent is ABOUT is the wrong signature, however it is worded.';
 
 /** The one sentence a member reads before they agree to anything here. */
 export const SIGNING_RULE =
-  'Signing records your name, the moment, and the exact wording above, against your account. It is kept as the gym’s evidence that you agreed and it cannot be edited or taken back afterwards — withdrawing consent later is a new record, not the quiet disappearance of this one.';
+  'Signing records your name, the moment, and the exact wording above, against your account. It is kept as the gym’s evidence that you agreed and it cannot be edited or taken back afterwards. Withdrawing consent later is a new record, not the quiet disappearance of this one.';
 
 /**
  * Why the gym holds this rather than the app's publisher, said once and shown
@@ -446,8 +446,8 @@ export const WITHDRAW_WHAT_IT_DOES =
 
 export const WITHDRAW_WHAT_IT_DOES_NOT =
   'It does not delete anything. Photographs and video already taken still exist, and anything already printed, posted or '
-  + 'shared is out in the world and no app can call it back. The record that you agreed on the original date also stays — '
-  + 'withdrawing is a second entry beside it, not an erasure of it, so both remain true. If you want particular pictures '
+  + 'shared is out in the world and no app can call it back. The record that you agreed on the original date also stays. '
+  + 'Withdrawing is a second entry beside it, not an erasure of it, so both remain true. If you want particular pictures '
   + 'taken down or deleted, ask your gym directly: that is a separate request and this button does not make it.';
 
 // The second sentence names WHERE, and that is not decoration. `gym_agreement_
@@ -458,7 +458,7 @@ export const WITHDRAW_WHAT_IT_DOES_NOT =
 // button that says it, which is the smaller cousin of the defect the paragraph
 // above it exists to prevent.
 export const WITHDRAW_CANNOT_BE_UNDONE =
-  'This entry is permanent, the same way your signature is — neither you nor your gym can delete it. If you change your '
+  'This entry is permanent, the same way your signature is. Neither you nor your gym can delete it. If you change your '
   + 'mind you can give consent again: tell your gym, or sign the next version of this document when they publish one. '
   + 'That later signature is the one that counts.';
 
@@ -515,8 +515,8 @@ export function withdrawnLine(revokedAt: string): string {
  * about this member made from the absence of a table.
  */
 export const WITHDRAW_UNAVAILABLE_NOTE =
-  'Withdrawing consent from the app is not switched on for your gym yet. Ask them directly and they can record it for you — '
-  + 'this is not a record that you have never asked.';
+  'Withdrawing consent from the app is not switched on for your gym yet. Ask them directly and they can record it for you. '
+  + 'This is not a record that you have never asked.';
 
 /**
  * Why this cannot be withdrawn here, or null when it can.
@@ -529,7 +529,7 @@ export function withdrawBlocker(a: MemberAgreement, read: RevocationRead): strin
   if (read.status !== 'read') return WITHDRAW_UNAVAILABLE_NOTE;
   if (!isRevocable(a.kind)) {
     return 'This one is part of how your gym is allowed to train you, so it is not something to switch off here. '
-      + 'If you no longer want to agree to it, that is a conversation about your membership — speak to your gym.';
+      + 'If you no longer want to agree to it, that is a conversation about your membership. Speak to your gym.';
   }
   if (!memberMayRevoke(a.kind)) return GUARDIAN_REFUSAL;
   if (a.signedAt === null) return 'You have not given this consent, so there is nothing to withdraw.';
@@ -605,7 +605,7 @@ export async function withdrawConsent(
   if (!memberMayRevoke(w.kind)) {
     throw new Error(
       isRevocable(w.kind) ? GUARDIAN_REFUSAL
-        : 'That one is not something you can withdraw here. Speak to your gym — it is part of how they are allowed to train you.',
+        : 'That one is not something you can withdraw here. Speak to your gym. It is part of how they are allowed to train you.',
     );
   }
   const { data: auth, error: authErr } = await sb.auth.getUser();
@@ -748,11 +748,11 @@ export function agreementSummary(rows: ReadonlyArray<MemberAgreement>): string {
   if (waiting === 0 && blocked === 0) return 'Nothing is waiting on you.';
   if (waiting === 0) {
     return `Nothing here is for you to sign, but ${docs(blocked)} your gym asks for `
-      + `${blocked === 1 ? 'is' : 'are'} still unsigned — ${guardian(blocked)}. `
+      + `${blocked === 1 ? 'is' : 'are'} still unsigned: ${guardian(blocked)}. `
       + 'Your gym may not be able to train you until that is done.';
   }
   if (blocked === 0) return `${docs(waiting)} waiting on you.`;
-  return `${docs(waiting)} waiting on you, and ${blocked} more still unsigned — `
+  return `${docs(waiting)} waiting on you, and ${blocked} more still unsigned: `
     + `${guardian(blocked)}. Your gym may not be able to train you until that is done.`;
 }
 
@@ -773,7 +773,7 @@ export function signingBlocker(
   if (!readIt) return 'Open the wording and read it first. Agreeing to a document you have not seen is not agreeing to anything.';
   if (!agreed) return 'Tick the box to say you agree to it.';
   if (!typedName.trim()) {
-    return 'Type your name. The name on the document is what makes it a signature, and it is kept exactly as you type it — separately from your account name, so it survives you changing that.';
+    return 'Type your name. The name on the document is what makes it a signature, and it is kept exactly as you type it, separately from your account name, so it survives you changing that.';
   }
   if (typedName.trim().length < 2) return 'That is too short to be a name.';
   return null;

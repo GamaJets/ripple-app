@@ -118,7 +118,7 @@ export function LiftingToolsPanel({ unit }: { unit: WeightUnit }) {
       <Section>
         <SectionHead title="Estimated 1RM" />
         <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-          Type a set you have actually done. Nothing here is logged — this is arithmetic, not a
+          Type a set you have actually done. Nothing here is logged. This is arithmetic, not a
           record, and it never reaches your training log.
         </Text>
         <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>

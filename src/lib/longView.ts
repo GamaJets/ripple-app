@@ -457,7 +457,7 @@ export function historyNote(log: WorkoutEntry[], now: number = Date.now()): stri
   const cells = monthlyHistory(log, now);
   const months = trainedMonths(cells).length;
   if (stage === 'starting') {
-    return `Day ${span.days} — this is the start of your history, and it fills out as the months go by.`;
+    return `Day ${span.days}. This is the start of your history, and it fills out as the months go by.`;
   }
   return `${months} month${months === 1 ? '' : 's'} with training, back to ${monthLabel(monthKey(span.firstAt)!)}.`;
 }

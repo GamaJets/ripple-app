@@ -3841,7 +3841,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ok(gn.summary.bands === null,
     'so NO bands at all — a roster marked "nothing recorded" would be a statement about three failed queries wearing the clothes of a statement about the gym');
   ok(gn.rows![0].drift === null, 'and no verdict on the member: not judged, which is not the same as unknown');
-  ok(headline(gn)!.includes('unknown — not zero'), 'the headline says so in as many words');
+  ok(headline(gn)!.includes('unknown, not zero'), 'the headline says so in as many words');
 
   // ── no roster, and still loading ──
   const noRoster: RetentionRecord = {
@@ -4304,7 +4304,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   const pcNR = buildPassConversion(pcNoRoster, { today: PC_TODAY });
   ok(pcNR.passes!.issued === 8 && pcNR.holders === null && pcNR.counts === null && pcNR.joinedAfterRate === null,
     'a failed roster read leaves the pass counts standing and every conversion figure null — not a gym where no pass holder has ever joined');
-  ok(/unknown here — not none/.test(pcNR.headline ?? ''), 'and the headline says which');
+  ok(/unknown here, not none/.test(pcNR.headline ?? ''), 'and the headline says which');
   ok(pcNR.warning !== null && /whether any pass holder ever joined/.test(pcNR.warning!),
     'the banner names the missing ANSWER, not the missing query');
 

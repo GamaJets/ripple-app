@@ -160,7 +160,7 @@ export async function recordCost(draft: CostDraft): Promise<RecordCostResult> {
     // body, and a coach told their rent is on record when it is not will not
     // record it again.
     const row = ((data ?? []) as unknown as CostRow[])[0];
-    if (!row?.id) return { ok: false, error: 'That cost was not recorded — nothing came back from the server.' };
+    if (!row?.id) return { ok: false, error: 'That cost was not recorded. Nothing came back from the server.' };
     return { ok: true, cost: toCost(row) };
   } catch (e) {
     reportError('coachCosts.record', e);

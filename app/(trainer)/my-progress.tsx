@@ -222,7 +222,7 @@ export default function MyProgress() {
   const latestAgo = latest ? agoLabel(latest.at, today) : null;
   const latestDays = latest ? daysBetween(latest.at, today) : null;
   const staleNote = latestDays != null && latestDays > STALE_AFTER_DAYS
-    ? `Your last weigh-in is ${latestDays} days old — this figure describes the body you had then.`
+    ? `Your last weigh-in is ${latestDays} days old, so this figure describes the body you had then.`
     : null;
   const weightNote = convertedNote(wu);
   const tapeNote = convertedNote(lu);
@@ -288,11 +288,11 @@ export default function MyProgress() {
     const kg = weightToKg(typed, wu);
     if (kg == null) { setProblem(`Enter your weight in ${wu}.`); return; }
     if (kg < MIN_KG || kg > MAX_KG) {
-      setProblem(`That is outside the range this records — ${minShown} to ${maxShown} ${wu}.`);
+      setProblem(`That is outside the range this records: ${minShown} to ${maxShown} ${wu}.`);
       return;
     }
     if (!energy || !sleep || !mood || !adherence) {
-      setProblem('Tap a score for energy, sleep, mood and adherence — they are not guessed for you.');
+      setProblem('Tap a score for energy, sleep, mood and adherence. They are not guessed for you.');
       return;
     }
     setBusy(true);
@@ -314,14 +314,14 @@ export default function MyProgress() {
       // exists, and leaving it in the boxes as well invites a second one.
       clear();
       Alert.alert('Saved on This Phone',
-        'No connection, so this weigh-in has not reached your record yet — nothing is lost. It is saved here, it is on the trend above, and it goes up on its own the next time you have signal.');
+        'No connection, so this weigh-in has not reached your record yet. Nothing is lost. It is saved here, it is on the trend above, and it goes up on its own the next time you have signal.');
       return;
     }
     // 'refused'. The server read this and declined it, so it is not on the
     // record and it is not waiting either — `sendCheckIn` has already taken it
     // back off the trend. The fields are deliberately left as they are: what
     // was typed is now the only copy of it.
-    setProblem('Not saved — your record rejected this weigh-in, so it has not been stored and it is not waiting to send. What you typed is still in the boxes; saving it again as it is will be rejected again.');
+    setProblem('Not saved. Your record rejected this weigh-in, so it has not been stored and it is not waiting to send. What you typed is still in the boxes; saving it again as it is will be rejected again.');
   };
 
   /* ── logging tape measurements ───────────────────────────────────────── */
@@ -404,7 +404,7 @@ export default function MyProgress() {
     const kg = weightToKg(scanWt, wu);
     if (kg == null) { setScanProblem(`Enter your weight in ${wu}.`); return; }
     if (kg < MIN_KG || kg > MAX_KG) {
-      setScanProblem(`That weight is outside the range this records — ${minShown} to ${maxShown} ${wu}.`);
+      setScanProblem(`That weight is outside the range this records: ${minShown} to ${maxShown} ${wu}.`);
       return;
     }
     // `Number('18,5')` is NaN, so a coach on a German phone was told to enter
@@ -413,7 +413,7 @@ export default function MyProgress() {
     const bf = readNumber(scanBf);
     if (!scanBf.trim() || bf == null) { setScanProblem('Enter your body fat as a percentage.'); return; }
     if (bf < MIN_BF || bf > MAX_BF) {
-      setScanProblem(`That body-fat percentage is outside the range this records — ${MIN_BF} to ${MAX_BF}%.`);
+      setScanProblem(`That body-fat percentage is outside the range this records: ${MIN_BF} to ${MAX_BF}%.`);
       return;
     }
     // Blank is absent, not zero. A typed figure that will not read is refused
@@ -445,7 +445,7 @@ export default function MyProgress() {
     }
     // Not cleared. What was typed is the only copy of it, and this is the one
     // path where the coach may want to try again.
-    setScanProblem('Not saved — we could not reach your record. This scan is on this phone only and will be gone when you next open the app, along with anything built from it.');
+    setScanProblem('Not saved. We could not reach your record. This scan is on this phone only and will be gone when you next open the app, along with anything built from it.');
   };
 
   /* ── presentation ────────────────────────────────────────────────────── */
@@ -468,7 +468,7 @@ export default function MyProgress() {
           {bodyStatus === 'error' ? (
             <Section>
               <Notice tone={t.warn} kicker="Your Record" title="We Couldn’t Read Your Body Record"
-                note="Your own weigh-ins and measurements are safe — this screen cannot see them right now. Nothing has been reset, and an empty history below means unknown rather than none." />
+                note="Your own weigh-ins and measurements are safe. This screen cannot see them right now. Nothing has been reset, and an empty history below means unknown rather than none." />
             </Section>
           ) : bodyStatus === 'partial' ? (
             <Section>
@@ -498,7 +498,7 @@ export default function MyProgress() {
                 ? 'Reading your record…'
                 : !weighKnown
                   ? 'Your weigh-ins could not be read, so this is unknown rather than none.'
-                  : 'No weigh-in of your own yet — log one below and the trend builds from it.')
+                  : 'No weigh-in of your own yet. Log one below and the trend builds from it.')
               // The three arms — a movement, no movement, and no earlier
               // reading — are deltaLabel's own, so this line cannot drift out of
               // step with the same sentence on the client's Progress hero.
@@ -555,7 +555,7 @@ export default function MyProgress() {
                 {ci.status === 'loading'
                   ? 'Reading your record…'
                   : !weighKnown
-                    ? 'Your weigh-ins could not be read, so there is no trend to draw. They have not gone anywhere — this screen cannot see them right now.'
+                    ? 'Your weigh-ins could not be read, so there is no trend to draw. They have not gone anywhere. This screen cannot see them right now.'
                     : 'A trend needs two weigh-ins of your own. Log one below, and another next week.'}
               </Text>
             )}
@@ -586,7 +586,7 @@ export default function MyProgress() {
           <Section>
             <SectionHead title="Log a Weigh-in" note={wu} />
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-              Your weight and how the week has gone. Stored against your own account — no client and no
+              Your weight and how the week has gone. Stored against your own account. No client and no
               other coach can read it.
             </Text>
             <TextInput value={typed} onChangeText={setTyped} keyboardType="decimal-pad" placeholder={wu}
@@ -658,7 +658,7 @@ export default function MyProgress() {
                     // Not "you have never measured yourself" — a failed read
                     // gives nobody the standing to say that about somebody
                     // else's history.
-                    ? 'Your tape history could not be read, so nothing is shown. That is not the same as having none — try again once you have a connection and it will be exactly as you left it.'
+                    ? 'Your tape history could not be read, so nothing is shown. That is not the same as having none. Try again once you have a connection and it will be exactly as you left it.'
                     : 'No tape measurements of your own yet. Save the first below and the comparison builds from it.'}
               </Text>
             )}
@@ -740,7 +740,7 @@ export default function MyProgress() {
                 {bodyStatus === 'loading'
                   ? 'Reading your record…'
                   : bodyStatus === 'error'
-                    ? 'Your own history could not be read. It has not gone anywhere — this screen cannot see it right now.'
+                    ? 'Your own history could not be read. It has not gone anywhere. This screen cannot see it right now.'
                     : 'Nothing of your own recorded yet. Anything you log above appears here, and only you ever see it.'}
               </Text>
             ) : null}
@@ -830,7 +830,7 @@ export default function MyProgress() {
             <SectionHead title="Log a Body Scan" note={dayLabel(today)} />
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
               The figures off your scale or InBody sheet, dated today. Stored against your own account,
-              and this is what your daily calorie target on My Nutrition is built from — no client and
+              and this is what your daily calorie target on My Nutrition is built from. No client and
               no other coach can read it.
             </Text>
             {[
@@ -863,7 +863,7 @@ export default function MyProgress() {
               <Cta wide label={scanBusy ? 'Saving…' : 'Save My Scan'} onPress={saveScan} disabled={scanBusy} />
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Leave muscle empty if your scan did not report one — it is stored as absent rather than as
+              Leave muscle empty if your scan did not report one. It is stored as absent rather than as
               a zero, so the history never shows a reading nobody took. Weight is stored in kilograms
               whichever unit you read in, so switching the unit in Settings never changes what you
               measured.
@@ -875,7 +875,7 @@ export default function MyProgress() {
           <Section>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               Looking at a client&rsquo;s weight, scans or measurements? Those are on their record,
-              from their card on the Clients tab — not here.
+              from their card on the Clients tab, not here.
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
               <Icon name="people" size={14} color={t.ink3} />

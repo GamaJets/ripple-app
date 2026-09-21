@@ -237,12 +237,12 @@ function zoneLine(): string {
  * said as that, never as "no fee".
  */
 function cancelTermsLine(policy: CancellationPolicy | null): string {
-  if (!policy) return 'Your coach’s cancellation policy has not been read, so we can’t say what notice they ask for or whether a late cancellation costs anything — check with them.';
+  if (!policy) return 'Your coach’s cancellation policy has not been read, so we can’t say what notice they ask for or whether a late cancellation costs anything. Check with them.';
   const w = noticeLabel(noticeHoursOf(policy));
   const v = lateCancelFee(policy, true);
   switch (v.kind) {
     case 'no-policy': return 'Your coach doesn’t charge for a late cancellation.';
-    case 'unpriced': return `Cancel with less than ${w} to go and your coach’s late-cancellation policy applies. They haven’t set an amount here, so ask them what it is — Repple doesn’t charge it.`;
+    case 'unpriced': return `Cancel with less than ${w} to go and your coach’s late-cancellation policy applies. They haven’t set an amount here, so ask them what it is. Repple doesn’t charge it.`;
     case 'fee': return `Cancel with less than ${w} to go and your coach’s late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} applies. Repple doesn’t take this payment.${unstatedCurrency(v.currency)}`;
     default: return `Cancel with more than ${w} to go and your coach’s late-cancellation policy doesn’t apply.`;
   }
@@ -840,7 +840,7 @@ export default function Calendar() {
         say(keptOnPhoneNote('planned day'));
         return;
       }
-      Alert.alert('Not Saved', `We couldn’t save this day${r.error ? ` (${r.error})` : ''}. Your calendar is unchanged — try again in a moment.`);
+      Alert.alert('Not Saved', `We couldn’t save this day${r.error ? ` (${r.error})` : ''}. Your calendar is unchanged. Try again in a moment.`);
       return;
     }
     setPlans((prev) => [...prev.filter((p) => p.dateISO !== day), { dateISO: day, type: planType, note }]);
@@ -905,7 +905,7 @@ export default function Calendar() {
         : 'There are no pack sessions to draw from, so this booking is not covered by one.';
     Alert.alert(
       'Book This Session?',
-      [`${when}\n${who} An open slot — it is yours once you confirm.`, zoneLine(), credit, cancelTermsLine(policyStatus === 'error' ? null : cancelPolicy)].join('\n\n'),
+      [`${when}\n${who} An open slot. It is yours once you confirm.`, zoneLine(), credit, cancelTermsLine(policyStatus === 'error' ? null : cancelPolicy)].join('\n\n'),
       [
         { text: 'Not Now', style: 'cancel' },
         { text: 'Book It', onPress: () => { void commitBooking(s); } },
@@ -944,7 +944,7 @@ export default function Calendar() {
     if (!booked) {
       Alert.alert(
         'Not Booked',
-        `${slot} was not booked — someone may have taken it first. Pull down to refresh and pick another time.`,
+        `${slot} was not booked. Someone may have taken it first. Pull down to refresh and pick another time.`,
         [{ text: 'OK' }],
       );
       return;
@@ -974,11 +974,11 @@ export default function Calendar() {
     const lines = [coachName ? `${slot} with ${coachName} is confirmed.` : `${slot} with your coach is confirmed.`];
     lines.push(push.ok
       ? 'Your coach has been notified.'
-      : 'We couldn’t notify your coach — the booking is on their calendar, but message them if it’s soon.');
+      : 'We couldn’t notify your coach. The booking is on their calendar, but message them if it’s soon.');
     // Only worth raising to someone who was showing credits: for a client who
     // pays per session there is no pack to draw from and nothing went wrong.
     if (mayHaveCredits && !redeem.ok) {
-      lines.push(`This wasn’t taken off your session pack${redeem.error ? ` (${redeem.error})` : ''} — check your package before you book again.`);
+      lines.push(`This wasn’t taken off your session pack${redeem.error ? ` (${redeem.error})` : ''}. Check your package before you book again.`);
     }
     Alert.alert('Session Booked', lines.join('\n\n'), [{ text: 'Great' }]);
   }
@@ -1011,7 +1011,7 @@ export default function Calendar() {
           // says which — src/lib/reachability.ts — and it is appended to this
           // screen's own specific first half, exactly as My Bookings and
           // Standing do it.
-          `Your ${timeLabel(s.startsAt)} session is still booked — that did not save, so nothing has changed and nobody has been told. ${retryLine(reach)}`,
+          `Your ${timeLabel(s.startsAt)} session is still booked. That did not save, so nothing has changed and nobody has been told. ${retryLine(reach)}`,
           [{ text: 'OK' }],
         );
         return;
@@ -1062,7 +1062,7 @@ export default function Calendar() {
   async function joinWaitlist(slot: { sessionId: string; startsAt: string }) {
     const res = await joinWait(slot.sessionId);
     if (!res.ok) {
-      Alert.alert('Not Added', res.error || `We couldn't put you on the waitlist for ${timeLabel(slot.startsAt)}. Nothing has changed — try again.`, [{ text: 'OK' }]);
+      Alert.alert('Not Added', res.error || `We couldn't put you on the waitlist for ${timeLabel(slot.startsAt)}. Nothing has changed. Try again.`, [{ text: 'OK' }]);
       return;
     }
     // `res.waiting ?? 1` and `res.position ?? 1` until tonight, and both halves
@@ -1088,11 +1088,11 @@ export default function Calendar() {
     const place = pos != null
       ? waitlistLine(pos, res.waiting ?? null)
       : res.waiting != null
-        ? `You’re on the waitlist. Your place in the queue didn’t come back, so we can’t say where in it you are — ${res.waiting === 1 ? 'one person is' : `${res.waiting} people are`} in it. Open this screen again for your place.`
-        : `You’re on the waitlist. Neither your place in the queue nor its length came back, so we can’t say where in it you are. You are in it in the order you joined — open this screen again for your place.`;
+        ? `You’re on the waitlist. Your place in the queue didn’t come back, so we can’t say where in it you are. ${res.waiting === 1 ? 'One person is' : `${res.waiting} people are`} in it. Open this screen again for your place.`
+        : `You’re on the waitlist. Neither your place in the queue nor its length came back, so we can’t say where in it you are. You are in it in the order you joined. Open this screen again for your place.`;
     Alert.alert(
       'On the Waitlist',
-      `${place}\n\nIf whoever has ${timeLabel(slot.startsAt)} cancels, it is booked for you automatically — you don't have to be quick, and nobody can take it ahead of you.`,
+      `${place}\n\nIf whoever has ${timeLabel(slot.startsAt)} cancels, it is booked for you automatically. You don't have to be quick, and nobody can take it ahead of you.`,
       [{ text: 'OK' }],
     );
   }
@@ -1299,7 +1299,7 @@ export default function Calendar() {
               missing before they read a quiet day as a lazy one. */}
           {!logKnown ? (
             <Notice tone={t.warn} kicker="This Day" title="We couldn’t read your training log"
-              note="Sessions with your coach are still shown below, but workouts you logged yourself are not — and the coloured dots are missing from the grid above for the same reason. Nothing has been lost.">
+              note="Sessions with your coach are still shown below, but workouts you logged yourself are not, and the coloured dots are missing from the grid above for the same reason. Nothing has been lost.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={reloadLog} />
               </View>
@@ -1311,7 +1311,7 @@ export default function Calendar() {
               would otherwise invite somebody to re-plan a day they already have. */}
           {planStatus === 'error' ? (
             <Notice tone={t.warn} kicker="Planned Days" title="We couldn’t read what you’ve planned"
-              note="Days you marked ahead are not shown, on this day or on the grid. Nothing you planned has been lost — and nothing here should be read as an unplanned day.">
+              note="Days you marked ahead are not shown, on this day or on the grid. Nothing you planned has been lost, and nothing here should be read as an unplanned day.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={() => setPlanReload((n) => n + 1)} />
               </View>
@@ -1564,7 +1564,7 @@ export default function Calendar() {
           {waitStatus === 'error' ? (
             <View style={{ paddingVertical: sp.md }}>
               <Flag tone={t.warn}>
-                We couldn’t read your coach’s taken hours or your place in any waitlist, so neither is shown on this day. This is a connection problem — nothing has been lost, and any waitlist you are on still stands.
+                We couldn’t read your coach’s taken hours or your place in any waitlist, so neither is shown on this day. This is a connection problem. Nothing has been lost, and any waitlist you are on still stands.
               </Flag>
             </View>
           ) : selDayTaken.length > 0 ? (
@@ -1681,14 +1681,14 @@ export default function Calendar() {
               same bound (`mine` is what is still to come), same gate. */}
           <Text style={{ ...ty.caption, color: t.ink3 }}>
             {!sessionsKnown
-              ? 'Your sessions could not be read, so these are dashes rather than counts. Nothing has been cancelled — pull down to refresh.'
+              ? 'Your sessions could not be read, so these are dashes rather than counts. Nothing has been cancelled. Pull down to refresh.'
               : sessionsStatus === 'loading'
                 ? 'Reading your sessions…'
                 : !sessionsCountable
                   ? 'Only part of your calendar loaded, so it cannot be counted. The days above show what did come back.'
                   : open.length > 0
-                    ? `Still to come. ${open.length} open slot${open.length === 1 ? '' : 's'} — tap a day to book`
-                    : 'Still to come. No open slots yet — your coach adds them here'}
+                    ? `Still to come. ${open.length} open slot${open.length === 1 ? '' : 's'}. Tap a day to book`
+                    : 'Still to come. No open slots yet. Your coach adds them here'}
           </Text>
           {!sessionsKnown ? (
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>
@@ -1702,7 +1702,7 @@ export default function Calendar() {
               stop being printed by accident. */}
           {policyStatus === 'error' ? (
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-              We couldn’t read your coach’s cancellation policy, so we can’t tell you whether cancelling would cost you anything. Cancelling still works — check with your coach what their notice period and fee are.
+              We couldn’t read your coach’s cancellation policy, so we can’t tell you whether cancelling would cost you anything. Cancelling still works. Check with your coach what their notice period and fee are.
             </Flag>
           ) : null}
           {/* ── the hour the coach never opened ──────────────────────────
@@ -1729,7 +1729,7 @@ export default function Calendar() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {sessionsCountable && open.length > 0
               ? 'None of these suit? Ask your coach for a different time. Asking doesn’t book anything.'
-              : 'Ask your coach for a time that isn’t here yet. Asking doesn’t book anything — they have to say yes.'}
+              : 'Ask your coach for a time that isn’t here yet. Asking doesn’t book anything. They have to say yes.'}
           </Text>
 
           {mine.length > 0 ? (
@@ -1742,7 +1742,7 @@ export default function Calendar() {
                   // unreadable name becomes a generic but true title rather
                   // than a dash somebody finds under next Tuesday.
                   const title = coachName ? `Training with ${coachName}` : 'Personal Training';
-                  const calName = coachName ? `${BRAND.label} — ${coachName}` : `${BRAND.label} — Personal Training`;
+                  const calName = coachName ? `${BRAND.label} · ${coachName}` : `${BRAND.label} · Personal Training`;
                   // `mine`, which is bounded to what is still to come. It was
                   // the whole history: last March's sessions went permanently
                   // into the member's own diary.
@@ -1773,11 +1773,11 @@ export default function Calendar() {
               <SectionHead title="Standing Appointments" />
               <ListRow icon="clock" tone="brand" title="Your Weekly Slots"
                 note={standingStatus === 'error'
-                  ? 'Could not be read — this is not a statement that you have none'
+                  ? 'Could not be read. This is not a statement that you have none'
                   : standingStatus === 'loading'
                     ? 'Checking'
                     : standingStatus === 'partial'
-                      ? 'Part of the list loaded — open to see it'
+                      ? 'Part of the list loaded. Open to see it'
                       : standingCount === 1
                         ? 'One hour booked for you every week'
                         : `${standingCount} hours booked for you every week`}
@@ -1813,7 +1813,7 @@ export default function Calendar() {
             // ascending, so what a cut set loses is the FAR END — the future,
             // which is the entire subject of this section. An empty list here
             // under 'partial' is therefore evidence of nothing at all.
-            <Text style={{ ...ty.label, color: t.ink3 }}>You have more days marked than we can read in one go, so what is coming up can’t be listed here. Nothing you planned has been lost — tap a day above to see what is on it.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>You have more days marked than we can read in one go, so what is coming up can’t be listed here. Nothing you planned has been lost. Tap a day above to see what is on it.</Text>
           ) : coming.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Nothing planned from today onwards. Tap a day above to mark one.</Text>
           ) : (
@@ -1889,7 +1889,7 @@ export default function Calendar() {
                             {c.amount == null ? fig(null) : feeAmountLine(c.amount, c.currency)}
                           </Text>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                            {fmtFullDay(c.createdAt)}{c.waivedAt ? ' · your coach waived this — nothing to pay' : ' · outstanding with your coach'}
+                            {fmtFullDay(c.createdAt)}{c.waivedAt ? ' · your coach waived this, nothing to pay' : ' · outstanding with your coach'}
                           </Text>
                           {/* The state as a chip as well as in the sentence:
                               amber is "yours to settle", neutral is "nothing
@@ -1923,7 +1923,7 @@ export default function Calendar() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{UNKNOWN_REASON_NOTE}</Text>
                 ) : null}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  {BRAND.label} doesn’t take these payments — settle them with your coach.
+                  {BRAND.label} doesn’t take these payments. Settle them with your coach.
                 </Text>
               </>)}
             </Section>
@@ -1989,7 +1989,7 @@ export default function Calendar() {
                 recording an intention; nothing on this sheet writes to their
                 training log and nothing here will later claim the day was done. */}
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
-              This is what you intend the day to be. It doesn’t log anything and it won’t tick itself off — what you actually do stays in your training log.
+              This is what you intend the day to be. It doesn’t log anything and it won’t tick itself off. What you actually do stays in your training log.
             </Text>
 
             <View style={{ marginTop: sp.lg }}>
@@ -2084,13 +2084,13 @@ export default function Calendar() {
                 follow: one definer function, no arguments, answering only about
                 the caller's own coach. */}
             <Text style={{ ...ty.body, color: t.ink3, marginBottom: sp.lg }}>
-              Your coach&rsquo;s profile — what they specialise in, how they work, what they
-              offer — isn&rsquo;t shared with this app yet. Ask them, or send them a message.
+              Your coach&rsquo;s profile (what they specialise in, how they work, what they
+              offer) isn&rsquo;t shared with this app yet. Ask them, or send them a message.
             </Text>
             <Rule />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: sp.lg }}>
               <Text style={{ ...ty.label, color: t.ink3 }}>Session Rate</Text>
-              <Text style={{ ...ty.body, color: t.ink3 }}>— ask your coach</Text>
+              <Text style={{ ...ty.body, color: t.ink3 }}>Ask your coach</Text>
             </View>
             <View style={{ marginTop: sp.xl }}>
               <Cta label="Close" wide onPress={() => setShowCoach(false)} />

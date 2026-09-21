@@ -175,15 +175,15 @@ const STRANGER = '1efee95c-f17d-47b7-bff8-fcc11c7c8d65';
 
 // ── the sentence under a bubble that did not go ────────────────────────────
 {
-  eq(unsentNote('your coach', 'send', null), 'Not sent — your coach cannot see this',
+  eq(unsentNote('your coach', 'send', null), 'Not sent, so your coach cannot see this',
     'a plain message that was refused');
   eq(unsentNote('your coach', 'upload', 'image'),
-    'Not sent — the photo did not upload, so your coach cannot see it',
+    'Not sent: the photo did not upload, so your coach cannot see it',
     'a photo whose FILE did not go says so, because that is the fixable part');
   eq(unsentNote('they', 'upload', 'video'),
-    'Not sent — the video did not upload, so they cannot see it',
+    'Not sent: the video did not upload, so they cannot see it',
     'and the coach side says it in their words');
-  eq(unsentNote('they', 'send', 'image'), 'Not sent — they cannot see this photo',
+  eq(unsentNote('they', 'send', 'image'), 'Not sent, so they cannot see this photo',
     'an uploaded photo whose row was refused is still not sent');
   // Not one of these may read as a delivery.
   for (const n of [unsentNote('your coach', 'send', null), unsentNote('your coach', 'upload', 'image'),
@@ -194,7 +194,7 @@ const STRANGER = '1efee95c-f17d-47b7-bff8-fcc11c7c8d65';
   // event as one the server refused, and the two sentences have to differ. This
   // one has to hold both halves at once: the words are safe, and nobody has
   // read them.
-  eq(unsentNote('your coach', 'queued', null), 'Waiting to send — your coach cannot see this yet',
+  eq(unsentNote('your coach', 'queued', null), 'Waiting to send, so your coach cannot see this yet',
     'a queued message says it is waiting, not that it failed');
   ok(!unsentNote('your coach', 'queued', null).startsWith('Not sent'),
     'and specifically does not lead with a failure that did not happen');

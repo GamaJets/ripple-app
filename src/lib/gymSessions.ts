@@ -406,7 +406,7 @@ export function settlementBlocker(t: PayrollTotal): string | null {
   if (t.payable === 0) return 'No payable sessions in this period.';
   if (t.priced < t.payable) {
     const missing = t.payable - t.priced;
-    return `${missing} payable session${missing === 1 ? '' : 's'} have no rate — set a session fee.`;
+    return `${missing} payable session${missing === 1 ? '' : 's'} have no rate. Set a session fee.`;
   }
   return null;
 }
@@ -508,7 +508,7 @@ export function settlementAmount(
  */
 export function settleBlocker(payable: PtSession[], unmarked: number): string | null {
   if (unmarked > 0) {
-    return `${unmarked} session${unmarked === 1 ? '' : 's'} still need an outcome — settling now would pay for an unfinished period.`;
+    return `${unmarked} session${unmarked === 1 ? '' : 's'} still need an outcome. Settling now would pay for an unfinished period.`;
   }
   if (payable.length === 0) return 'Nothing outstanding for this trainer.';
   return null;
@@ -920,7 +920,7 @@ function requireAmount(v: unknown, what: string, id: unknown): number {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   throw new Error(
     `A payroll settlement came back with no ${what} recorded (row ${String(id)}). `
-    + 'That column cannot be null, so this read cannot be trusted — nothing is shown rather than '
+    + 'That column cannot be null, so this read cannot be trusted. Nothing is shown rather than '
     + 'showing a run as having paid nothing.',
   );
 }

@@ -607,6 +607,7 @@ export function buildProblems(built: BuiltRoutine, minutes: number): string[] {
   // where they want the arithmetic.
   if (total > minutes * 60) {
     // numbers-ok: as above — a test failure message, read by nobody else.
+    // dash-ok: developer self-check message, read only by its test, which rebuilds this exact wording.
     problems.push(`the routine runs ${total}s against a budget of ${minutes * 60}s — somebody who said they had ${minutes} minutes is being kept ${total - minutes * 60}s longer`);
   }
   if (routineMinutes(r) < minutes && !built.shortfall) {

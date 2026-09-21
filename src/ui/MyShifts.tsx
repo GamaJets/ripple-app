@@ -167,7 +167,7 @@ export function MyShifts({ rota }: { rota: MyRota }) {
             </Text>
             {view.hours == null ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                One of these shifts does not read as a span of time, so no hours total is offered —
+                One of these shifts does not read as a span of time, so no hours total is offered:
                 a figure that quietly left it out would be smaller than your fortnight.
               </Text>
             ) : null}
@@ -199,7 +199,7 @@ export function MyShifts({ rota }: { rota: MyRota }) {
           {view.unpriced > 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
               {num(view.unpriced)} {plural(view.unpriced, 'shift carries', 'shifts carry')} no figure. That is a shift nobody
-              priced rather than a shift worth nothing — the gym fills that in on their side.
+              priced rather than a shift worth nothing. The gym fills that in on their side.
             </Text>
           ) : null}
 

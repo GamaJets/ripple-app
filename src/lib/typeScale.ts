@@ -139,5 +139,5 @@ export function fontScaleNote(scale: number): string | null {
   const pct = Math.round(s * 100);
   return s > 1
     ? `Your phone is set to ${pct}% text size and this app is following it.`
-    : `Your phone is set to ${pct}% text size — smaller than standard — and this app is following it.`;
+    : `Your phone is set to ${pct}% text size, smaller than standard, and this app is following it.`;
 }

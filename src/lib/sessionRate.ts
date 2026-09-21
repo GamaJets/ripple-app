@@ -133,4 +133,4 @@ export function sessionRate(
  */
 export const RATE_MEANING_NOTE =
   'This is what your coach recorded the session as being worth when they marked '
-  + 'it delivered — not a bill, and not something to settle here.';
+  + 'it delivered. It is not a bill, and not something to settle here.';

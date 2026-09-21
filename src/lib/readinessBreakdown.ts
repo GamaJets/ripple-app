@@ -347,7 +347,7 @@ function sleepLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInpu
     // night", which is what the line below says and would be false here.
     return {
       key: 'sleep', title, state: 'no-record',
-      detail: `nothing recorded for the last ${w} nights — the most recent night you have is older than that`,
+      detail: `nothing recorded for the last ${w} nights; the most recent night you have is older than that`,
     };
   }
   return {
@@ -404,20 +404,20 @@ function recoveryLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessI
   if (!i.recoveryDeviceConnected) {
     return {
       key: 'recovery', title, state: 'not-tracked',
-      detail: 'not in the scale — no connected device scores recovery',
+      detail: 'not in the scale: no connected device scores recovery',
     };
   }
   if (trust !== 'ready') {
     return {
       key: 'recovery', title, state: 'unread',
       detail: trust === 'loading'
-        ? 'not in the scale — still reading your devices'
-        : 'not in the scale — we could not read your devices, so we cannot say whether one scored your recovery today',
+        ? 'not in the scale: still reading your devices'
+        : 'not in the scale: we could not read your devices, so we cannot say whether one scored your recovery today',
     };
   }
   return {
     key: 'recovery', title, state: 'unread',
-    detail: 'not in the scale — your device has not reported a recovery score today',
+    detail: 'not in the scale: your device has not reported a recovery score today',
   };
 }
 
@@ -432,12 +432,12 @@ function hydrationLine(i: ReadinessBreakdownInput): ReadinessInputLine {
   // score — so both say so, because a member who reads "no hydration figure"
   // under a lower number will assume they were marked down for it.
   if (!i.hydrationGoal) {
-    return { key: 'hydration', title, state: 'not-tracked', detail: 'not in the scale — you have not set a daily water goal' };
+    return { key: 'hydration', title, state: 'not-tracked', detail: 'not in the scale: you have not set a daily water goal' };
   }
   if (i.hydrationStatus !== 'ready') {
-    return { key: 'hydration', title, state: 'unread', detail: "not in the scale — today's count could not be read" };
+    return { key: 'hydration', title, state: 'unread', detail: "not in the scale: today's count could not be read" };
   }
-  return { key: 'hydration', title, state: 'not-tracked', detail: 'not in the scale — nothing was scored against it' };
+  return { key: 'hydration', title, state: 'not-tracked', detail: 'not in the scale: nothing was scored against it' };
 }
 
 function loadLine(i: ReadinessBreakdownInput): ReadinessInputLine {
@@ -485,21 +485,21 @@ function loadLine(i: ReadinessBreakdownInput): ReadinessInputLine {
 function absenceFor(i: ReadinessBreakdownInput, trust: LoadStatus): string {
   const w = sleepWindow(i);
   if (i.workoutsLast2Days == null || !Number.isFinite(i.workoutsLast2Days)) {
-    return 'We could not read your training log, so there is no readiness to show — it does not mean you are rested.';
+    return 'We could not read your training log, so there is no readiness to show. It does not mean you are rested.';
   }
   if (trust === 'loading') return 'Reading last night from your devices…';
   if (i.typedStatus === 'loading') return 'Reading the nights you have logged…';
   if (i.sleep.state === 'unknown') {
-    return 'We could not work out which nights to read just now, so there is no readiness to show — it does not mean you slept badly.';
+    return 'We could not work out which nights to read just now, so there is no readiness to show. It does not mean you slept badly.';
   }
   if (trust === 'error') {
-    return 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.';
+    return 'We could not read your devices just now, so there is no readiness to show. It does not mean you slept badly.';
   }
   if (i.typedStatus === 'error') {
     // Live until now: an unreadable sleep log with an empty cache reached the
     // home screen as "log a night of sleep", which is a statement about what
     // the member has done, made out of a read that failed.
-    return 'We could not read your sleep log just now, so there is no readiness to show — it does not mean you have not logged a night.';
+    return 'We could not read your sleep log just now, so there is no readiness to show. It does not mean you have not logged a night.';
   }
   // Nights on record, all of them older than the window. Neither of the two
   // sentences below can be said to this member: "no sleep on record" is false
@@ -508,7 +508,7 @@ function absenceFor(i: ReadinessBreakdownInput, trust: LoadStatus): string {
   // the very nights it was telling them did not exist.
   if (i.sleep.state === 'stale') {
     return i.sources.some((s) => s.status !== 'unsupported')
-      ? `Nothing on record for the last ${w} nights — the most recent night you have is older than that.`
+      ? `Nothing on record for the last ${w} nights. The most recent night you have is older than that.`
       : `The most recent night you logged is older than the last ${w} nights, so there is no readiness to show yet.`;
   }
   if (i.sources.some((s) => s.status !== 'unsupported')) {

@@ -388,7 +388,7 @@ export function planStaleLine(s: PlanStale, who: string): string | null {
       ? `One meal now resolves to something else on their phone: "${s.diverged[0].was}" is showing as "${s.diverged[0].now}".`
       : `${s.diverged.length} of these meals now resolve to something else on their phone.`);
   }
-  parts.push('Rebuild the week and send it again — nothing here is being shown to them as your plan while it says this.');
+  parts.push('Rebuild the week and send it again. Nothing here is being shown to them as your plan while it says this.');
   return parts.join(' ');
 }
 
@@ -476,14 +476,14 @@ export function planServingNote(servings: readonly number[], baseKcal: number, t
   // reader's own language.
   const mult = numUpTo(lo, 2);
   if (lo !== hi) {
-    return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app sizes each plate on its own, between ${numUpTo(lo, 2)}× and ${numUpTo(hi, 2)}×, to land the day on that number — pick differently if that is not the portion you mean.`;
+    return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app sizes each plate on its own, between ${numUpTo(lo, 2)}× and ${numUpTo(hi, 2)}×, to land the day on that number. Pick differently if that is not the portion you mean.`;
   }
   const servings0 = lo;
   if (servings0 === 1) {
     return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, which is what their target asks for. Their app serves them as written.`;
   }
   const dir = servings0 > 1 ? 'up' : 'down';
-  return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app scales every plate ${dir} to ${mult}× to close the gap — pick differently if that is not the portion you mean.`;
+  return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, against a target of ${targetKcal.toLocaleString()} kcal. Their app scales every plate ${dir} to ${mult}× to close the gap. Pick differently if that is not the portion you mean.`;
 }
 
 /**

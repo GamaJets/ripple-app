@@ -174,7 +174,7 @@ export default function Invoices() {
             <Notice tone={t.crit} kicker="Not Read" title="We couldn’t read your invoices"
               note={rows.length
                 ? (cachedAtLine(cachedAt) ?? 'What is listed below is what we had before the read failed. It is not confirmed current, and there may be invoices missing from it.')
-                : 'This is not a record with nothing in it — it is a record we could not open. Pull down to try again, or ask your gym for a copy.'} >
+                : 'This is not a record with nothing in it. It is a record we could not open. Pull down to try again, or ask your gym for a copy.'} >
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void load(); }} /></View>
             </Notice>
           </Section>

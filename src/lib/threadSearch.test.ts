@@ -68,7 +68,7 @@ const THREAD = [
   const none = threadSearchLine({ query: 'knee', matched: 0, searched: 200, hasOlder: true, status: 'partial' });
   ok(!!none && /No match in the 200 messages on this screen/.test(none), 'an empty result names the set it looked at');
   ok(!!none && /not searched/.test(none), 'and says the rest of the conversation was not searched');
-  ok(!!none && /load them/.test(none), 'and what to do about it');
+  ok(!!none && /load them/i.test(none), 'and what to do about it');
 
   const whole = threadSearchLine({ query: 'knee', matched: 0, searched: 12, hasOlder: false, status: 'ready' });
   ok(!!whole && /No match in the 12 messages on this screen/.test(whole), 'a whole conversation still names its size');

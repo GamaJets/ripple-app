@@ -166,7 +166,7 @@ export function siteRailLine(s: SiteScope): string | null {
 /** What the console says when the site list did not settle. One sentence, in
  *  one place, so two screens cannot word the same silence two ways. */
 export const SITES_UNREAD_NOTE =
-  'How many gyms this account owns is not known — that read did not come back. The figures below are one gym’s record, and nothing here can say whether that is your whole business or part of it.';
+  'How many gyms this account owns is not known. That read did not come back. The figures below are one gym’s record, and nothing here can say whether that is your whole business or part of it.';
 
 /**
  * The paragraph a screen full of figures puts above them, or null when there
@@ -275,5 +275,5 @@ export function branchNote(span: BranchSpan): string | null {
   const tail = span.unlabelled
     ? `${named}, and classes with no place recorded`
     : named;
-  return `These figures cover more than one place — ${tail} — so they are a total across all of them and not any one’s.`;
+  return `These figures cover more than one place (${tail}), so they are a total across all of them and not any one’s.`;
 }

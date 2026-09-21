@@ -271,7 +271,7 @@ export default function Promotions() {
           const figure = fig(live);
           const unit = live === 1 ? 'code' : 'codes';
           const note = status === 'loading' ? 'Reading your codes…'
-            : status === 'error' ? 'Your codes could not be read — this is not a gym with none.'
+            : status === 'error' ? 'Your codes could not be read. This is not a gym with none.'
             : !countable
             // 'partial'. The codes below are real; how many of them there are is
             // not known, so no numeral is offered — including the one that would
@@ -279,9 +279,9 @@ export default function Promotions() {
             ? 'The list did not come back whole, so no count is stated. Pull down to read it again.'
             : live === 0
               ? (off ?? 0) > 0
-                ? `Nothing is redeemable right now. ${off} code${off === 1 ? ' is' : 's are'} switched off below — switch one back on, or create a new offer.`
+                ? `Nothing is redeemable right now. ${off} code${off === 1 ? ' is' : 's are'} switched off below. Switch one back on, or create a new offer.`
                 : 'Create an offer and push it straight to your members.'
-              : `${(off ?? 0) > 0 ? `${off} more switched off. ` : ''}A push is queued, not guaranteed — delivery follows each member's notification settings.`;
+              : `${(off ?? 0) > 0 ? `${off} more switched off. ` : ''}A push is queued, not guaranteed: delivery follows each member's notification settings.`;
           // Live of every code the gym holds, as the ring. Both halves come
           // from the same whole read or neither is drawn: `live` is null
           // unless the list is countable, and a null draws no arc and a dash.
@@ -335,7 +335,7 @@ export default function Promotions() {
               {' '}Two codes spelled the same way can both be saved, and a member typing one of them gets whichever the database reaches first. Pull down to read the list again before creating a code you are not sure about.
             </Flag>
           ) : null}
-          <TextInput value={title} onChangeText={setTitle} accessibilityLabel="What this promotion is called" placeholder="Title — e.g. Summer Special" placeholderTextColor={t.ink3} style={inp} />
+          <TextInput value={title} onChangeText={setTitle} accessibilityLabel="What this promotion is called" placeholder="Title, e.g. Summer Special" placeholderTextColor={t.ink3} style={inp} />
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
             <TextInput value={code} onChangeText={setCode} accessibilityLabel="The code a member types to claim it" placeholder="CODE" autoCapitalize="characters" placeholderTextColor={t.ink3} style={[inp, { flex: 1 }]} />
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.sm }}>
@@ -411,7 +411,7 @@ export default function Promotions() {
               <Pressable
                 onPress={async () => { if (!await toggleActive(p.id)) Alert.alert('Not Changed', `“${p.code}” could not be switched ${p.active ? 'off' : 'on'}, so it is still ${p.active ? 'live' : 'off'}.`); }}
                 accessibilityRole="button"
-                accessibilityLabel={`${p.code} is ${p.active ? 'live' : 'off'} — switch it ${p.active ? 'off' : 'on'}`}
+                accessibilityLabel={`${p.code} is ${p.active ? 'live' : 'off'}. Switch it ${p.active ? 'off' : 'on'}`}
                 hitSlop={6}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 6 }}>
                 <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: p.active ? t.brand : t.ink3 }} />
@@ -434,7 +434,7 @@ export default function Promotions() {
                   // pair of sentences over `r.queued` — the length of the list
                   // handed over — so the second place an owner can push an offer
                   // was making the claim the first one had been fixed of.
-                  void pushToMembers(body, `${p.code} — an offer from your gym`).then((r) => Alert.alert(
+                  void pushToMembers(body, `${p.code}: an offer from your gym`).then((r) => Alert.alert(
                     'Push',
                     [
                       r.readError ? `The member list could not be read: ${r.readError}` : null,

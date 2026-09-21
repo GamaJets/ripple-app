@@ -111,14 +111,14 @@ export function unstampBlocker(claimed: number, unstamped: number | null | undef
   if (unstamped < claimed) {
     const short = claimed - unstamped;
     return `This run was not taken back. It was recorded as paying for ${sessions(claimed)}, and `
-      + `only ${unstamped} of them could be unstamped — ${sessions(short)} did not come loose. `
+      + `only ${unstamped} of them could be unstamped. ${sessions(short)} did not come loose. `
       + `Going ahead would mark the run reversed while ${short === 1 ? 'that session stays' : 'those sessions stay'} `
       + `attached to it, which takes ${short === 1 ? 'it' : 'them'} out of what the coach is owed `
       + `permanently. ${whatIsLoose(unstamped)}`;
   }
   const extra = unstamped - claimed;
   return `This run was not taken back. It was recorded as paying for ${sessions(claimed)}, and `
-    + `${unstamped} came loose — ${sessions(extra)} more than the run says it covered. Two records `
+    + `${unstamped} came loose, ${sessions(extra)} more than the run says it covered. Two records `
     + `disagree about what was paid for, and reversing over that would settle the disagreement by `
     + `guessing. ${whatIsLoose(unstamped)}`;
 }
@@ -147,8 +147,8 @@ function whatIsLoose(unstamped: number): string {
   return `The settlement is untouched and still reads as paid, but ${sessions(unstamped)} `
     + `${one ? 'has' : 'have'} already come loose from it and ${one ? 'is' : 'are'} back in what this `
     + `coach is owed, so recording another run now pays ${one ? 'that hour' : 'those hours'} a `
-    + `second time. Pressing Reverse again will not finish the job — the unstamp would now match nothing `
-    + `and be refused for that very reason — so put this run right on the record before paying this coach `
+    + `second time. Pressing Reverse again will not finish the job: the unstamp would now match nothing `
+    + `and be refused for that very reason. So put this run right on the record before paying this coach `
     + `anything else.`;
 }
 

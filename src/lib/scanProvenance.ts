@@ -161,7 +161,7 @@ export function evidenceNote(s: ScanSource): string {
     case 'machine-ocr':
       return 'Read off a photograph of the printout, so the figure is the machine’s own and nobody retyped it.';
     case 'machine-typed':
-      return 'A machine reading, typed onto the record by hand — so the measurement is a machine’s and the transcription is a person’s.';
+      return 'A machine reading, typed onto the record by hand, so the measurement is a machine’s and the transcription is a person’s.';
     case 'typed':
       return 'Typed in. No machine is named on the record, so this is somebody’s figure for themselves rather than a measurement this app can vouch for.';
     case 'unrecognised':
@@ -196,8 +196,8 @@ export function sameEvidence(a: ScanSource, b: ScanSource): boolean {
  */
 export function changeAcrossSources(earlier: ScanSource, later: ScanSource): string | null {
   if (sameEvidence(earlier, later)) return null;
-  return `These two readings did not arrive the same way — ${sourceChip(earlier).toLowerCase()} then `
-    + `${sourceChip(later).toLowerCase()} — so part of the difference between them may be the equipment `
+  return `These two readings did not arrive the same way (${sourceChip(earlier).toLowerCase()} then `
+    + `${sourceChip(later).toLowerCase()}), so part of the difference between them may be the equipment `
     + 'rather than the body. It is shown because it is what the record holds, not because the two are comparable.';
 }
 
@@ -227,6 +227,6 @@ export function mixedSourcesNote(sources: readonly ScanSource[]): string | null 
   if (typed) parts.push(`${typed} typed in`);
   if (blank) parts.push(`${blank} with no source recorded`);
   if (unread) parts.push(`${unread} recording a source this app cannot classify`);
-  return `These readings did not all arrive the same way — ${parts.join(', ')}. `
+  return `These readings did not all arrive the same way: ${parts.join(', ')}. `
     + 'A trend drawn through a mixture is partly a trend in the equipment, so the source is on every row.';
 }

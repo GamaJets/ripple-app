@@ -141,7 +141,7 @@ export const MAX_FILING_NOTE_CHARS = 1000;
 export const FILINGS_ARE_YOUR_OWN_RECORD =
   'Nothing tells Repple when a gym files. Every row here is one somebody typed, no reference is '
   + 'checked against anything, and no deadline, penalty or amount is worked out from any of it. A '
-  + 'period with nothing recorded against it is one NOBODY HAS ANSWERED FOR — it is not a period '
+  + 'period with nothing recorded against it is one NOBODY HAS ANSWERED FOR. It is not a period '
   + 'this gym failed to file for, and this screen will never say that it is.';
 
 /* ── what a period has had done about it ──────────────────────────────────── */
@@ -243,7 +243,7 @@ export function filingsFor(
       line: `Part of ${periodLabel} has something recorded against it and part of it does not: nothing covers ${gapFrom} to ${lastDay}. ${whenLine}`,
     };
   }
-  return { state: 'filed', filings: mine, line: `${periodLabel} — ${whenLine}` };
+  return { state: 'filed', filings: mine, line: `${periodLabel}: ${whenLine}` };
 }
 
 /**
@@ -261,7 +261,7 @@ function describeFilings(mine: readonly TaxFiling[]): string {
   const ref = first.reference ? `, reference ${first.reference}` : '';
   if (byDay.length === 1) return `filed on ${first.filedOn}${who}${ref}.`;
   const rest = byDay.slice(1).map((f) => f.filedOn).join(', ');
-  return `filed on ${first.filedOn}${who}${ref}, and filed again on ${rest} — both are recorded, because a later submission does not undo an earlier one.`;
+  return `filed on ${first.filedOn}${who}${ref}, and filed again on ${rest}. Both are recorded, because a later submission does not undo an earlier one.`;
 }
 
 /** The day after a bare day, or null when it is not one. UTC in, UTC out, so
@@ -320,29 +320,29 @@ export function filingBlockers(d: FilingDraft, today: string): string[] {
     out.push('Say what was filed. “Something else the gym had to file” is on the list and is a real answer.');
   }
   if (!isoDay(d.periodFrom)) {
-    out.push('The first day the filing covers has to be a real date — YYYY-MM-DD.');
+    out.push('The first day the filing covers has to be a real date: YYYY-MM-DD.');
   }
   if (!isoDay(d.periodTo)) {
-    out.push('The last day it covers has to be a real date — YYYY-MM-DD. It is inclusive, so a quarter ending on 31 March ends on the 31st.');
+    out.push('The last day it covers has to be a real date: YYYY-MM-DD. It is inclusive, so a quarter ending on 31 March ends on the 31st.');
   }
   if (isoDay(d.periodFrom) && isoDay(d.periodTo) && d.periodTo < d.periodFrom) {
     out.push('That period ends before it starts.');
   }
   if (!isoDay(d.filedOn)) {
-    out.push('The day it was filed has to be a real date — YYYY-MM-DD.');
+    out.push('The day it was filed has to be a real date: YYYY-MM-DD.');
   }
   if (isoDay(d.filedOn) && isoDay(today) && d.filedOn > today) {
-    out.push('That day has not happened yet. This records a filing that was made, so it cannot be dated into the future — record it once it has been sent.');
+    out.push('That day has not happened yet. This records a filing that was made, so it cannot be dated into the future. Record it once it has been sent.');
   }
   // A return is filed for a period that has ENDED. One filed before its own
   // period was over is almost always a mistyped year, and saying so is cheaper
   // than a gym believing Q4 is dealt with in October.
   if (isoDay(d.filedOn) && isoDay(d.periodFrom) && d.filedOn < d.periodFrom) {
-    out.push(`This says it was filed on ${d.filedOn}, before the period it covers had even begun on ${d.periodFrom}. Check the dates — a mistyped year is the usual cause.`);
+    out.push(`This says it was filed on ${d.filedOn}, before the period it covers had even begun on ${d.periodFrom}. Check the dates; a mistyped year is the usual cause.`);
   }
   const ref = (d.reference ?? '').trim();
   if (ref.length > MAX_REFERENCE_CHARS) {
-    out.push('That reference is longer than any this can hold. Check it, or leave the box empty and none is recorded — a filing with no reference on it is still a filing.');
+    out.push('That reference is longer than any this can hold. Check it, or leave the box empty and none is recorded. A filing with no reference on it is still a filing.');
   }
   const by = (d.filedBy ?? '').trim();
   if (by.length > MAX_FILED_BY_CHARS) {
@@ -431,7 +431,7 @@ export async function recordFiling(
   const row = data as any;
   if (!row?.id || row.period_from !== d.periodFrom || row.period_to !== d.periodTo || row.filed_on !== d.filedOn) {
     throw new Error(
-      'That filing was NOT recorded the way it was meant to be — the row did not come back matching '
+      'That filing was NOT recorded the way it was meant to be. The row did not come back matching '
       + 'what was sent. Reload this screen and read the list before entering it again, so that one '
       + 'submission does not end up recorded twice.',
     );

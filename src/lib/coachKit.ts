@@ -80,7 +80,7 @@ import { isWhole, type LoadStatus } from '../ui/loadStatus';
  */
 export const KIT_UNREAD_NOTE =
   'Your gym’s equipment register could not be read, so nothing here says what is in service. ' +
-  'It is not a statement that everything works — check with the gym before you program around a machine.';
+  'It is not a statement that everything works. Check with the gym before you program around a machine.';
 
 /**
  * A gym whose register has no rows in it.
@@ -91,8 +91,8 @@ export const KIT_UNREAD_NOTE =
  * of them is a reason to change a program.
  */
 export const KIT_UNWRITTEN_NOTE =
-  'Your gym has not put anything in its equipment register. That is an empty form rather than an empty gym — ' +
-  'nothing here says a machine is missing, and nothing here says one works.';
+  'Your gym has not put anything in its equipment register. That is an empty form rather than an empty gym. ' +
+  'Nothing here says a machine is missing, and nothing here says one works.';
 
 /** The one silence that is an answer, said rather than drawn as blank space. */
 export const KIT_ALL_CLEAR_NOTE =

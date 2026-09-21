@@ -70,7 +70,7 @@ export const MAX_LOGGED_BODY = 4000;
  *  not. Null when there is nothing to say. */
 export function loggingNote(err: string | null): string | null {
   if (!err) return null;
-  return `The message went out, but the record of who it went to was not written: ${err}. Nothing can now say who received it — take a note of the group and the time yourself.`;
+  return `The message went out, but the record of who it went to was not written: ${err}. Nothing can now say who received it. Take a note of the group and the time yourself.`;
 }
 
 /**
@@ -242,7 +242,7 @@ export async function fetchBroadcasts(
 export function senderLine(b: Broadcast, ctx: { meId?: string | null; namesError?: string | null }): string {
   if (!b.sentBy) return 'Sent by an account that has since been removed from this gym.';
   if (ctx.meId && b.sentBy === ctx.meId) return 'Sent by you.';
-  if (ctx.namesError) return 'Sent by somebody whose name could not be read — the record names them, the lookup failed.';
+  if (ctx.namesError) return 'Sent by somebody whose name could not be read. The record names them; the lookup failed.';
   return b.sentByName ? `Sent by ${b.sentByName}.` : 'Sent by an account with no name on it.';
 }
 
@@ -257,7 +257,7 @@ export function senderLine(b: Broadcast, ctx: { meId?: string | null; namesError
 export function deliveredLine(b: Broadcast): string {
   const who = `${b.recipients} ${b.recipients === 1 ? 'person' : 'people'}`;
   if (b.delivered == null) {
-    return `Addressed to ${who}. How many inboxes it reached was not recorded — that is unknown, not none.`;
+    return `Addressed to ${who}. How many inboxes it reached was not recorded. That is unknown, not none.`;
   }
   if (b.delivered === b.recipients) return `Addressed to ${who}, and every inbox was written.`;
   if (b.delivered < b.recipients) {
@@ -265,7 +265,7 @@ export function deliveredLine(b: Broadcast): string {
     return `Addressed to ${who}. ${b.delivered} ${b.delivered === 1 ? 'inbox was' : 'inboxes were'} written, `
       + `so ${missed} ${missed === 1 ? 'person was' : 'people were'} not reached.`;
   }
-  return `Addressed to ${who}, and ${b.delivered} inboxes were written — more than were addressed, `
+  return `Addressed to ${who}, and ${b.delivered} inboxes were written, more than were addressed, `
     + 'which this record cannot explain.';
 }
 

@@ -117,7 +117,7 @@ export function hrKcalConfidence(avgBpm: number): HrKcalConfidence {
  */
 export function hrKcalNote(kcal: number | null, avgBpm: number | null): string | null {
   if (kcal == null || avgBpm == null) return null;
-  const base = `Worked out from your average heart rate of ${Math.round(avgBpm)} bpm, your age and your weight — an estimate, not a measurement.`;
+  const base = `Worked out from your average heart rate of ${Math.round(avgBpm)} bpm, your age and your weight. It is an estimate, not a measurement.`;
   const conf = hrKcalConfidence(avgBpm);
   if (conf === 'below-range') {
     return `${base} It is on the low side of where this calculation is reliable, so treat it as a rough figure.`;

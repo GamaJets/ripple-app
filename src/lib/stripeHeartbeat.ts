@@ -117,10 +117,10 @@ export function stripePulse(
  */
 export function stripePulseLine(p: StripePulse): string {
   if (p.kind === 'unread') {
-    return 'Whether this app has heard from Stripe could not be read just now. That is not a statement that it has not — nothing below is affected, and neither is anything Stripe has already recorded.';
+    return 'Whether this app has heard from Stripe could not be read just now. That is not a statement that it has not. Nothing below is affected, and neither is anything Stripe has already recorded.';
   }
   if (p.kind === 'silent') {
-    return 'This app has never heard from Stripe. Card payments reach Repple through a webhook Stripe calls, and not one has ever arrived — so if a client has paid you by card, that payment is at Stripe and this app was never told about it. An empty list below is this, not a quiet month.';
+    return 'This app has never heard from Stripe. Card payments reach Repple through a webhook Stripe calls, and not one has ever arrived, so if a client has paid you by card, that payment is at Stripe and this app was never told about it. An empty list below is this, not a quiet month.';
   }
   if (p.kind === 'unreadable') {
     return 'This app has heard from Stripe, and the date it last did could not be read. Something is on record; how long ago is not, and a figure is not going to be invented for it.';
@@ -154,7 +154,7 @@ export function stripeEventsLine(p: StripePulse): string | null {
  * one coach, so the honest fix is to say what it covers.
  */
 export const STRIPE_PULSE_IS_NOT_YOUR_SALES =
-  'This is about the connection between Repple and Stripe, not about your own sales. Every coach on this app shares one webhook, so the time above is when it last carried anybody’s payment — not necessarily one of yours.';
+  'This is about the connection between Repple and Stripe, not about your own sales. Every coach on this app shares one webhook, so the time above is when it last carried anybody’s payment, not necessarily one of yours.';
 
 /**
  * That a quiet heartbeat is not a broken one.

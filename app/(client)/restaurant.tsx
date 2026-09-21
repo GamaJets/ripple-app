@@ -72,11 +72,11 @@ export default function Restaurant() {
     // server said, including when it refused the row outright.
     const out = await fl.logFood({ name: est.name, kcal: est.kcal, protein: est.protein, carbs: est.carbs, fat: est.fat, via: 'manual' });
     if (out === 'refused') {
-      Alert.alert('Not Logged', `${est.name} could not be saved, so it is not on today's record. Your choice is still here — try again in a moment.`);
+      Alert.alert('Not Logged', `${est.name} could not be saved, so it is not on today's record. Your choice is still here. Try again in a moment.`);
       return;
     }
     setSel(null); setPortion(1);
-    Alert.alert(out === 'unsent' ? 'Logged — Waiting to Send' : 'Logged',
+    Alert.alert(out === 'unsent' ? 'Logged, Waiting to Send' : 'Logged',
       `${est.name} · ${num(est.kcal)} kcal${out === 'unsent' ? '. It is kept on this phone and goes up when you have signal.' : ' added to today.'}`);
   };
 
@@ -183,7 +183,7 @@ export default function Restaurant() {
                   This is the moment the dish goes into the member's day. */}
               {marks.marked && dishAllergenMark(dishAllergens(sel.name, cd.avoid)) ? (
                 <Flag tone={t.crit} style={{ marginBottom: sp.lg }}>
-                  {dishAllergenMark(dishAllergens(sel.name, cd.avoid))} — one of the things you asked to avoid. {marks.text}
+                  {dishAllergenMark(dishAllergens(sel.name, cd.avoid))}: one of the things you asked to avoid. {marks.text}
                 </Flag>
               ) : !marks.marked ? (
                 /* The sheet is the moment the dish goes into the member's day,

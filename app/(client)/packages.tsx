@@ -449,7 +449,7 @@ export default function ClientPackages() {
     const ends = s.current_period_end ? fmtFullDay(s.current_period_end) : null;
     Alert.alert('Cancel This Subscription?',
       ends
-        ? `You keep it until ${ends} — you have already paid for this period — and you will not be charged again.`
+        ? `You keep it until ${ends}, because you have already paid for this period, and you will not be charged again.`
         : 'You keep it until the end of the period you have already paid for, and you will not be charged again.',
       [{ text: 'Keep It', style: 'cancel' }, { text: 'Cancel Subscription', style: 'destructive', onPress: async () => {
         setBusy(s.id);
@@ -457,7 +457,7 @@ export default function ClientPackages() {
         setBusy(null);
         // Stripe's answer, not ours. Saying "cancelled" on a failure would stop
         // the client trying again, and they would be charged next month.
-        if (!r.ok) { Alert.alert('Not Cancelled', (r.error || 'The change did not go through.') + ' Your subscription is still running — try again in a moment.'); return; }
+        if (!r.ok) { Alert.alert('Not Cancelled', (r.error || 'The change did not go through.') + ' Your subscription is still running. Try again in a moment.'); return; }
         load();
       } }]);
   };
@@ -600,7 +600,7 @@ export default function ClientPackages() {
               <SectionHead title="Your Subscriptions" note={!subsFailed && subs && liveSubs.length ? String(liveSubs.length) : undefined} />
               {subs === null ? (
                 <Flag tone={t.crit}>
-                  We couldn't read your subscriptions. This is not a statement that you have none — if you
+                  We couldn't read your subscriptions. This is not a statement that you have none. If you
                   are subscribed to your coach you still are, and you should not subscribe again from here.
                 </Flag>
               ) : subsFailed ? (
@@ -608,7 +608,7 @@ export default function ClientPackages() {
                 // and the state and the date on it are whatever was true when
                 // it was written. A card that failed since would not show here.
                 <Flag tone={t.warn}>
-                  These are the subscriptions this phone last read, and they could not be checked just now — so
+                  These are the subscriptions this phone last read, and they could not be checked just now, so
                   the state and the date on each one are not confirmed as current. A payment that failed since
                   would not be shown here.
                 </Flag>
@@ -651,7 +651,7 @@ export default function ClientPackages() {
                   {s.status === 'past_due' ? (
                     <View style={{ marginTop: sp.sm }}>
                       <Flag tone={t.crit}>
-                        Your last payment did not go through. The subscription has not ended — update your
+                        Your last payment did not go through. The subscription has not ended. Update your
                         card and it carries on.
                       </Flag>
                     </View>
@@ -736,7 +736,7 @@ export default function ClientPackages() {
                 <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>We couldn't load your purchases</Text>
                 <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: 4, maxWidth: 320 }}>
                   This is our end, not a statement about what you have bought. Anything you have paid
-                  for is still yours — it just is not readable right now.
+                  for is still yours. It just is not readable right now.
                 </Text>
                 <View style={{ marginTop: sp.lg }}>
                   <Ghost label="Try Again" onPress={load} />
@@ -874,8 +874,8 @@ export default function ClientPackages() {
                 <Text style={{ ...ty.label, color: t.ink3 }}>You are not linked to a coach yet. Find one and their packages appear here.</Text>
               ) : offers === null ? (
                 <Flag tone={t.crit}>
-                  We couldn't read your coach's packages. This is not a statement that they sell none —
-                  try again in a moment.
+                  We couldn't read your coach's packages. This is not a statement that they sell none.
+                  Try again in a moment.
                 </Flag>
               ) : buyable.length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>Your coach has nothing else on sale right now.</Text>
@@ -931,7 +931,7 @@ export default function ClientPackages() {
                   {p.billing_interval && subsUnknown ? (
                     <Flag tone={t.warn} style={{ marginTop: sp.md }}>
                       We could not read what you are already subscribed to, so this cannot be bought right
-                      now — if you are already on it, subscribing again would charge you twice every
+                      now. If you are already on it, subscribing again would charge you twice every
                       {p.billing_interval === 'month' ? ' month' : ' year'}. Pull down to try the read again.
                     </Flag>
                   ) : null}

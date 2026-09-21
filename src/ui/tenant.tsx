@@ -300,6 +300,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
             // Nothing established, so nothing is cleared and nothing is
             // claimed: an owner keeps the gym on screen, with the status
             // saying it is not confirmed.
+            // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
             reportError('tenant.load.session', new Error('auth read unreadable — who is signed in could not be established'));
             setStatus('error'); setLoading(false); return;
           }
@@ -310,6 +311,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         const who = uidFromAuth(whoRes);
         if (who.fate !== null) {
           if (who.fate === 'unreadable') {
+            // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
             reportError('tenant.load.auth', new Error('auth read unreadable — who is signed in could not be established'));
             setStatus('error'); setLoading(false); return;
           }

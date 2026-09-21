@@ -93,9 +93,9 @@ export function currencyGapLine(gap: CurrencyGap, consequence: string): string {
     case 'reading':
       return `Your currency is still being read, so ${c}.`;
     case 'unreadable':
-      return `Your currency could not be read, so ${c}. That is a read that failed rather than a setting nobody has made — try again in a moment.`;
+      return `Your currency could not be read, so ${c}. That is a read that failed rather than a setting nobody has made. Try again in a moment.`;
     case 'incomplete':
-      return `Your currency could not be established, because part of the read did not come back, so ${c}. That is not the same as nobody having set one — try again in a moment.`;
+      return `Your currency could not be established, because part of the read did not come back, so ${c}. That is not the same as nobody having set one. Try again in a moment.`;
     case 'unset':
       return `Your gym has not set a currency, so ${c}. An owner sets one in the gym settings.`;
   }

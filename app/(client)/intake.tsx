@@ -302,7 +302,7 @@ export default function IntakeScreen() {
 
         <PageHead title="Your Intake" subtitle="Before you start" />
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
-          What your coach needs before your first session. Your answers are yours — only you can
+          What your coach needs before your first session. Your answers are yours. Only you can
           change them, and your coach cannot edit a word of it.
         </Text>
 
@@ -329,7 +329,7 @@ export default function IntakeScreen() {
           <View style={{ marginTop: sp.lg }}>
             <Flag tone={t.warn}>
               These are your answers as they were read a moment ago. Asking the server again did not
-              work, so nothing can be saved until it does — what you type is kept on this phone.
+              work, so nothing can be saved until it does. What you type is kept on this phone.
               {' '}{retryLine(reach)}
             </Flag>
           </View>
@@ -626,7 +626,7 @@ export default function IntakeScreen() {
                 </View>
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                You can save a half-finished form and come back — your coach is shown how far you got
+                You can save a half-finished form and come back. Your coach is shown how far you got
                 rather than nothing at all. Anything you type is kept on this phone as you go, so
                 closing this screen never loses it. {READINESS_NOT_ADVICE}
               </Text>

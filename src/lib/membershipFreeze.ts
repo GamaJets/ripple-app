@@ -168,7 +168,7 @@ export function freezeLine(
  * and this app does not hold it, the same position `classCancel.ts` takes.
  */
 export function freezeRefusal(from: Day, to: Day, today: string): string | null {
-  if (!isDay(from) || !isDay(to)) return 'Pick both dates — the first day of the pause and the last.';
+  if (!isDay(from) || !isDay(to)) return 'Pick both dates: the first day of the pause and the last.';
   if (to < from) return 'The last day is before the first. Tap the dates again in the other order.';
   if (isDay(today) && to < today) {
     return 'Those dates have already passed. A pause can only cover days that are still to come.';

@@ -1073,7 +1073,7 @@ export default function CoachMoney() {
           <SectionHead title="Recorded Against Clients" note="Late cancellations you settle yourself" />
           {fees.status === 'error' ? (
             <Flag>
-              Your late-cancellation fees could not be read. This is not a statement that there are none — anything already recorded still stands against the client it was recorded against.
+              Your late-cancellation fees could not be read. This is not a statement that there are none. Anything already recorded still stands against the client it was recorded against.
             </Flag>
           ) : fees.status === 'partial' ? (
             <PartialRead what="recorded fees" shown={fees.charges.length} onPress={fees.reload} />
@@ -1128,7 +1128,7 @@ export default function CoachMoney() {
             </Flag>
           ) : null}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Repple records these and never collects them. No card is charged and nothing arrives in your Stripe account — the client sees what they owe and who to settle it with.
+            Repple records these and never collects them. No card is charged and nothing arrives in your Stripe account. The client sees what they owe and who to settle it with.
           </Text>
           <ListRow icon="calendar" title="Schedule"
             note="Where a recorded fee is listed, and where you waive one"
@@ -1232,7 +1232,7 @@ export default function CoachMoney() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your payout account…</Text>
           ) : payoutStage(connect.acct, connect.read) === 'unreadable' ? (
             <Flag>
-              Your payout account could not be read. This is not a statement that you have none — if you had set one up it is still set up.
+              Your payout account could not be read. This is not a statement that you have none. If you had set one up, it is still set up.
             </Flag>
           ) : payoutStage(connect.acct, connect.read) === 'active' ? (
             <Text style={{ ...ty.label, color: t.ink2 }}>
@@ -1340,7 +1340,7 @@ export default function CoachMoney() {
                     deciding what they owe, and a floor printed as a total is
                     the one thing that stops them looking for the rest. */}
                 {duesRead === 'partial'
-                  ? `At least ${owed.length} ${plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding — there are more than fitted in one read, so this is a floor and not a count of them.`
+                  ? `At least ${owed.length} ${plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding. There are more than fitted in one read, so this is a floor and not a count of them.`
                   : `${owed.length} ${plural(owed.length, 'invoice on your own account is', 'invoices on your own account are')} outstanding.`}
               </Flag>
               {owed.map((i) => (
@@ -1382,7 +1382,7 @@ export default function CoachMoney() {
           )}
           {spend.unrecorded > 0 ? (
             <Flag style={{ marginTop: sp.sm }}>
-              {spend.unrecorded} {plural(spend.unrecorded, 'code has', 'codes have')} no cost recorded. That is not a cost of nothing — until a figure is entered or synced, what {plural(spend.unrecorded, 'that code', 'those codes')} cost you is unknown and is in no total here.
+              {spend.unrecorded} {plural(spend.unrecorded, 'code has', 'codes have')} no cost recorded. That is not a cost of nothing. Until a figure is entered or synced, what {plural(spend.unrecorded, 'that code', 'those codes')} cost you is unknown and is in no total here.
             </Flag>
           ) : null}
           <ListRow icon="trending" title="Ad Spend"
@@ -1504,7 +1504,7 @@ export default function CoachMoney() {
               ) : null}
               {channels.unnamed > 0 ? (
                 <Flag tone={t.ink3} style={{ marginBottom: sp.md }}>
-                  Your main code is left out of everything in this section. It is not a channel — it collects everybody no named code claims, including codes you have since replaced — so setting what it earned against what it cost would compare real money with nothing.
+                  Your main code is left out of everything in this section. It is not a channel (it collects everybody no named code claims, including codes you have since replaced), so setting what it earned against what it cost would compare real money with nothing.
                 </Flag>
               ) : null}
 
@@ -1684,7 +1684,7 @@ export default function CoachMoney() {
               : !isWhole(issued.status)
                 ? 'Your own statement of a charge, never a payment receipt'
                 : issued.count > 0
-                  ? `${issued.count} issued — your own statement of a charge, never a payment receipt`
+                  ? `${issued.count} issued: your own statement of a charge, never a payment receipt`
                   : 'Issue a document for what somebody paid you, including cash and transfers'}
             onPress={() => router.push('/(trainer)/invoices')} />
           {/* The document this whole screen is the working copy of.
@@ -1694,7 +1694,7 @@ export default function CoachMoney() {
               built from had no way to get to it, and the one moment they want
               it is the moment they are looking at their takings. */}
           <ListRow icon="chart" title="Statement of Record"
-            note="What this app recorded in a year or a quarter, to hand to an accountant — never a tax return"
+            note="What this app recorded in a year or a quarter, to hand to an accountant, never a tax return"
             onPress={() => router.push('/(trainer)/statement')} />
           {/* The ninth money screen, and the only one this page did not reach.
               Which Codes Worked above answers what a coach PAID for a client;
@@ -1710,7 +1710,7 @@ export default function CoachMoney() {
         <Section>
           <SectionHead title="What Is Not Here" />
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Cash and bank transfers never reach Repple on their own. What you have recorded yourself is in the figures above and the rest is not, so they are a floor and only you know by how much. Work paid for through a gym is now here — but only as the runs your gym has closed, which is their word for what they handed over and not a record of anything arriving. Nothing on this page is a projection or a forecast: it is what has been recorded, over the period each heading names.
+            Cash and bank transfers never reach Repple on their own. What you have recorded yourself is in the figures above and the rest is not, so they are a floor and only you know by how much. Work paid for through a gym is now here, but only as the runs your gym has closed, which is their word for what they handed over and not a record of anything arriving. Nothing on this page is a projection or a forecast: it is what has been recorded, over the period each heading names.
           </Text>
         </Section>
       </ScrollView>

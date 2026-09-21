@@ -49,7 +49,7 @@ const SAY_NOTHING = 'state no amount';
 export function currencyForModel(cur: MyCurrency | null | undefined): string {
   const code = (cur?.currency || '').trim().toUpperCase();
   if (code) return code;
-  return `unknown — ${reasonFor(cur ? cur.gap : 'reading')}, so ${SAY_NOTHING}`;
+  return `unknown: ${reasonFor(cur ? cur.gap : 'reading')}, so ${SAY_NOTHING}`;
 }
 
 function reasonFor(gap: MyCurrencyGap | null): string {

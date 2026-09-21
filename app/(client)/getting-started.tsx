@@ -245,8 +245,8 @@ export default function GettingStarted() {
             These are the ones the front desk cares about. Open each one to see where you stand.
           </Text>
           {[
-            { icon: 'check' as const, title: "Your Gym's Paperwork", note: 'waivers and consents your gym asks you to sign — some gyms cannot train you until they have them', route: '/(client)/agreements' },
-            { icon: 'pencil' as const, title: 'Your Intake', note: 'what your coach needs before your first session — you can save it half-finished', route: '/(client)/intake' },
+            { icon: 'check' as const, title: "Your Gym's Paperwork", note: 'waivers and consents your gym asks you to sign; some gyms cannot train you until they have them', route: '/(client)/agreements' },
+            { icon: 'pencil' as const, title: 'Your Intake', note: 'what your coach needs before your first session. You can save it half-finished', route: '/(client)/intake' },
             { icon: 'lock' as const, title: 'Your Entry Barcode', note: 'give it to reception once and the entrance scanner will read it after that', route: '/(client)/access' },
           ].map((r) => (
             <Pressable
@@ -272,8 +272,8 @@ export default function GettingStarted() {
         <Section>
           <SectionHead title="If Something Does Not Make Sense" />
           <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
-            Every tab has a row at the top saying what it is showing you. Open it, read it, and close it —
-            it will not come back.
+            Every tab has a row at the top saying what it is showing you. Open it, read it, and close it.
+            It will not come back.
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.md }}>
             <Ghost label="User Guide" onPress={() => router.push('/guide')} />

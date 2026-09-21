@@ -546,7 +546,7 @@ function statusLine(a: MemberAgreement): string {
   // The refusal is a property of the KIND, so it is still set once a guardian
   // consent has actually been given at the desk. Read in that order this told a
   // member a document already on file "has to be given at the gym".
-  if (a.refusal && !a.signedAt) return 'not signed yet — has to be given at the gym';
+  if (a.refusal && !a.signedAt) return 'not signed yet; has to be given at the gym';
   if (!a.signedAt) return 'waiting on you';
   const on = day(a.signedAt);
   if (a.attribution === 'member') return `signed by you${on ? ` on ${on}` : ''}`;

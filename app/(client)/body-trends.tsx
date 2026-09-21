@@ -336,7 +336,7 @@ export default function BodyTrends() {
               kicker="Composition"
               title={bodyStatus === 'error' ? 'We couldn’t read your scans' : 'Not all of your scans could be read'}
               note={bodyStatus === 'error'
-                ? 'Nothing below is a statement about your body — it is a statement about a read that did not answer. Your scans are on your record and are not lost.'
+                ? 'Nothing below is a statement about your body. It is a statement about a read that did not answer. Your scans are on your record and are not lost.'
                 : 'You have more readings on record than this screen can read in one go, so a trend drawn here starts where the read stopped rather than where you did.'}
             />
           </Section>
@@ -347,7 +347,7 @@ export default function BodyTrends() {
             {/* Only a whole read may say the member has not got enough. */}
             {!bodyWhole ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                {bodyStatus === 'loading' ? 'Reading your scans…' : 'No trends can be drawn from what was read. That is not the same as having none — see above.'}
+                {bodyStatus === 'loading' ? 'Reading your scans…' : 'No trends can be drawn from what was read. That is not the same as having none (see above).'}
               </Text>
             ) : (<>
               <SectionHead title="Not Enough Readings Yet" />
@@ -422,7 +422,7 @@ export default function BodyTrends() {
                       app has lost it. */}
                   {readings.length === 1 ? (
                     <Text style={{ ...ty.label, color: t.ink3 }}>
-                      One reading so far — {figure(show(readings[0].value))}
+                      One reading so far: {figure(show(readings[0].value))}
                       {` ${unit}`} · {measuredNote(readings[0], today)}. A trend needs two.
                     </Text>
                   ) : (
@@ -432,8 +432,8 @@ export default function BodyTrends() {
                       // data yet" would read as a fault in the app to somebody
                       // who has typed six scans in by hand. It is a statement
                       // about which KIND of scan they have, and it says so.
-                      : m.from === 'scan' ? 'This one comes off a photographed InBody printout — a scan typed in by hand carries a weight and a body fat and none of the breakdown.'
-                        : bodyWhole ? 'Not enough data yet.' : bodyStatus === 'loading' ? 'Reading…' : 'Nothing read for this one — see the note above.'}</Text>
+                      : m.from === 'scan' ? 'This one comes off a photographed InBody printout. A scan typed in by hand carries a weight and a body fat and none of the breakdown.'
+                        : bodyWhole ? 'Not enough data yet.' : bodyStatus === 'loading' ? 'Reading…' : 'Nothing read for this one. See the note above.'}</Text>
                   )}
                 </Section>
               </View>
@@ -630,7 +630,7 @@ export default function BodyTrends() {
                 <SectionHead title="The Rest of the Sheet" />
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   Visceral fat, BMR, fat and lean mass, each arm and leg, body water, protein and minerals
-                  graph here too — but only from a scan added by photographing the InBody printout. A scan
+                  graph here too, but only from a scan added by photographing the InBody printout. A scan
                   typed in by hand carries a weight and a body fat, and nothing this part can draw.
                 </Text>
                 <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>

@@ -139,7 +139,7 @@ export function dayRefusal(
 ): string | null {
   const day = String(iso ?? '').trim();
   if (!isStartDate(day)) {
-    return 'That is not a day this app can read. Write it as year, month and day — 2026-09-07 — or pick it off the calendar above.';
+    return 'That is not a day this app can read. Write it as year, month and day (2026-09-07), or pick it off the calendar above.';
   }
   const lo = bound(range?.min);
   const hi = bound(range?.max);

@@ -436,7 +436,7 @@ export default function Receipts() {
                   each line rather than by an account. Most people who pay a
                   coach in cash were never given one. */}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                These are grouped by the name you wrote on each line, not by an account — most people who pay in cash have never been given one. Two spellings of the same person are two rows here.
+                These are grouped by the name you wrote on each line, not by an account. Most people who pay in cash have never been given one. Two spellings of the same person are two rows here.
               </Text>
             </Section>
           </>

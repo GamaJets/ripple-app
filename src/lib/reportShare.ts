@@ -51,7 +51,7 @@ export const REPORT_SENT_WITH_PERMISSION: Record<ReportHealthKind, string> = {
   body: 'your weight, body fat and skeletal muscle',
   waist: 'your waist and other tape measurements',
   checkin: 'your check-in scores, including how you slept',
-  composition: 'what your body-composition scan says is improving and what to watch — visceral fat, BMR, lean and fat mass, body water',
+  composition: 'what your body-composition scan says is improving and what to watch: visceral fat, BMR, lean and fat mass, body water',
   balance: 'any left/right difference in that scan, such as “legs: left 12% behind”',
 };
 

@@ -372,7 +372,7 @@ export function planEditDiffLine(
   who: string,
   loadLabel: (kg: number | null) => string | null,
 ): string {
-  const where = r.dayLabel ? `${r.dayLabel} — ` : '';
+  const where = r.dayLabel ? `${r.dayLabel}: ` : '';
   if (r.kind === 'custom') {
     // No day and nothing of the coach's to compare it against: the member added
     // a movement the program does not contain, which is the one kind whose

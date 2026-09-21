@@ -611,7 +611,7 @@ export function unitFor(
   if (clientUnit === coachUnit) return { unit: clientUnit, source: 'client', note: null };
   return {
     unit: clientUnit, source: 'client',
-    note: `Every load below is in ${clientUnit} — ${who}'s own unit, and what their phone shows `
+    note: `Every load below is in ${clientUnit}, ${who}'s own unit, and what their phone shows `
       + `them. You read in ${coachUnit}.`,
   };
 }

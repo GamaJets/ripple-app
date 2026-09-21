@@ -131,7 +131,7 @@ export function pairInvite(reach: WatchReach, pairable: boolean): string | null 
       // permission check, which is the half of pairing that silently fails.
       return 'Paired and quiet? Check what this app is allowed to read, without leaving your session.';
     case 'none':
-      return 'No heart-rate source yet. You can pair one here — your sets, your clock and your session all stay exactly where they are.';
+      return 'No heart-rate source yet. You can pair one here; your sets, your clock and your session all stay exactly where they are.';
   }
 }
 
@@ -172,12 +172,12 @@ export function pairResultNote(outcome: PairOutcome, hasSample: boolean): string
   switch (outcome) {
     case 'connected':
       return hasSample
-        ? 'Connected, and a reading is coming through. Your zones are building from now on — the minutes before this are not counted, because nothing was measuring them.'
+        ? 'Connected, and a reading is coming through. Your zones are building from now on. The minutes before this are not counted, because nothing was measuring them.'
         : 'Connected. Nothing is coming through yet: an Apple Watch only streams heart rate while a workout is running ON THE WATCH, so start one there. Zones build from the first reading, not from the start of this session.';
     case 'pending':
       return 'Still asking. Answer the permission prompt and this will update on its own.';
     case 'refused':
-      return 'Not connected. Nothing was changed and your session is untouched — you can carry on and pair later, or try again here.';
+      return 'Not connected. Nothing was changed and your session is untouched. You can carry on and pair later, or try again here.';
   }
 }
 
@@ -191,4 +191,4 @@ export function pairResultNote(outcome: PairOutcome, hasSample: boolean): string
  * rule about nulls exists for.
  */
 export const MID_SESSION_GAP_NOTE =
-  'Zones count from the first reading. The part of this session before that is not in them — it was not measured, so it is missing rather than empty.';
+  'Zones count from the first reading. The part of this session before that is not in them. It was not measured, so it is missing rather than empty.';

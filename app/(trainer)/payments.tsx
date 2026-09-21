@@ -644,7 +644,7 @@ export default function TrainerPayments() {
     // reading happens, and it is asserted in src/lib/packExpiry.test.ts.
     const typedValidity = readValidityDays(interval || !(sess && sess > 0) ? '' : validity);
     if (!typedValidity.ok) { Alert.alert('How Long Is It Good For?', typedValidity.reason); return; }
-    const confirmLine = `${pkgPriceLine(cents, currency, interval) ?? fig(null)} — ${nm}`;
+    const confirmLine = `${pkgPriceLine(cents, currency, interval) ?? fig(null)} · ${nm}`;
     const go = async () => {
       setBusy(true);
       const r = await createPackage({ name: nm, price_cents: cents, sessions: sess && sess > 0 ? sess : null, currency, billing_interval: interval, validity_days: typedValidity.days });
@@ -702,7 +702,7 @@ export default function TrainerPayments() {
     };
     if (to === 'resume') {
       Alert.alert('Let This Keep Running?',
-        `${who}${price ? ` — ${price}` : ''}\n\nIt was set to end${ends ? ` on ${ends}` : ''}. Restarting it means they are charged again on that date, as normal.`,
+        `${who}${price ? ` · ${price}` : ''}\n\nIt was set to end${ends ? ` on ${ends}` : ''}. Restarting it means they are charged again on that date, as normal.`,
         [{ text: 'Leave It', style: 'cancel' }, { text: 'Keep Running', onPress: go }]);
       return;
     }
@@ -713,7 +713,7 @@ export default function TrainerPayments() {
     // reads before they confirm rather than the one they work out afterwards.
     if (to === 'end_now') {
       Alert.alert('End It Today?',
-        `${who}${price ? ` — ${price}` : ''}\n\n${END_NOW_TAKES_THE_REST}\n\n${REFUND_IS_FINAL.replace('A refund cannot be taken back.', 'This cannot be taken back either.')}`,
+        `${who}${price ? ` · ${price}` : ''}\n\n${END_NOW_TAKES_THE_REST}\n\n${REFUND_IS_FINAL.replace('A refund cannot be taken back.', 'This cannot be taken back either.')}`,
         [{ text: 'Leave It', style: 'cancel' }, { text: 'End It Today', style: 'destructive', onPress: go }]);
       return;
     }
@@ -722,7 +722,7 @@ export default function TrainerPayments() {
     // the end of the period, and a screen that put the irreversible option next
     // to the reversible one at the same weight would get it tapped by mistake.
     Alert.alert('Stop This Subscription?',
-      `${who}${price ? ` — ${price}` : ''}\n\nThey keep what they have already paid for${ends ? ` until ${ends}` : ''}, and are not charged again after that. Nothing is refunded, and you can put it back any time before it ends.\n\nIf they have asked to be stopped TODAY, the second option ends it now — which takes the rest of the period off them and still refunds nothing.`,
+      `${who}${price ? ` · ${price}` : ''}\n\nThey keep what they have already paid for${ends ? ` until ${ends}` : ''}, and are not charged again after that. Nothing is refunded, and you can put it back any time before it ends.\n\nIf they have asked to be stopped TODAY, the second option ends it now. That takes the rest of the period off them and still refunds nothing.`,
       [
         { text: 'Leave It', style: 'cancel' },
         { text: 'End It Today', style: 'destructive', onPress: () => switchCancel(s, 'end_now') },
@@ -883,7 +883,7 @@ export default function TrainerPayments() {
     if (!isPartlyRefunded(r) && !isFullyRefunded(r)) return null;
     const back = minorMoney(r.refundedCents, target.rule.currency);
     if (isFullyRefunded(r)) {
-      return back ? `Refunded in full — ${back} went back` : 'Refunded in full';
+      return back ? `Refunded in full: ${back} went back` : 'Refunded in full';
     }
     const left = minorMoney(refundableCents(r), target.rule.currency);
     return back && left ? `${back} refunded, ${left} of it still stands` : 'Partly refunded';
@@ -943,7 +943,7 @@ export default function TrainerPayments() {
     // next act would be to refund it a second time.
     if (r.mirrored === false) {
       Alert.alert('Refunded, and Not Recorded Here',
-        `The money has gone back to them. This app could not write the refund onto the ${thing}, so the figures on this screen are still showing the full amount. Do NOT refund it again — check your Stripe dashboard, which is the record of what actually moved.`);
+        `The money has gone back to them. This app could not write the refund onto the ${thing}, so the figures on this screen are still showing the full amount. Do NOT refund it again. Check your Stripe dashboard, which is the record of what actually moved.`);
     } else {
       // Stripe's own figure, not the one asked for. They are the same today,
       // and a screen that echoed the request back would be reporting an
@@ -1003,7 +1003,7 @@ export default function TrainerPayments() {
     );
     Alert.alert(
       'Give This Money Back?',
-      `${who}${money ? ` — ${money} was charged` : ''}\n\n${line}\n\n${REFUND_DOES_NOT}\n\n${REFUND_FEES_NOTE}${balance ? `\n\n${balance}` : ''}\n\n${REFUND_IS_FINAL}`,
+      `${who}${money ? ` · ${money} was charged` : ''}\n\n${line}\n\n${REFUND_DOES_NOT}\n\n${REFUND_FEES_NOTE}${balance ? `\n\n${balance}` : ''}\n\n${REFUND_IS_FINAL}`,
       [
         { text: 'Leave It', style: 'cancel' },
         { text: 'Refund It', style: 'destructive', onPress: () => { setRefunding(null); void sendRefund(target, cents); } },
@@ -1043,7 +1043,7 @@ export default function TrainerPayments() {
       const why = drawReason({ outcome: r.outcome, remaining: r.remaining, purchaseId: b.id, total: null });
       Alert.alert(
         'Nothing Was Changed',
-        (why ? `That credit did not move — ${why}.` : 'That credit did not move.')
+        (why ? `That credit did not move: ${why}.` : 'That credit did not move.')
         + '\n\nTheir balance is exactly what it was. Nothing has been refunded and nothing has been charged.',
       );
       load();
@@ -1051,7 +1051,7 @@ export default function TrainerPayments() {
     }
     Alert.alert(
       delta === 1 ? 'Credit Given Back' : 'Credit Taken Off',
-      `${b.client_name || 'They'} now ${r.remaining == null ? 'have a different balance on that pack' : `${r.remaining === 1 ? 'has' : 'have'} ${r.remaining} left on that pack`}. Nobody has been told — their own screen is where they will see it, and no money has moved either way.`,
+      `${b.client_name || 'They'} now ${r.remaining == null ? 'have a different balance on that pack' : `${r.remaining === 1 ? 'has' : 'have'} ${r.remaining} left on that pack`}. Nobody has been told. Their own screen is where they will see it, and no money has moved either way.`,
     );
     load();
   };
@@ -1065,7 +1065,7 @@ export default function TrainerPayments() {
     Alert.alert(
       delta === 1 ? 'Give a Session Credit Back?' : 'Take a Session Credit Off?',
       delta === 1
-        ? `One credit goes back onto ${who}’s pack, so they can book one more session against it.\n\nNO MONEY MOVES. This is only the balance on their pack — if you also mean to give money back, refund the sale separately.\n\nThey are not told; their own screen is where they will see it.`
+        ? `One credit goes back onto ${who}’s pack, so they can book one more session against it.\n\nNO MONEY MOVES. This is only the balance on their pack. If you also mean to give money back, refund the sale separately.\n\nThey are not told; their own screen is where they will see it.`
         : `One credit comes off ${who}’s pack, so they can book one fewer session against it.\n\nNO MONEY MOVES, and nothing is charged. Use this where a session was delivered and never marked.\n\nThey are not told; their own screen is where they will see it.`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -1197,7 +1197,7 @@ export default function TrainerPayments() {
     // refreshed and said nothing — a package the trainer believes is withdrawn
     // stays on sale until a client buys it.
     const ok = await deactivatePackage(id);
-    if (!ok) { Alert.alert('Not Removed', 'That package is still on sale — the change did not save. Try again in a moment.'); return; }
+    if (!ok) { Alert.alert('Not Removed', 'That package is still on sale. The change did not save. Try again in a moment.'); return; }
     load();
   } }]);
 
@@ -1664,7 +1664,7 @@ export default function TrainerPayments() {
             {stage === 'unreadable' ? (
               <View style={{ marginTop: sp.xl }}>
                 <Notice tone={t.crit} kicker="Payouts" title="Could Not Read Your Payout Account"
-                  note="This is not a statement that you have none — if you had set one up it is still set up, and any client payment already on its way is unaffected. Nothing about setting one up is offered here until we can see what you already have.">
+                  note="This is not a statement that you have none. If you had set one up, it is still set up, and any client payment already on its way is unaffected. Nothing about setting one up is offered here until we can see what you already have.">
                   <View style={{ marginTop: sp.lg }}>
                     <Cta label={loading ? 'Checking…' : 'Try Again'} wide disabled={loading} onPress={() => { void load(); }} />
                   </View>
@@ -1742,7 +1742,7 @@ export default function TrainerPayments() {
                 {kind === 'standard' ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                     Your clients pay your own Stripe account. Stripe&apos;s processing fee comes out of it,
-                    and so does any refund or chargeback — those are yours to answer, not Repple&apos;s.
+                    and so does any refund or chargeback. Those are yours to answer, not Repple&apos;s.
                     Your payouts, disputes and receipts are in the full Stripe dashboard at dashboard.stripe.com.
                   </Text>
                 ) : kind === 'express' ? (
@@ -1805,7 +1805,7 @@ export default function TrainerPayments() {
               {earnedStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   {buysStatus === 'error' && paysStatus === 'error'
-                    ? 'Your sales and your renewals could not be read, so there is no figure here. This is not a statement that nothing has been paid — anything a client has paid, they have paid.'
+                    ? 'Your sales and your renewals could not be read, so there is no figure here. This is not a statement that nothing has been paid. Anything a client has paid, they have paid.'
                     : buysStatus === 'error'
                       ? 'Your one-off sales could not be read, so there is no figure here. Your renewals were read fine, but half of what you have taken is not a total and will not be shown as one.'
                       : 'Your subscription renewals could not be read, so there is no figure here. Your one-off sales were read fine, but half of what you have taken is not a total and will not be shown as one.'}
@@ -1895,8 +1895,8 @@ export default function TrainerPayments() {
                 ) : null}
 
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                  Everything your clients have been charged through Repple — one-off packages,
-                  session packs and subscription renewals — in the currency each was charged in, and
+                  Everything your clients have been charged through Repple (one-off packages,
+                  session packs and subscription renewals), in the currency each was charged in, and
                   dated by when Stripe took the money.
                 </Text>
                 {/* ── the refunds, which the GROSS sentence below never named ──
@@ -1968,7 +1968,7 @@ export default function TrainerPayments() {
                 // amount plus a fee, and the deadline goes past regardless.
                 <Flag tone={t.crit}>
                   We could not read whether you have any chargebacks, so this is not a statement
-                  that you have none. Your Stripe dashboard is the record — check it if a payment
+                  that you have none. Your Stripe dashboard is the record. Check it if a payment
                   has gone missing.
                 </Flag>
               ) : disputesStatus === 'partial' ? (
@@ -2292,7 +2292,7 @@ export default function TrainerPayments() {
                   <Flag tone={t.warn}>
                     At least {stranded} session{stranded === 1 ? '' : 's'} your clients paid for ran out of time before
                     {stranded === 1 ? ' it was' : ' they were'} used. Only part of your purchases loaded, so there may be more
-                    than this — the ones that did load are marked below.
+                    than this. The ones that did load are marked below.
                   </Flag>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{EXPIRY_IS_NOT_A_REFUND}</Text>
                 </View>
@@ -2342,9 +2342,9 @@ export default function TrainerPayments() {
                           // so neither can be absent, and a dash producer in a
                           // sentence is a hole where a word should be (check:prose).
                           ? (lost > 0
-                            ? `Ran out of time — ${lost} of ${sold} unused`
-                            : `Ran out of time — all ${sold} had been used`)
-                          : out ? `Used up — all ${fig(sold)} sessions` : `${fig(left)} of ${fig(sold)} left`}
+                            ? `Ran out of time · ${lost} of ${sold} unused`
+                            : `Ran out of time · all ${sold} had been used`)
+                          : out ? `Used up · all ${fig(sold)} sessions` : `${fig(left)} of ${fig(sold)} left`}
                         {b.package_name ? ' · ' + b.package_name : ''}
                         {' · '}{new Date(b.created_at).toLocaleDateString()}
                       </Text>
@@ -2547,12 +2547,12 @@ export default function TrainerPayments() {
               {pkgRead === 'error' ? (
                 <Flag tone={t.crit}>
                   Your packages could not be read, so this is not a list of what you sell. Do not add
-                  them again from here — reopen the screen once you have signal.
+                  them again from here. Reopen the screen once you have signal.
                 </Flag>
               ) : pkgRead === 'partial' ? (
                 <PartialRead what="packages" shown={activePkgs.length} onPress={() => { void load(); }} />
               ) : activePkgs.length === 0 ? (
-                <Text style={{ ...ty.label, color: t.ink3 }}>No packages yet. Add one below — a monthly membership or a pack of sessions.</Text>
+                <Text style={{ ...ty.label, color: t.ink3 }}>No packages yet. Add one below: a monthly membership or a pack of sessions.</Text>
               ) : null}
               {activePkgs.map((p, i) => (
                 <View key={p.id} style={{
@@ -2589,7 +2589,7 @@ export default function TrainerPayments() {
               {subsStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   We could not read your subscribers, so this is not a list of who is paying you. It is
-                  not a statement that nobody is — anyone subscribed still is.
+                  not a statement that nobody is. Anyone subscribed still is.
                 </Flag>
               ) : subsStatus === 'partial' ? (
                 <PartialRead what="subscribers" shown={subs.length} onPress={load} />
@@ -2718,7 +2718,7 @@ export default function TrainerPayments() {
                     </Flag>
                   ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    What your live subscriptions are priced at — what they are set to charge next,
+                    What your live subscriptions are priced at: what they are set to charge next,
                     if nobody cancels and no card fails. It is not money you have been paid. What
                     you have actually been paid is in Taken Through Stripe at the top, renewals
                     included.
@@ -2738,7 +2738,7 @@ export default function TrainerPayments() {
                 <>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                     Stopping a subscription ends it at the close of the period the client has already
-                    paid for — they keep what they bought, and are not charged again. You can put it
+                    paid for. They keep what they bought, and are not charged again. You can put it
                     back any time before it ends, and the client can do both from their Memberships
                     screen too. Ending one today is offered inside that confirmation, and it cannot
                     be undone.
@@ -2780,7 +2780,7 @@ export default function TrainerPayments() {
               {paysStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   Your renewals could not be read, so this is not a list of what your subscribers have
-                  paid. It is not a statement that nobody has renewed — every payment that has been
+                  paid. It is not a statement that nobody has renewed. Every payment that has been
                   taken has been taken, and Stripe still holds all of them.
                 </Flag>
               ) : paysStatus === 'partial' ? (
@@ -2843,7 +2843,7 @@ export default function TrainerPayments() {
               {paysStatus !== 'error' && pays.length ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                   Each line is one payment Stripe actually took, and giving one back does not stop the
-                  subscription — it keeps running and charges again next period. Stop it in Subscribers
+                  subscription. It keeps running and charges again next period. Stop it in Subscribers
                   above if that is what you mean.
                 </Text>
               ) : null}
@@ -2986,7 +2986,7 @@ export default function TrainerPayments() {
                   pkgRead === 'error' ? (
                     <Flag style={{ marginTop: sp.lg }}>
                       Your packages could not be read, so there is nothing to choose from here. That is not a
-                      statement that you have none on sale — anything already on sale still is.
+                      statement that you have none on sale. Anything already on sale still is.
                     </Flag>
                   ) : pkgRead === 'loading' ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Still reading your packages.</Text>
@@ -3014,7 +3014,7 @@ export default function TrainerPayments() {
             {/* ── add a package ──────────────────────────────────────────── */}
             <Section>
               <SectionHead title="Add a Package" />
-              <TextInput value={name} onChangeText={setName} placeholder="Name — e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Package name" />
+              <TextInput value={name} onChangeText={setName} placeholder="Name, e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Package name" />
 
               <View style={{ marginTop: sp.md }}>
                 {pick({
@@ -3084,7 +3084,7 @@ export default function TrainerPayments() {
                   holding. It did not, and that is the whole design. */}
               {!interval && sessions.trim() && parseInt(sessions, 10) > 0 ? (
                 <View style={{ marginTop: sp.md }}>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Valid For (Days — Blank = Never Expires)</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 5 }}>Valid For (Days, Blank = Never Expires)</Text>
                   <TextInput value={validity} onChangeText={setValidity} keyboardType="number-pad" placeholder="90" placeholderTextColor={t.ink3} style={input} />
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5 }}>
                     {validityLine(readValidityDays(validity).ok ? (readValidityDays(validity) as { ok: true; days: number | null }).days : null) ?? NO_VALIDITY_IS_FOREVER}
@@ -3156,7 +3156,7 @@ export default function TrainerPayments() {
                   from the first. */}
               <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
                 {refunding?.who || 'This client'}
-                {refunding && minorMoney(refunding.rule.amountCents, refunding.rule.currency) ? ` — ${minorMoney(refunding.rule.amountCents, refunding.rule.currency)} was charged` : ''}
+                {refunding && minorMoney(refunding.rule.amountCents, refunding.rule.currency) ? ` · ${minorMoney(refunding.rule.amountCents, refunding.rule.currency)} was charged` : ''}
               </Text>
               {refunding?.what ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refunding.what}</Text>
@@ -3328,7 +3328,7 @@ export default function TrainerPayments() {
               {editing && (editing.sessions != null || editing.billing_interval) ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   {editing.billing_interval
-                    ? 'How often this charges cannot be changed here — a running subscription bills on the schedule Stripe holds, and this screen would only be describing a different one.'
+                    ? 'How often this charges cannot be changed here. A running subscription bills on the schedule Stripe holds, and this screen would only be describing a different one.'
                     : 'How many sessions this grants cannot be changed here. Packs already bought keep the number they were sold with, so changing it would only alter what you believe you sold.'}
                 </Text>
               ) : null}

@@ -95,13 +95,13 @@ const SUGGESTIONS = [
 const SYSTEM =
   'You are a business assistant for a self-employed fitness coach. Answer only from the figures in the context. '
   + 'Never invent a figure, never name a client (you have not been given any names), and never state an amount of money '
-  + 'unless the currency field gives you an ISO code — write the code before the amount and never a currency symbol. '
+  + 'unless the currency field gives you an ISO code. Write the code before the amount and never a currency symbol. '
   + 'Where a figure is null or says "unknown", say you were not given it rather than guessing. '
   // The same two rules the Monday digest carries, in the same words, because
   // they are about the same two fields and a second wording is a second
   // definition. sessionsDeliveredThisMonth is counted from recorded outcomes
   // now, not from the clock, and the unmarked ones are their own state.
-  + 'sessionsDeliveredThisMonth counts only sessions whose outcome was recorded as completed — never describe it as '
+  + 'sessionsDeliveredThisMonth counts only sessions whose outcome was recorded as completed. Never describe it as '
   + 'sessions booked. sessionsStillUnmarked are sessions that happened and have no outcome recorded: they are neither '
   + 'delivered nor missed, so never add them to the delivered figure, and if there are any, say they are waiting to be '
   + 'marked. revenueAtOwnRate is those delivered sessions multiplied by the coach own session rate and is the coach own '
@@ -293,8 +293,8 @@ export default function TrainerAssistant() {
    */
   const adhGap = !figuresWhole || adhKnown.length ? null
     : roster.length === 0
-      ? 'unknown — there is nobody on this roster to have an adherence figure'
-      : 'unknown — not one of the ' + roster.length + ' clients on this roster has a check-in on record'
+      ? 'unknown: there is nobody on this roster to have an adherence figure'
+      : 'unknown: not one of the ' + roster.length + ' clients on this roster has a check-in on record'
         + (noRecord ? ' (' + noRecord + ' of them were added by hand and have no Repple account to record one with)' : '')
         + ', so state no adherence figure and do not say anyone is on track or at risk';
   const revenue = deliveredValue(month, sessionFee);
@@ -325,7 +325,7 @@ export default function TrainerAssistant() {
     const ctx = {
       sessionsDeliveredThisMonth: sessionsMo,
       sessionsStillUnmarked: unmarkedMo,
-      revenueAtOwnRate: revenue ?? 'unknown — no session rate set',
+      revenueAtOwnRate: revenue ?? 'unknown: no session rate set',
       // Was `gymCur ?? 'unknown — the gym has not set one, so state no amount'`
       // — one sentence for six different states. Four of them it describes
       // wrongly, and the commonest since part 940 is a coach with NO GYM, who
@@ -350,7 +350,7 @@ export default function TrainerAssistant() {
       avgAdherence: avgAdh != null
         ? adhKnown.length === roster.length
           ? avgAdh + '%'
-          : avgAdh + '% — averaged over the ' + adhKnown.length + ' of ' + roster.length
+          : avgAdh + '%, averaged over the ' + adhKnown.length + ' of ' + roster.length
             + ' clients who have a check-in on record, so it is not the whole book'
         : adhGap,
       // Was `roster.filter(atRiskClient).length`. `atRiskClient` is
@@ -391,7 +391,7 @@ export default function TrainerAssistant() {
       atRiskClients: !figuresWhole ? null
         : driftSubjects.length === 0
           ? (roster.length
-            ? 'unknown — all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
+            ? 'unknown: all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
               + 'account, so there is no training record to judge any of them by and nobody has been assessed'
             : null)
           : drift.drift && !drift.error && driftCovered
@@ -405,7 +405,7 @@ export default function TrainerAssistant() {
                 : n;
             })()
             : drift.note
-              ? 'unknown — ' + drift.note
+              ? 'unknown: ' + drift.note
               : null,
       // The three bands are counted over the clients who have an adherence on
       // record, which is narrower than the roster and narrower than
@@ -447,7 +447,7 @@ export default function TrainerAssistant() {
       unreadThreads: !figuresWhole ? null
         : driftSubjects.length === 0
           ? (roster.length
-            ? 'unknown — all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
+            ? 'unknown: all ' + roster.length + ' clients on this roster were added by hand and have no Repple '
               + 'account, so none of them is in a message thread and nobody has been counted'
             : null)
           : driftSubjects.some((c) => c.unread == null)
@@ -470,7 +470,7 @@ export default function TrainerAssistant() {
       content: answer.ok ? answer.reply
         : answer.reason === 'unavailable'
           ? 'The assistant is not switched on for this build, so nothing was sent and there is no answer. Every figure it would have used is on your Analytics screen.'
-          : 'That did not reach the assistant, so nothing came back. Nothing about your business was left half-sent — try again in a moment.',
+          : 'That did not reach the assistant, so nothing came back. Nothing about your business was left half-sent. Try again in a moment.',
     }]);
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 40);
   };
@@ -536,7 +536,7 @@ export default function TrainerAssistant() {
 
           {!coachAvailable() ? (
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-              The assistant is not switched on for this build. Nothing is sent anywhere and no question is answered — your figures are all on the Analytics screen.
+              The assistant is not switched on for this build. Nothing is sent anywhere and no question is answered. Your figures are all on the Analytics screen.
             </Flag>
           ) : null}
 
@@ -570,7 +570,7 @@ export default function TrainerAssistant() {
 
           {thread.status === 'partial' ? (
             <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
-              An earlier conversation is saved on this phone and could not be read this time. It has been left alone rather than written over, so anything you ask now is not being kept — try again after the next restart.
+              An earlier conversation is saved on this phone and could not be read this time. It has been left alone rather than written over, so anything you ask now is not being kept. Try again after the next restart.
             </Flag>
           ) : null}
 
@@ -592,7 +592,7 @@ export default function TrainerAssistant() {
               nobody has been shown. */}
           <View style={{ marginTop: sp.xl, borderTopWidth: hairline, borderTopColor: t.ring, paddingTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              No client is named to the assistant, so it cannot tell you who to message — it can tell you how many and what to do, and the names are on your own roster.
+              No client is named to the assistant, so it cannot tell you who to message. It can tell you how many and what to do, and the names are on your own roster.
             </Text>
             {/* Where the conversation itself is. Said here for the same
                 reason the member's screen says it: a record nobody has been
@@ -600,7 +600,7 @@ export default function TrainerAssistant() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
               {thread.kept
                 ? COACH_THREAD_KEPT_NOTE
-                : 'This conversation is not being kept — it goes when you leave the screen, and it is not stored on our servers either.'}
+                : 'This conversation is not being kept. It goes when you leave the screen, and it is not stored on our servers either.'}
             </Text>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center', flexWrap: 'wrap' }}>
               <Ghost label={showsDetail ? 'Hide the Detail' : 'What Gets Sent'} onPress={() => setShowsDetail((v) => !v)} />

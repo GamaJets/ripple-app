@@ -115,7 +115,7 @@ const SIGNED_OUT_MESSAGE = 'You are signed out. Sign in again and nothing will h
  * writes first must not borrow this sentence.
  */
 const AUTH_UNREADABLE_MESSAGE =
-  'We could not check your account just now, so nothing has been changed. That is our end rather than your sign-in — try again in a moment.';
+  'We could not check your account just now, so nothing has been changed. That is our end rather than your sign-in. Try again in a moment.';
 
 /**
  * What to put in front of somebody when an action could not establish who they
@@ -138,6 +138,7 @@ export function authGateMessage(fate: AuthReadFate): string {
  */
 export function authGateFault(fate: AuthReadFate): Error | null {
   return fate === 'unreadable'
+    // dash-ok: telemetry text, never shown to a person. Kept identical to its other copies so reportError files them as one error.
     ? new Error('auth read unreadable — who is signed in could not be established')
     : null;
 }

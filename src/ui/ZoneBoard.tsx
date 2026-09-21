@@ -54,7 +54,7 @@ export function ZoneNow({ zone, bpm, compact }: { zone: ZoneNo | null; bpm?: num
   // SENTENCE rule, which this component was outside of.
   const spoken = zone
     ? [`Zone ${zone}`, zoneName(zone), bpm ? `${bpm} beats per minute` : ''].filter(Boolean).join(', ')
-    : 'No heart rate — wear your watch';
+    : 'No heart rate. Wear your watch';
   return (
     <View accessible accessibilityLabel={spoken}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>

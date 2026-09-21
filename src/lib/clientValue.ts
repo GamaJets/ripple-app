@@ -466,12 +466,12 @@ export function unattributedLine(count: number, status: LoadStatus): string | nu
   const what = `recorded ${one ? 'payment is' : 'payments are'} not attached to anybody's account`;
   const why = 'cash from somebody you bill by hand has a name you typed and no Repple client behind it.';
   const outside = `${one ? 'It is' : 'They are'} real income and ${one ? 'it is' : 'they are'} not in any of the per-client figures here.`;
-  if (status === 'ready') return `${num(count)} ${what} — ${why} ${outside}`;
+  if (status === 'ready') return `${num(count)} ${what}: ${why} ${outside}`;
   // Truncated, failed or still in flight, the sentence is the same shape: the
   // count is a floor. Which of the three it was is already said, once, by the
   // reason under every per-client figure on the screen — repeating it here
   // would be the third statement of one fact.
-  return `At least ${num(count)} ${what} — ${why} The record of your cash and transfers did not come back whole, so that is a floor and not a count. ${outside}`;
+  return `At least ${num(count)} ${what}: ${why} The record of your cash and transfers did not come back whole, so that is a floor and not a count. ${outside}`;
 }
 
 /* ── what the figure is, said on the screen ───────────────────────────────── */
@@ -484,7 +484,7 @@ export function unattributedLine(count: number, status: LoadStatus): string | nu
  * strength of a number this app has not calculated and could not.
  */
 export const VALUE_IS_PAST =
-  'This is money already paid, added up. It is not a forecast of what somebody will be worth, and nothing here has been projected forward — a client who paid you every month for a year and stopped in March shows the year and says nothing about April.';
+  'This is money already paid, added up. It is not a forecast of what somebody will be worth, and nothing here has been projected forward. A client who paid you every month for a year and stopped in March shows the year and says nothing about April.';
 
 /**
  * That the cash half depends on the coach having written it down.
@@ -503,7 +503,7 @@ export const VALUE_NEEDS_YOUR_RECORDS =
  * there is one wording of this warning in the app.
  */
 export const VALUE_IS_NET_OF_REFUNDS =
-  'A refund is taken off the figure for the person it went back to. It is the one place in this app where that happens: every takings line is gross — what a client was charged — because that is what takings have always meant here, and what somebody has paid you and not had back is a different question. This section asks that one.';
+  'A refund is taken off the figure for the person it went back to. It is the one place in this app where that happens: every takings line is gross (what a client was charged) because that is what takings have always meant here, and what somebody has paid you and not had back is a different question. This section asks that one.';
 
 /**
  * What has gone back, beside the figure it has already come off.
@@ -533,7 +533,7 @@ export function refundedLine(v: ClientValue): string | null {
 }
 
 export const VALUE_MAY_DOUBLE_COUNT =
-  'A payment recorded by hand that Stripe also took is counted twice here. The two rows share nothing this app can read, so nothing can spot it — record only what did not go through Repple.';
+  'A payment recorded by hand that Stripe also took is counted twice here. The two rows share nothing this app can read, so nothing can spot it. Record only what did not go through Repple.';
 
 /**
  * The number of payments, ONLY when every read behind it was whole.

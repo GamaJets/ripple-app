@@ -153,7 +153,7 @@ export function pushLine(d: PushDisposition): string {
     case 'threw':
       return 'The delete of this handset’s notification registration could not be attempted to a conclusion, so the row may still be there.';
     case 'no-session':
-      return 'The session had already ended, so this handset’s notification registration could not be deleted from here — that delete is only possible from inside the session being ended. The row is still on the server. The reconciler in src/ui/settings.tsx removes it at the next launch on which somebody is signed in on this handset with notifications off.';
+      return 'The session had already ended, so this handset’s notification registration could not be deleted from here. That delete is only possible from inside the session being ended. The row is still on the server. The reconciler in src/ui/settings.tsx removes it at the next launch on which somebody is signed in on this handset with notifications off.';
     case 'already-revoked':
       return 'This handset had already been taken off that account’s notification list earlier in this session, and that is not repeated.';
   }

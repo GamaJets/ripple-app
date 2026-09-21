@@ -430,7 +430,7 @@ export function sessionRequestExpiry(startsAt: string): string | null {
  * until it has.
  */
 export function keptOnPhoneNote(noun: string): string {
-  return `Your ${noun} is saved on this phone and not sent yet — it goes up next time you have signal, and it won’t show up here until it has.`;
+  return `Your ${noun} is saved on this phone and not sent yet. It goes up next time you have signal, and it won’t show up here until it has.`;
 }
 
 /**
@@ -443,6 +443,6 @@ export function keptOnPhoneNote(noun: string): string {
  */
 export function notKeptNote(noun: string, why: 'full' | 'unavailable'): string {
   return why === 'full'
-    ? `Your ${noun} was not saved. This phone is already holding as much unsent work as it will hold — get some signal so what is waiting can go up, then try again.`
+    ? `Your ${noun} was not saved. This phone is already holding as much unsent work as it will hold. Get some signal so what is waiting can go up, then try again.`
     : `Your ${noun} was not saved and is not waiting to send. Nothing was kept, so try again once you have signal.`;
 }

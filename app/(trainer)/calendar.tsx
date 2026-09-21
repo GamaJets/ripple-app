@@ -956,7 +956,7 @@ export default function TrainerSchedule() {
     if (!availKnown) {
       Alert.alert(
         'Can’t Generate Slots Yet',
-        'Your weekly availability could not be read, so Repple does not know which times you offer — and an empty list here does not mean you have none set.\n\nNothing has been changed and nothing has been lost. Pull down to refresh and try again once you are connected.',
+        'Your weekly availability could not be read, so Repple does not know which times you offer, and an empty list here does not mean you have none set.\n\nNothing has been changed and nothing has been lost. Pull down to refresh and try again once you are connected.',
         [{ text: 'OK' }],
       );
       return;
@@ -987,10 +987,10 @@ export default function TrainerSchedule() {
       Alert.alert(
         'Can’t Generate Slots Yet',
         sessionsStatus === 'loading'
-          ? 'Your calendar is still being read, so Repple does not yet know what you already have booked — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Give it a moment and try again.'
+          ? 'Your calendar is still being read, so Repple does not yet know what you already have booked, and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Give it a moment and try again.'
           : sessionsStatus === 'partial'
-            ? 'There is more in your calendar than can be read in one go, so Repple cannot say what you already have booked at every one of these times — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Nothing has been changed.'
-            : 'Your calendar could not be read, so Repple does not know what you already have booked — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Pull down to refresh and try again.',
+            ? 'There is more in your calendar than can be read in one go, so Repple cannot say what you already have booked at every one of these times, and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Nothing has been changed.'
+            : 'Your calendar could not be read, so Repple does not know what you already have booked, and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Pull down to refresh and try again.',
         [{ text: 'OK' }],
       );
       return;
@@ -1040,7 +1040,7 @@ export default function TrainerSchedule() {
     const added = results.filter(Boolean).length;
     const lost = results.length - added;
     const lines = [
-      added + ' open slot' + (added === 1 ? '' : 's') + ' added across the next 4 weeks — your clients can book ' + (added === 1 ? 'it' : 'them') + ' now.',
+      added + ' open slot' + (added === 1 ? '' : 's') + ' added across the next 4 weeks. Your clients can book ' + (added === 1 ? 'it' : 'them') + ' now.',
     ];
     if (alreadyOpen) lines.push(alreadyOpen + ' time' + (alreadyOpen === 1 ? ' was' : 's were') + ' already open on your calendar, so ' + (alreadyOpen === 1 ? 'it was' : 'they were') + ' left as ' + (alreadyOpen === 1 ? 'it is' : 'they are') + '. Nothing was lost.');
     if (clash) lines.push(clash + ' time' + (clash === 1 ? ' was' : 's were') + ' skipped because you already have a session booked or time blocked then.');
@@ -1120,7 +1120,7 @@ export default function TrainerSchedule() {
     Alert.alert(
       `Remove ${n} Slot${n === 1 ? '' : 's'}?`,
       `This takes every weekly slot between ${avTime(avFrom, avFromMin)} and ${avTime(avTo, avToMin)} off ${dayNames}. `
-      + 'Open slots already generated from them are NOT withdrawn — anything a client has booked stays booked, '
+      + 'Open slots already generated from them are NOT withdrawn. Anything a client has booked stays booked, '
       + 'and anything still open stays open until it passes. This only stops new ones being generated.',
       [
         { text: 'Keep Them', style: 'cancel' },
@@ -1135,7 +1135,7 @@ export default function TrainerSchedule() {
             if (gone < n) {
               Alert.alert(
                 'Some Are Still There',
-                `${gone} of ${n} were removed. The rest are still on your week and still generating open slots — try again when you have a connection.`,
+                `${gone} of ${n} were removed. The rest are still on your week and still generating open slots. Try again when you have a connection.`,
                 [{ text: 'OK' }],
               );
             }
@@ -1150,7 +1150,7 @@ export default function TrainerSchedule() {
     Alert.alert(
       `Remove ${DOW[dow]}?`,
       `This takes all ${count} weekly slot${count === 1 ? '' : 's'} off ${DOW[dow]}. `
-      + 'Open slots already generated from them are NOT withdrawn — a client who has booked one keeps it, '
+      + 'Open slots already generated from them are NOT withdrawn. A client who has booked one keeps it, '
       + 'and anything still open stays open until it passes. This only stops new ones being generated.',
       [
         { text: 'Keep Them', style: 'cancel' },
@@ -1168,7 +1168,7 @@ export default function TrainerSchedule() {
             if (gone < mine.length) {
               Alert.alert(
                 'Some Are Still There',
-                `${gone} of ${mine.length} were removed. The rest are still on your week and still generating open slots — try again when you have a connection.`,
+                `${gone} of ${mine.length} were removed. The rest are still on your week and still generating open slots. Try again when you have a connection.`,
                 [{ text: 'OK' }],
               );
             }
@@ -1215,14 +1215,14 @@ export default function TrainerSchedule() {
     if (!availKnown) {
       Alert.alert(
         'Not Added',
-        `${when} was not added, and this may be because you already offer it — your weekly times could not be read, so Repple could not check first.\n\nNothing has been lost and nothing on your week has changed. Try again once you are connected, and do not remove anything on the strength of this.`,
+        `${when} was not added, and this may be because you already offer it. Your weekly times could not be read, so Repple could not check first.\n\nNothing has been lost and nothing on your week has changed. Try again once you are connected, and do not remove anything on the strength of this.`,
         [{ text: 'OK' }],
       );
       return;
     }
     Alert.alert(
       'Saved on This Phone Only',
-      `${when} is in your weekly list here, but it did not reach the server — so it is not on your other devices, and generating open slots from it may not work.\n\nIt has not been lost. Check your connection and remove and re-add it once you are back online.`,
+      `${when} is in your weekly list here, but it did not reach the server, so it is not on your other devices, and generating open slots from it may not work.\n\nIt has not been lost. Check your connection and remove and re-add it once you are back online.`,
       [{ text: 'OK' }],
     );
   };
@@ -1357,7 +1357,7 @@ export default function TrainerSchedule() {
     if (!res.ok) {
       Alert.alert(
         'Still Standing',
-        `${seriesLabel(s)} with ${who} is still running — that did not save, so nothing has changed, no session has been removed and ${who} has not been told.\n\n${res.error}`,
+        `${seriesLabel(s)} with ${who} is still running. That did not save, so nothing has changed, no session has been removed and ${who} has not been told.\n\n${res.error}`,
         [{ text: 'OK' }],
       );
       return;
@@ -1379,10 +1379,10 @@ export default function TrainerSchedule() {
       // rather than swallowed: a fee that appeared without anybody deciding to
       // charge one is the coach's to find, not ours to hide.
       + (r.charged
-        ? `The server reported a charge against this, which it should never do — check Late-Cancellation Fees below before you settle anything with ${who}.`
+        ? `The server reported a charge against this, which it should never do. Check Late-Cancellation Fees below before you settle anything with ${who}.`
         : 'Nothing was charged for any of them, however close they were.')
       + (s.nextAt
-        ? `\n\nThe next one — ${dateLabel(s.nextAt)} at ${timeLabel(s.nextAt)} — is still booked, on purpose. If that one has to go as well, cancel it on its own from that day and your notice policy prices that session alone.`
+        ? `\n\nThe next one, ${dateLabel(s.nextAt)} at ${timeLabel(s.nextAt)}, is still booked on purpose. If that one has to go as well, cancel it on its own from that day and your notice policy prices that session alone.`
         : ''),
       [{ text: 'Done' }],
     );
@@ -1949,7 +1949,7 @@ export default function TrainerSchedule() {
       if (announce) {
         Alert.alert(
           'Can’t Send Yet',
-          'Your Repple calendar could not be read, so Repple does not know what you have booked — and sending now would remove sessions from Google that are still here.\n\nNothing has been changed. Pull down to refresh and try again.',
+          'Your Repple calendar could not be read, so Repple does not know what you have booked, and sending now would remove sessions from Google that are still here.\n\nNothing has been changed. Pull down to refresh and try again.',
           [{ text: 'OK' }],
         );
       }
@@ -1959,7 +1959,7 @@ export default function TrainerSchedule() {
       if (announce) {
         Alert.alert(
           'Can’t Send Yet',
-          'Your class timetable could not be read in full, so Repple does not know which classes you teach — and sending now would remove the classes it has already written from your Google calendar, leaving those hours looking free to anybody reading it.\n\nNothing has been changed. Pull down to refresh and try again.',
+          'Your class timetable could not be read in full, so Repple does not know which classes you teach, and sending now would remove the classes it has already written from your Google calendar, leaving those hours looking free to anybody reading it.\n\nNothing has been changed. Pull down to refresh and try again.',
           [{ text: 'OK' }],
         );
       }
@@ -2190,7 +2190,7 @@ export default function TrainerSchedule() {
       Alert.alert(
         'Not Booked',
         `${timeLabel(s.startsAt)} with ${who} was not saved, so it is not on your calendar and ${who} has not been booked.\n\n` +
-          'Either the save failed, or somebody booked that time while this screen was open — your diary now allows only one session at a time. Pull down to refresh and check before trying again.',
+          'Either the save failed, or somebody booked that time while this screen was open. Your diary now allows only one session at a time. Pull down to refresh and check before trying again.',
         [{ text: 'OK' }],
       );
       return;
@@ -2200,7 +2200,7 @@ export default function TrainerSchedule() {
       'Session Booked',
       `${timeLabel(s.startsAt)} with ${who} is confirmed, and it is now on their calendar in the Repple app.\n\n` +
         (push.ok
-          ? `${who} was sent a notification — they will see it if they have notifications on.`
+          ? `${who} was sent a notification. They will see it if they have notifications on.`
           : `We couldn't send ${who} a notification${push.error ? ` (${push.error})` : ''}, so message them to let them know.`) +
         (caveat ? `\n\n${caveat}` : ''),
       [{ text: 'Great' }],
@@ -2310,7 +2310,7 @@ export default function TrainerSchedule() {
     let promotedTold: boolean | null = null;
     let offer: CancelOutcome['offer'] = null;
     if (promoted) {
-      promotedTold = (await sendPushChecked([promoted], 'The slot you were waiting for is yours', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} freed up and you were next on the list — it is booked for you.`, { route: '/(client)/calendar' })).ok;
+      promotedTold = (await sendPushChecked([promoted], 'The slot you were waiting for is yours', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} freed up and you were next on the list, so it is booked for you.`, { route: '/(client)/calendar' })).ok;
       // `mayOffer`: the broadcast is licensed by a PROVEN empty queue and by
       // nothing else, and that condition lives in src/lib/waitlistPromotion.ts.
       // Where the promotion did not come back, the hour stays open on the
@@ -2339,7 +2339,7 @@ export default function TrainerSchedule() {
         // `partial` (send-push could only part-read the handset list, so
         // whatever went out is a floor). All three were discarded here and all
         // three are what `reofferConfirmation` needs to say a true sentence.
-        const push = await sendPushChecked(openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available — first to book it gets it.`, { route: '/(client)/calendar' });
+        const push = await sendPushChecked(openTo, 'A slot just opened', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is available. First to book it gets it.`, { route: '/(client)/calendar' });
         offer = {
           asked: openTo.length,
           recorded: push.recorded,
@@ -2358,7 +2358,7 @@ export default function TrainerSchedule() {
     if (!r.freed) {
       Alert.alert(
         'Not Cancelled',
-        `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} is still booked — that did not save, so nothing has changed and nobody has been told. Try again.`,
+        `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} is still booked. That did not save, so nothing has changed and nobody has been told. Try again.`,
         [{ text: 'OK' }],
       );
       return;
@@ -2370,18 +2370,18 @@ export default function TrainerSchedule() {
       `${timeLabel(s.startsAt)} with ${nameOf(s.clientId)} was cancelled.\n\n` +
       (toldClient
         ? `${nameOf(s.clientId)} was sent a notification. `
-        : `We couldn’t notify ${nameOf(s.clientId)} — tell them yourself, especially if this session is soon. `) +
+        : `We couldn’t notify ${nameOf(s.clientId)}. Tell them yourself, especially if this session is soon. `) +
       (promoted
-        ? `The hour went straight to the next client on its waitlist${promotedTold === false ? ', though we couldn’t notify them — tell them yourself.' : ' and they have been told. Nobody had to race for it.'}`
+        ? `The hour went straight to the next client on its waitlist${promotedTold === false ? ', though we couldn’t notify them. Tell them yourself.' : ' and they have been told. Nobody had to race for it.'}`
         : `The slot is open again on your calendar. ` +
           // Before the roster question, because it is a different unknown and
           // a worse one: not "who could we ask" but "does this hour already
           // belong to somebody". Offering it round on top of that is how the
           // person at the head of the queue loses their own slot.
           (queueUnknown
-            ? 'Its waiting list could not be checked just now, so it has NOT been offered round — somebody may already be next in line for it. Pull down to refresh, and use Offer It Round once you can see the list.'
+            ? 'Its waiting list could not be checked just now, so it has NOT been offered round. Somebody may already be next in line for it. Pull down to refresh, and use Offer It Round once you can see the list.'
             : !rosterWhole
-            ? 'Your clients could not all be read just now, so it has NOT been offered round — that is a connection problem and not an empty book. Use Offer It Round once the list has loaded.'
+            ? 'Your clients could not all be read just now, so it has NOT been offered round. That is a connection problem and not an empty book. Use Offer It Round once the list has loaded.'
             : offer === null
             ? 'You have no other clients to offer it to.'
             : offer.ok
@@ -2400,7 +2400,7 @@ export default function TrainerSchedule() {
       // their coach called off the session. No policy applies to this path at
       // all, so nothing about money is printed on it.
       (insideNoticeWindow(s.startsAt, lcPolicy.noticeHours)
-        ? `\n\nThis was inside your ${noticeLabel(lcPolicy.noticeHours)} notice period, but you cancelled it — so nothing is charged to ${nameOf(s.clientId)}.`
+        ? `\n\nThis was inside your ${noticeLabel(lcPolicy.noticeHours)} notice period, but you cancelled it, so nothing is charged to ${nameOf(s.clientId)}.`
         : ''),
       [{ text: 'Done' }]
     );
@@ -2423,7 +2423,7 @@ export default function TrainerSchedule() {
       ]);
       return;
     }
-    Alert.alert('Waive This Fee?', `${sum} against ${who} would be marked as forgiven. The record stays — it shows as waived rather than disappearing — and neither of you owes anything on it.${unit}`, [
+    Alert.alert('Waive This Fee?', `${sum} against ${who} would be marked as forgiven. The record stays (it shows as waived rather than disappearing), and neither of you owes anything on it.${unit}`, [
       { text: 'Keep It', style: 'cancel' },
       { text: 'Waive', onPress: async () => {
         // A zero-row update is a success in PostgREST. `waiveFee` counts the
@@ -2538,7 +2538,7 @@ export default function TrainerSchedule() {
     Alert.alert(
       'Move This Session?',
       `${who} moves from ${fromLabel} to ${toLabel}.\n\n`
-      + 'Nothing is charged and no session comes off their pack — it is the same session at a different time. '
+      + 'Nothing is charged and no session comes off their pack. It is the same session at a different time. '
       + `${fromLabel} goes back on your calendar, or straight to whoever is first in line for it. `
       + 'They are notified once it has moved.',
       [
@@ -2704,7 +2704,7 @@ export default function TrainerSchedule() {
     if (s.status === 'blocked') {
       Alert.alert(
         'Free This Time Up?',
-        `${timeLabel(s.startsAt)} on ${dateOfLabel(new Date(s.startsAt))} is blocked, so nobody can book it. Freeing it lifts the block.\n\nAny open slots the block withdrew do not come back — put them up again with Generate Open Slots in Weekly Availability.`,
+        `${timeLabel(s.startsAt)} on ${dateOfLabel(new Date(s.startsAt))} is blocked, so nobody can book it. Freeing it lifts the block.\n\nAny open slots the block withdrew do not come back. Put them up again with Generate Open Slots in Weekly Availability.`,
         [
           { text: 'Keep It Blocked', style: 'cancel' },
           { text: 'Free It Up', style: 'destructive', onPress: async () => {
@@ -2742,11 +2742,11 @@ export default function TrainerSchedule() {
   // then waited on a slot nobody had been asked about.
   async function doReoffer(s: TrainingSession, ids: string[]) {
     const when = `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]}`;
-    const push = await sendPushChecked(ids, 'A slot just opened', `${when} is available — first to book it gets it.`, { route: '/(client)/calendar' });
+    const push = await sendPushChecked(ids, 'A slot just opened', `${when} is available. First to book it gets it.`, { route: '/(client)/calendar' });
     if (!push.ok) {
       Alert.alert(
         'Nobody Was Told',
-        `${when} is still open on your calendar, but the notification did not go out${push.error ? ` (${push.error})` : ''} — so none of your clients has been asked about it. Message them yourself, or try again.`,
+        `${when} is still open on your calendar, but the notification did not go out${push.error ? ` (${push.error})` : ''}, so none of your clients has been asked about it. Message them yourself, or try again.`,
         [{ text: 'OK' }],
       );
       return;
@@ -2794,7 +2794,7 @@ export default function TrainerSchedule() {
           : rosterStatus === 'error'
             ? 'Your clients could not be read, so Repple does not know who to offer this to. This is a connection problem, not an empty book.'
             : 'Only part of your roster loaded, so offering it now would skip the clients that are missing from the list.') +
-          '\n\nThe slot stays open on your calendar either way — pull down to refresh and try again.',
+          '\n\nThe slot stays open on your calendar either way. Pull down to refresh and try again.',
         [{ text: 'OK' }],
       );
       return;
@@ -2874,9 +2874,9 @@ export default function TrainerSchedule() {
    */
   const occurrenceLine = (o: CancelOption, s: RecurringSeries) => {
     const day = DOW_NAMES[((s.dow % 7) + 7) % 7];
-    const base = `Frees that one hour and leaves the standing appointment running — next ${day} is still next ${day}. Whoever is first on that session’s waitlist takes it.`;
+    const base = `Frees that one hour and leaves the standing appointment running: next ${day} is still next ${day}. Whoever is first on that session’s waitlist takes it.`;
     return o.verdict && o.verdict.kind !== 'in-time'
-      ? `${base} It is inside your ${noticeLabel(lcPolicy.noticeHours)} notice period, but you are the one cancelling it — so nothing is charged to ${seriesWho(s)}.`
+      ? `${base} It is inside your ${noticeLabel(lcPolicy.noticeHours)} notice period, but you are the one cancelling it, so nothing is charged to ${seriesWho(s)}.`
       : base;
   };
 
@@ -2935,7 +2935,7 @@ export default function TrainerSchedule() {
       // was kept. A sign-in still being restored is not a signed-out coach, and
       // this says which without sending anybody to sign in again.
       Alert.alert('Not Checked In',
-        `${who} was not marked present. Your sign-in has not come back yet, so there is nothing to record this against — try again in a moment.`);
+        `${who} was not marked present. Your sign-in has not come back yet, so there is nothing to record this against. Try again in a moment.`);
       return;
     }
     // The NAME and not the description. `who` is a noun phrase when the roster
@@ -2986,7 +2986,7 @@ export default function TrainerSchedule() {
 
   const exportSchedule = async () => {
     const evts = booked.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title: `Session · ${nameOf(s.clientId)}` }));
-    await shareIcs(buildIcs(evts, 'Repple — Coaching schedule'), 'repple-schedule.ics', 'Export Your Schedule');
+    await shareIcs(buildIcs(evts, 'Repple · Coaching schedule'), 'repple-schedule.ics', 'Export Your Schedule');
   };
 
   return (
@@ -3149,18 +3149,18 @@ export default function TrainerSchedule() {
             // they could not read on a bright screen.
             !known ? (
               <Flag tone={t.warn}>
-                Your calendar could not be read, so nothing can be shown for this day. This is a connection problem, not an empty day — do not book over it until it loads.
+                Your calendar could not be read, so nothing can be shown for this day. This is a connection problem, not an empty day. Do not book over it until it loads.
               </Flag>
             ) : (
               <Text style={{ ...ty.label, color: t.ink3 }}>
                 {sessionsStatus === 'loading'
                   ? 'Reading your calendar…'
                   : sessionsStatus === 'partial'
-                    ? 'Nothing came back for this day, but only part of your calendar loaded — so this day may not be empty. Pull down to refresh.'
+                    ? 'Nothing came back for this day, but only part of your calendar loaded, so this day may not be empty. Pull down to refresh.'
                     // A day with a class on it is not a free day, and the
                     // sentence that used to stand here said so by omission.
                     : selDayClasses.length > 0
-                      ? 'No one-to-ones this day. You are teaching below — tap Add to book somebody around it.'
+                      ? 'No one-to-ones this day. You are teaching below. Tap Add to book somebody around it.'
                       : 'No sessions this day. Tap Add to book one.'}
               </Text>
             )
@@ -3270,7 +3270,7 @@ export default function TrainerSchedule() {
                           // rather than as a number nobody has. The count is left out
                           // of the sentence instead of drawn as a dash inside it.
                           ? 'Only part of the waitlist loaded, so the number waiting is not known'
-                          : `${waitCounts.get(s.id)} waiting — cancelling hands it to whoever is first`}
+                          : `${waitCounts.get(s.id)} waiting. Cancelling hands it to whoever is first`}
                     </Text>
                   </View>
                 ) : null}
@@ -3551,7 +3551,7 @@ export default function TrainerSchedule() {
               rule 2 — so "nothing waiting" is withheld rather than stated. */}
           {!floor.queueRead ? (
             <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-              What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost — it is not being written over either.
+              What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost, and it is not being written over either.
             </Flag>
           ) : floorPendingNote(floor.unsent) ? (
             <>
@@ -3635,7 +3635,7 @@ export default function TrainerSchedule() {
                   ? (sessionsStatus === 'error'
                     ? 'Your calendar could not be read, so how many are waiting is not known. This is not a count of none.'
                     : 'Only part of your calendar loaded, so these cannot be counted. Open the queue to see them all.')
-                  : 'Completed, missed or cancelled — until each one is marked it is on nobody’s record and no credit or fee moves.'}
+                  : 'Completed, missed or cancelled? Until each one is marked it is on nobody’s record and no credit or fee moves.'}
                 age={oldest ? `Oldest · ${new Date(oldest.startsAt).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}` : undefined}
                 action={{ label: 'Mark', onPress: () => router.push('/(trainer)/sessions') }}
                 onPress={() => router.push('/(trainer)/sessions')}
@@ -3662,11 +3662,11 @@ export default function TrainerSchedule() {
               note={feeStatus === 'error' ? 'Not read' : feeStatus === 'partial' ? 'Part of the list' : undefined} />
             {feeStatus === 'error' ? (
               <Flag tone={t.warn}>
-                We couldn’t read your late-cancellation fees. This is not a statement that there are none — any fee already recorded still stands.
+                We couldn’t read your late-cancellation fees. This is not a statement that there are none. Any fee already recorded still stands.
               </Flag>
             ) : (<>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                Recorded when a client cancelled inside your notice period. Repple does not collect these — you settle them with the client.
+                Recorded when a client cancelled inside your notice period. Repple does not collect these. You settle them with the client.
               </Text>
               {lateFees.map((c, i) => (
                 <View key={c.id}>
@@ -3710,17 +3710,17 @@ export default function TrainerSchedule() {
               for the same contrast reason as the day above. */}
           {seriesStatus === 'error' ? (
             <Flag tone={t.warn}>
-              Your standing appointments could not be read, so none can be listed. This is a connection problem, not a statement that you have none — every arrangement you have agreed is still running, and its sessions are still on your calendar and your clients’. Setting a new one up is off until the list loads, so you can’t agree the same hour twice without seeing it.
+              Your standing appointments could not be read, so none can be listed. This is a connection problem, not a statement that you have none. Every arrangement you have agreed is still running, and its sessions are still on your calendar and your clients’. Setting a new one up is off until the list loads, so you can’t agree the same hour twice without seeing it.
             </Flag>
           ) : seriesStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your standing appointments…</Text>
           ) : standing.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {seriesStatus === 'partial'
-                ? 'Nothing came back, but only part of the list loaded — so this is not a statement that you have none. Pull down to refresh.'
+                ? 'Nothing came back, but only part of the list loaded, so this is not a statement that you have none. Pull down to refresh.'
                 : endedCount
                   ? `Nothing is standing right now. The ${endedCount === 1 ? 'one you ended is' : `${endedCount} you have ended are`} not listed here.`
-                  : 'No standing appointments yet. Set one up and the same hour is booked for the same client every week — neither of you has to book it again.'}
+                  : 'No standing appointments yet. Set one up and the same hour is booked for the same client every week, and neither of you has to book it again.'}
             </Text>
           ) : standing.map((s, i) => (
             <View key={s.id}>
@@ -3784,12 +3784,12 @@ export default function TrainerSchedule() {
           {!known || sessionsStatus === 'loading' || !countable || totalSlots === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {!known
-                ? 'Your calendar could not be read, so these are not counts of your week — they are dashes because the numbers are unknown. Nothing has been cancelled. Pull down to refresh.'
+                ? 'Your calendar could not be read, so these are not counts of your week. They are dashes because the numbers are unknown. Nothing has been cancelled. Pull down to refresh.'
                 : sessionsStatus === 'loading'
                   ? 'Reading your calendar…'
                   : !countable
                     ? 'Only part of your calendar loaded, so it cannot be counted. The days above show what did come back.'
-                    : 'Nothing scheduled yet — add a session or set your weekly availability.'}
+                    : 'Nothing scheduled yet. Add a session or set your weekly availability.'}
             </Text>
           ) : null}
         </View>
@@ -3829,7 +3829,7 @@ export default function TrainerSchedule() {
                   : `Booked sessions from ${range} are not counted, because this week was not read in full`} />
               {!covered ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                  {sessionsStatus === 'loading' ? 'Reading your calendar…' : 'This week was not read in full, so no bars are drawn — a missing bar here is not an empty day.'}
+                  {sessionsStatus === 'loading' ? 'Reading your calendar…' : 'This week was not read in full, so no bars are drawn. A missing bar here is not an empty day.'}
                 </Text>
               ) : null}
             </Section>
@@ -3864,7 +3864,7 @@ export default function TrainerSchedule() {
               {bookedAheadHeading(ahead.length) ? (
                 <>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                    {bookedAheadHeading(ahead.length)} — what each of them has taken, soonest first.
+                    {bookedAheadHeading(ahead.length)}: what each of them has taken, soonest first.
                   </Text>
                   {ahead.map((a, i) => {
                     const tap = tapOf(a.clientId);
@@ -3942,7 +3942,7 @@ export default function TrainerSchedule() {
               {unrebookedHeading(quiet.length) ? (
                 <>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                    {unrebookedHeading(quiet.length)} — they trained with you recently and have nothing in your diary.
+                    {unrebookedHeading(quiet.length)}. They trained with you recently and have nothing in your diary.
                   </Text>
                   {quiet.map((u, i) => {
                     const tap = tapOf(u.clientId);
@@ -4050,7 +4050,7 @@ export default function TrainerSchedule() {
           // not read sends them to re-enter times that are already on the
           // server — where the unique index refuses each one.
           availabilityNote={!availKnown
-            ? (availStatus === 'loading' ? 'Reading the times you offer…' : 'Your weekly times could not be read in full — this is not "none set"')
+            ? (availStatus === 'loading' ? 'Reading the times you offer…' : 'Your weekly times could not be read in full. This is not "none set"')
             : availSlots.length
               ? `${availSlots.length} weekly slot${availSlots.length === 1 ? '' : 's'} · generate the next 4 weeks`
               : 'Set the times you offer every week'}
@@ -4124,7 +4124,7 @@ export default function TrainerSchedule() {
             {availStatus === 'error' ? (
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                 Your weekly times could not be read, so we cannot say which ones you offer. This is
-                not "none set" — anything already on your week is still there and still bookable, so
+                not "none set". Anything already on your week is still there and still bookable, so
                 adding a time you already offer will be refused.
               </Text>
             ) : availStatus === 'loading' ? (
@@ -4348,7 +4348,7 @@ export default function TrainerSchedule() {
             <>
               <Ghost label="Generate Open Slots · Next 4 Weeks" onPress={generateSlots} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
-                Add your hours above first — there is nothing to open yet.
+                Add your hours above first. There is nothing to open yet.
               </Text>
             </>
           ) : (
@@ -4366,7 +4366,7 @@ export default function TrainerSchedule() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Block Out Time</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
-            {DOW[selDate.getDay()]} {selD} {MON_SHORT[selM]} — nobody can book across this, and any open slots inside it are withdrawn.
+            {DOW[selDate.getDay()]} {selD} {MON_SHORT[selM]}. Nobody can book across this, and any open slots inside it are withdrawn.
           </Text>
           <ScrollView showsVerticalScrollIndicator={false}>
             <View style={{ flexDirection: 'row', gap: sp.sm, paddingBottom: sp.md }}>
@@ -4439,7 +4439,7 @@ export default function TrainerSchedule() {
               // seventeen days, not twenty, and a button promising twenty would
               // be wrong before it was pressed.
               : (blockPlanLabel({ from: selDay, days: blkDays, repeatWeeks: blkWeeks }) ?? 'Block This Day')
-                + (blkAllDay ? '' : ` · ${hourLabel(blkFrom)} — ${hourLabel(blkTo)}`)}
+                + (blkAllDay ? '' : ` · ${hourLabel(blkFrom)} to ${hourLabel(blkTo)}`)}
             onPress={doBlock} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => setBlockOpen(false)} />
@@ -4960,7 +4960,7 @@ export default function TrainerSchedule() {
             {roster.length === 0 ? (
               rosterStatus === 'error' ? (
                 <Flag tone={t.warn} style={{ marginBottom: sp.xl }}>
-                  Your clients could not be read, so none can be listed here. This is a connection problem, not an empty book — you can still add an open slot.
+                  Your clients could not be read, so none can be listed here. This is a connection problem, not an empty book. You can still add an open slot.
                 </Flag>
               ) : (
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
@@ -5008,7 +5008,7 @@ export default function TrainerSchedule() {
             {roster.length === 0 ? (
               rosterStatus === 'error' ? (
                 <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
-                  Your clients could not be read, so none can be listed. This is a connection problem, not an empty book — pull down on the calendar to refresh and try again.
+                  Your clients could not be read, so none can be listed. This is a connection problem, not an empty book. Pull down on the calendar to refresh and try again.
                 </Flag>
               ) : (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -5064,7 +5064,7 @@ export default function TrainerSchedule() {
             {!devTz ? (<>
               <View style={{ height: sp.sm }} />
               <Flag tone={t.warn}>
-                This device can’t say what time zone it is in, and a weekly appointment has to be stored against one — otherwise seven in the morning quietly becomes six or eight the Sunday the clocks move. Set the zone in your phone’s settings and come back.
+                This device can’t say what time zone it is in, and a weekly appointment has to be stored against one. Otherwise seven in the morning quietly becomes six or eight the Sunday the clocks move. Set the zone in your phone’s settings and come back.
               </Flag>
             </>) : null}
           </ScrollView>
@@ -5136,9 +5136,9 @@ export default function TrainerSchedule() {
                       ) : (
                         <Flag tone={t.warn}>
                           {!endFor.nextAt
-                            ? 'There is no next session on the books to cancel — either it has not been written out yet, or it has already been cancelled.'
+                            ? 'There is no next session on the books to cancel. Either it has not been written out yet, or it has already been cancelled.'
                             : !known
-                              ? 'Your calendar could not be read, so that session cannot be found to cancel. This is a connection problem — pull down to refresh and try again. The arrangement itself is untouched.'
+                              ? 'Your calendar could not be read, so that session cannot be found to cancel. This is a connection problem. Pull down to refresh and try again. The arrangement itself is untouched.'
                               : 'That session is not among the ones this screen has loaded. Open its day on the calendar above and cancel it from there.'}
                         </Flag>
                       )}

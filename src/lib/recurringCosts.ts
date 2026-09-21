@@ -162,7 +162,7 @@ export interface CostTemplateDraft {
  * at all, past a lock they cannot reopen without a reason.
  */
 export const TEMPLATES_NEVER_POST =
-  'Nothing here records a cost by itself. A template fills the form in and you press Record, because Repple has no way of knowing whether the money actually went out — a direct debit can bounce, a landlord can give a rent holiday, an insurer can be changed mid-term, and a month the gym was shut is a month the cleaner did not come. A line that appeared on its own would be money this gym never paid, sitting in the book your accountant works from.';
+  'Nothing here records a cost by itself. A template fills the form in and you press Record, because Repple has no way of knowing whether the money actually went out: a direct debit can bounce, a landlord can give a rent holiday, an insurer can be changed mid-term, and a month the gym was shut is a month the cleaner did not come. A line that appeared on its own would be money this gym never paid, sitting in the book your accountant works from.';
 
 /**
  * What a carried amount is, said beside the amount box.
@@ -173,7 +173,7 @@ export const TEMPLATES_NEVER_POST =
  * owner look at the number rather than at the button.
  */
 export const CARRIED_IS_NOT_INCURRED =
-  'The amount came from the template, not from a bill. Check it against what you were actually charged before you record it — a figure carried forward is last time’s figure, and rents, premiums and licence fees all move.';
+  'The amount came from the template, not from a bill. Check it against what you were actually charged before you record it. A figure carried forward is last time’s figure, and rents, premiums and licence fees all move.';
 
 /**
  * Why the form makes the payee compulsory when the column does not.
@@ -183,7 +183,7 @@ export const CARRIED_IS_NOT_INCURRED =
  * until somebody explains that it is the only thing that can match the two.
  */
 export const TEMPLATE_NEEDS_A_PAYEE =
-  'A template needs the payee, even though a one-off cost does not. It is the only thing that can tell this arrangement apart from every other cost in its category — without it, nothing can say whether this month’s bill has been entered yet.';
+  'A template needs the payee, even though a one-off cost does not. It is the only thing that can tell this arrangement apart from every other cost in its category. Without it, nothing can say whether this month’s bill has been entered yet.';
 
 /**
  * The sentence under an empty template list, which depends entirely on the read.
@@ -200,7 +200,7 @@ export function templatesEmptyLine(status: LoadStatus): string {
     return 'There are more standing arrangements than could be read in one request, so this list is not all of them.';
   }
   if (status === 'loading') return 'Still reading.';
-  return 'Nothing is set up to repeat. A gym pays most of the same suppliers every month — the landlord, the power, the cleaner, the music licence, the accountant — and setting each one up once means filling the form with one press instead of retyping it twelve times a year.';
+  return 'Nothing is set up to repeat. A gym pays most of the same suppliers every month (the landlord, the power, the cleaner, the music licence, the accountant), and setting each one up once means filling the form with one press instead of retyping it twelve times a year.';
 }
 
 /* ── what a person typed, judged ──────────────────────────────────────────── */
@@ -240,7 +240,7 @@ export function templateBlockers(d: CostTemplateDraft): string[] {
   if (typed) {
     const cur = (d.currency || '').trim();
     if (!cur) {
-      out.push('This gym has not set its currency, so a usual amount cannot be read. Leave the amount blank, or set the currency on the Gym screen — Repple is white-labelled and there is no default that is right for every gym.');
+      out.push('This gym has not set its currency, so a usual amount cannot be read. Leave the amount blank, or set the currency on the Gym screen. Repple is white-labelled and there is no default that is right for every gym.');
     } else {
       // The reader's own refusal, so a gym in Kuwait is told the last place must
       // be a nought and a gym in Japan is told a yen has no smaller unit.
@@ -249,9 +249,9 @@ export function templateBlockers(d: CostTemplateDraft): string[] {
       const read = readMinorAmount(typed, cur, false);
       if (!read.ok) out.push(read.reason);
       else if (read.minorUnits <= 0) {
-        out.push('A usual amount of nothing is not an amount. Leave it blank if the bill varies — that is what blank means here.');
+        out.push('A usual amount of nothing is not an amount. Leave it blank if the bill varies; that is what blank means here.');
       } else if (read.minorUnits >= GYM_COST_MAX_MINOR) {
-        out.push('That is more than Repple will record on one cost line — check the zeros.');
+        out.push('That is more than Repple will record on one cost line. Check the zeros.');
       }
     }
   }
@@ -504,7 +504,7 @@ export function carryForward(
   if (when === 'ended') {
     return {
       ok: false,
-      why: `This arrangement ended on ${t.endsOn}, which is before the month on screen. If the gym did pay this supplier in this month, record it on the form above — the template is not the record.`,
+      why: `This arrangement ended on ${t.endsOn}, which is before the month on screen. If the gym did pay this supplier in this month, record it on the form above. The template is not the record.`,
     };
   }
 
@@ -525,7 +525,7 @@ export function carryForward(
   } else if (!gymCcy) {
     withheld = 'This gym has not set a currency, so the usual amount could not be filled in. Nothing else on this template has changed.';
   } else if (t.currency.trim().toUpperCase() !== gymCcy) {
-    withheld = `This template’s usual amount is in ${t.currency.trim().toUpperCase()} and costs here are recorded in ${gymCcy}. Repple holds no exchange rate and will not convert one, so the amount box has been left empty — type what actually went out, in ${gymCcy}.`;
+    withheld = `This template’s usual amount is in ${t.currency.trim().toUpperCase()} and costs here are recorded in ${gymCcy}. Repple holds no exchange rate and will not convert one, so the amount box has been left empty. Type what actually went out, in ${gymCcy}.`;
   } else {
     // Back through the reader that knows the factor is 1, 100 or 1000. A yen
     // template read as `cents / 100` would fill the box with a hundredth of the

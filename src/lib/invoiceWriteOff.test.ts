@@ -84,7 +84,7 @@ ok(writeOffBlocker('paid' as any, 'member emigrated in June') != null,
     droppedAt: '2026-09-12T10:00:00.000Z', dropReason: 'member emigrated', droppedByName: 'Ana',
   }), '12 Sep 2026');
   eq(h.state, 'dropped', 'a written-off invoice with a reason reads as one');
-  ok(/Written off on 12 Sep 2026 by Ana — member emigrated/.test(line(h)),
+  ok(/Written off on 12 Sep 2026 by Ana: member emigrated/.test(line(h)),
     'and the line carries when, who and why');
 }
 {

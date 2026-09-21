@@ -418,7 +418,7 @@ export default function ClientPhotos() {
         {r.status === 'error' ? (
           <Section>
             <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Nobody is listed below because the list did not come back — not because your book is empty. Open this again once you are connected." />
+              note="Nobody is listed below because the list did not come back, not because your book is empty. Open this again once you are connected." />
           </Section>
         ) : null}
 
@@ -439,7 +439,7 @@ export default function ClientPhotos() {
 
               {err ? (
                 <Notice tone={t.warn} kicker="Not Loaded" title="Their photos could not be read"
-                  note={`${err} That is not the same as ${firstName} having sent none — nothing came back, so this screen cannot say either way.`} />
+                  note={`${err} That is not the same as ${firstName} having sent none. Nothing came back, so this screen cannot say either way.`} />
               ) : !askable ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   You added {firstName} to your book yourself, so they have no Repple account and no
@@ -458,7 +458,7 @@ export default function ClientPhotos() {
                 </Text>
               ) : reason === 'none' ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
-                  {firstName} has not sent you any progress photos. There is nothing to turn on —
+                  {firstName} has not sent you any progress photos. There is nothing to turn on:
                   a photo reaches you only when they send that photo.
                 </Text>
               ) : inbox ? (

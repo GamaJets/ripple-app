@@ -325,9 +325,9 @@ export function combineRefusalNote(c: Combined): string {
     case 'channel-unread':
       return `${channelList(c.missing)} could not be read, so there is no total: what the other channels reported is not all of your ad spend, and printing it as though it were would make every channel look cheaper than it is. Each channel's own figure is below. Check ${channelList(c.missing)} again, and the total comes back on its own.`;
     case 'currency-clash':
-      return `Your ad accounts bill in ${c.currencies.join(' and ')}, and those do not add together — the result would not be an amount of any money. Each channel's own figure is below, in its own currency. Repple will not convert one into the other, because the rate would be one nobody chose.`;
+      return `Your ad accounts bill in ${c.currencies.join(' and ')}, and those do not add together. The result would not be an amount of any money. Each channel's own figure is below, in its own currency. Repple will not convert one into the other, because the rate would be one nobody chose.`;
     case 'no-currency':
-      return 'Every connected channel was read and none of them has any ads in it, so there is nothing to total and no currency to total it in. A code you promote without paying for it will never appear here — no ad spend is unknown, not free.';
+      return 'Every connected channel was read and none of them has any ads in it, so there is nothing to total and no currency to total it in. A code you promote without paying for it will never appear here. No ad spend is unknown, not free.';
   }
 }
 
@@ -338,7 +338,7 @@ export function channelStateNote(c: AdChannel, state: ChannelRunState): string {
     case 'never':
       return `${name} is connected and has never been checked, so what you have spent there is unknown rather than nothing. Press Check Now and it will be counted.`;
     case 'failed':
-      return `The last ${name} check failed, so what you have spent there is unknown. Nothing was recorded from it — a failed check knows no figures, so it writes none.`;
+      return `The last ${name} check failed, so what you have spent there is unknown. Nothing was recorded from it: a failed check knows no figures, so it writes none.`;
     case 'ok':
       return `${name} answered, and what it reported is counted below.`;
   }
@@ -359,7 +359,7 @@ export const NO_TOTAL_NOTE =
  */
 export function coverageNote(channels: readonly AdChannel[]): string {
   if (!channels.length) return 'No ad account is connected, so this covers nothing that was spent on ads.';
-  return `This covers ${channelList(channels)}. Money you spent anywhere else — a boosted post paid for on somebody else's card, a gym noticeboard, a flyer — is not in it and never will be, so a code with nothing against it here is a code whose cost is unknown rather than nought.`;
+  return `This covers ${channelList(channels)}. Money you spent anywhere else (a boosted post paid for on somebody else's card, a gym noticeboard, a flyer) is not in it and never will be, so a code with nothing against it here is a code whose cost is unknown rather than nought.`;
 }
 
 /**
@@ -382,10 +382,10 @@ export function coverageNote(channels: readonly AdChannel[]): string {
 export function channelSetupNote(c: AdChannel): string {
   switch (c) {
     case 'meta':
-      return 'Connecting a Meta ad account is not set up here — the owner sets EXPO_PUBLIC_META_ADS_CLIENT_ID (the Meta app id) and the META_ADS_CLIENT_SECRET Supabase secret.';
+      return 'Connecting a Meta ad account is not set up here. The owner sets EXPO_PUBLIC_META_ADS_CLIENT_ID (the Meta app id) and the META_ADS_CLIENT_SECRET Supabase secret.';
     case 'google':
-      return 'Connecting a Google Ads account is not set up here — the owner sets EXPO_PUBLIC_GOOGLE_ADS_CLIENT_ID (the Google Cloud OAuth client id) and, as Supabase secrets, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN. The developer token is issued by Google against a Google Ads manager account and has to be approved before it reads a live account.';
+      return 'Connecting a Google Ads account is not set up here. The owner sets EXPO_PUBLIC_GOOGLE_ADS_CLIENT_ID (the Google Cloud OAuth client id) and, as Supabase secrets, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN. The developer token is issued by Google against a Google Ads manager account and has to be approved before it reads a live account.';
     case 'tiktok':
-      return 'Connecting a TikTok ad account is not set up here — the owner sets EXPO_PUBLIC_TIKTOK_ADS_APP_ID (the TikTok for Business app id) and the TIKTOK_ADS_APP_SECRET Supabase secret.';
+      return 'Connecting a TikTok ad account is not set up here. The owner sets EXPO_PUBLIC_TIKTOK_ADS_APP_ID (the TikTok for Business app id) and the TIKTOK_ADS_APP_SECRET Supabase secret.';
   }
 }

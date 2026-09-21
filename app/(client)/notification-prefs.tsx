@@ -115,7 +115,7 @@ import { useNow } from '../../src/ui/today';
  *  set on another handset with whatever this one happens to show. */
 const QUIET_READ_FAILED =
   'Your quiet hours could not be read from your account, so they are not shown and cannot be changed here right '
-  + 'now. That is a read that failed rather than an answer — open this again once you have signal.';
+  + 'now. That is a read that failed rather than an answer. Open this again once you have signal.';
 
 /** Saved, on a server that does not apply the remote half. The local effect is
  *  real and is stated; the remote one is not claimed. */
@@ -128,7 +128,7 @@ const QUIET_PHONE_ONLY_SAVED =
  *  thing that was never checked. */
 const QUIET_PHONE_ONLY_UNSTORED =
   'Applied for now, and not stored. Reminders this app sets will wait for the morning until the app next starts, and '
-  + 'then these hours will be gone \u2014 this phone refused to keep them. Anything sent to you is unaffected either way.';
+  + 'then these hours will be gone, because this phone refused to keep them. Anything sent to you is unaffected either way.';
 
 /** Turned off on such a server. */
 const QUIET_PHONE_ONLY_OFF =
@@ -136,7 +136,7 @@ const QUIET_PHONE_ONLY_OFF =
 
 /** Turned off on this phone for this session only, because the store refused. */
 const QUIET_PHONE_ONLY_OFF_UNSTORED =
-  'Quiet hours are off on this phone for now, and that was not stored \u2014 they will be back on the next time the app '
+  'Quiet hours are off on this phone for now, and that was not stored. They will be back on the next time the app '
   + 'starts, because this phone refused to keep the change.';
 
 /** Turned off, both halves. Says what now arrives rather than "done". */
@@ -186,7 +186,7 @@ const QUIET_UNSAVED =
 const PHONE_READ_FAILED_TITLE = 'Your choices could not be read off this phone';
 const PHONE_READ_FAILED =
   'What is switched on below is this screen\u2019s starting point rather than yours, so these switches and Quiet Hours '
-  + 'are off \u2014 changing one would store this starting point over every answer you have given, including your quiet '
+  + 'are off. Changing one would store this starting point over every answer you have given, including your quiet '
   + 'hours. What you set before is still saved and still being applied. Close this screen and open it again.';
 
 /** A switch was touched while that was true. Nothing moved — said, rather than
@@ -194,12 +194,12 @@ const PHONE_READ_FAILED =
 const PHONE_WRITE_REFUSED_TITLE = 'Your Choices Could Not Be Read';
 const PHONE_WRITE_REFUSED =
   'Nothing has been changed. This phone did not hand over the choices you have already made, so what is on screen is '
-  + 'not them \u2014 saving now would replace them. Close this screen and open it again.';
+  + 'not them, so saving now would replace them. Close this screen and open it again.';
 
 /** The store refused the write. The switch stands for this session and is
  *  honoured, and it will not survive the next launch. Never "Saved". */
 const PHONE_NOT_STORED =
-  'That is applied for now, but this phone would not store it \u2014 so it will be back as it was the next time the app '
+  'That is applied for now, but this phone would not store it, so it will be back as it was the next time the app '
   + 'starts. Nothing else you have set has changed.';
 
 /** Tapped while the account read has not landed or has failed. Not a save and
@@ -211,7 +211,7 @@ const CHANNEL_NOT_READ =
 /** The server refused, or the write reached nothing. `setChannel` counts rows
  *  rather than trusting the absence of an error, so this covers both. */
 const CHANNEL_NOT_SAVED =
-  'That change was not saved, so nothing has moved — your notifications carry on exactly as they were. Try again once you have signal.';
+  'That change was not saved, so nothing has moved. Your notifications carry on exactly as they were. Try again once you have signal.';
 
 /**
  * The one thing the master switch does that these cannot.
@@ -608,7 +608,7 @@ export default function NotificationPrefs() {
                 {quietEmpty ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
-                    <Text style={{ ...ty.caption, color: t.ink2 }}>Nothing would be held — the two hours are the same, so the window is empty.</Text>
+                    <Text style={{ ...ty.caption, color: t.ink2 }}>Nothing would be held. The two hours are the same, so the window is empty.</Text>
                   </View>
                 ) : null}
 
@@ -705,7 +705,7 @@ export default function NotificationPrefs() {
                       not the position has been read, and dropping the note
                       would leave a row that says only that something failed. */}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                    {state === 'unknown' ? `${CHANNEL_UNKNOWN_LABEL} — ${c.note}` : c.note}
+                    {state === 'unknown' ? `${CHANNEL_UNKNOWN_LABEL} · ${c.note}` : c.note}
                   </Text>
                 </View>
                 <TriSwitch t={t} label={c.title} state={state}
@@ -739,7 +739,7 @@ export default function NotificationPrefs() {
         <Section>
           <Expandable title="Where These Are Kept">
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            The switches under What This App Sends are kept on this phone, and only this phone. If you use the app on a second phone, that one has its own answers — and signing out clears them, so the next person to sign in here starts from the defaults rather than yours. The switches under Sent To You are the other way round: they are stored on your account, so they are the same wherever you sign in. Quiet hours are both — the account holds the window that stops what is sent to you, and this phone holds the one that delays the reminders it sets itself.
+            The switches under What This App Sends are kept on this phone, and only this phone. If you use the app on a second phone, that one has its own answers, and signing out clears them, so the next person to sign in here starts from the defaults rather than yours. The switches under Sent To You are the other way round: they are stored on your account, so they are the same wherever you sign in. Quiet hours are both: the account holds the window that stops what is sent to you, and this phone holds the one that delays the reminders it sets itself.
           </Text>
           </Expandable>
         </Section>

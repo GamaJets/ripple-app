@@ -148,7 +148,7 @@ export default function CoachAccount() {
       // signing a coach out of the gym's iPad mid-session is its own harm.
       // `endOtherSessions` keeps THIS session — see the note on it.
       Alert.alert('Password Changed',
-        'Your new password is in place. Anywhere else you are signed in stays signed in until that session expires — including any phone or tablet you no longer have, and anything signed in to your account can read your clients’ records.',
+        'Your new password is in place. Anywhere else you are signed in stays signed in until that session expires, including any phone or tablet you no longer have, and anything signed in to your account can read your clients’ records.',
         [
           { text: 'Leave Them', style: 'cancel' },
           {
@@ -162,7 +162,7 @@ export default function CoachAccount() {
                 out.ok ? 'Signed Out Everywhere Else' : 'Still Signed in Elsewhere',
                 out.ok
                   ? 'Every other phone, tablet and browser signed in to this account has been signed out. This phone stays signed in, and your new password is what gets any of them back.'
-                  : `${out.note} Your password HAS been changed, so nothing new can sign in — but a device already signed in may still be. Try again in a moment.`,
+                  : `${out.note} Your password HAS been changed, so nothing new can sign in, but a device already signed in may still be. Try again in a moment.`,
               );
             },
           },
@@ -196,7 +196,7 @@ export default function CoachAccount() {
         return;
       }
       if (res.outcome === 'pending') {
-        Alert.alert('Check Your Inbox — Nothing Has Changed Yet',
+        Alert.alert('Check Your Inbox: Nothing Has Changed Yet',
           `We have sent a confirmation to ${res.requested}. Your account still uses ${signInAddress(email)} and will keep using it until you open that link.\n\n`
           + 'If the link is never opened, nothing happens and your old address goes on working.');
         return;

@@ -77,8 +77,8 @@ export const isDropStatus = (s: string | null | undefined): s is DropStatus =>
  * needs and it is not obvious from the two words.
  */
 export const DROP_MEANS: Record<DropStatus, string> = {
-  void: 'Void — this bill should never have existed. Wrong member, wrong amount, a duplicate, or something that was not delivered. Nothing was owed, so nothing has been lost.',
-  written_off: 'Written off — the bill was right and the money is not coming. Something WAS owed and the gym is taking the loss, which is a different line in the accounts.',
+  void: 'Void: this bill should never have existed. Wrong member, wrong amount, a duplicate, or something that was not delivered. Nothing was owed, so nothing has been lost.',
+  written_off: 'Written off: the bill was right and the money is not coming. Something WAS owed and the gym is taking the loss, which is a different line in the accounts.',
 };
 
 /** The question, asked in the words of the decision being made. A single
@@ -121,7 +121,7 @@ export function writeOffBlocker(status: DropStatus, reason: string): string | nu
       : 'Say why this money is not being collected. A bad debt with no reason on it is a figure in the accounts that nobody can explain, and it is the one an accountant asks about first.';
   }
   if (r.length < MIN_REASON_CHARS) {
-    return `That is too short to be a reason. A few words — “member emigrated”, “billed twice”, “class never ran” — is all this needs, and “${r}” will mean nothing to whoever reads it next year.`;
+    return `That is too short to be a reason. A few words (“member emigrated”, “billed twice”, “class never ran”) is all this needs, and “${r}” will mean nothing to whoever reads it next year.`;
   }
   if (r.length > MAX_REASON_CHARS) {
     return `That is longer than this holds. Keep the reason to a sentence or two; the detail belongs wherever the correspondence is.`;
@@ -204,7 +204,7 @@ export function writeOffHistory(
   if (isDropStatus(status)) {
     const word = status === 'void' ? 'Voided' : 'Written off';
     if (rec.droppedAt && rec.dropReason) {
-      return { state: 'dropped', status, line: `${word}${when}${who} — ${rec.dropReason}` };
+      return { state: 'dropped', status, line: `${word}${when}${who}: ${rec.dropReason}` };
     }
     return {
       state: 'dropped_unexplained',
@@ -218,7 +218,7 @@ export function writeOffHistory(
     // Both are true and the order is what makes them readable.
     return {
       state: 'reopened',
-      line: `This was taken off what the gym is owed${when}${who}${rec.dropReason ? ` — ${rec.dropReason}` : ''} — and has since been put back${status ? ` as ${status}` : ''}.`,
+      line: `This was taken off what the gym is owed${when}${who}${rec.dropReason ? ` (${rec.dropReason})` : ''}, and has since been put back${status ? ` as ${status}` : ''}.`,
     };
   }
 
@@ -296,7 +296,7 @@ export async function dropInvoice(
   if (!row || row.status !== status || (row.drop_reason ?? '').trim() !== reason.trim()) {
     throw new Error(
       'That invoice may not have been changed the way it was meant to be: the row came back without '
-      + 'the decision on it. Reload this page and read the invoice’s status before doing it again — '
+      + 'the decision on it. Reload this page and read the invoice’s status before doing it again. '
       + 'an invoice taken off what the gym is owed with no reason recorded is the row this exists to '
       + 'prevent.',
     );

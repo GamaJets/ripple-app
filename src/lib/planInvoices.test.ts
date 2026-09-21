@@ -43,7 +43,7 @@ ok(!/\d/.test(invoiceListNote('some-partial') ?? ''),
 /* ── no total, in the copy and in the module ────────────────────────────── */
 
 ok(/not added up/.test(INVOICES_ARE_NOT_TOTALLED), 'the note says the amounts are not added up');
-ok(/two currencies/.test(INVOICES_ARE_NOT_TOTALLED), 'and says why');
+ok(/two currencies/i.test(INVOICES_ARE_NOT_TOTALLED), 'and says why');
 // There is no sum function here to import, and that is the assertion.
 ok(!Object.keys({ invoiceListNote, invoiceListState } as Record<string, unknown>).some((k) => /total|sum/i.test(k)),
   'this module exports nothing that adds invoices together');
@@ -59,7 +59,7 @@ eq(invoiceStatusLine(inv({ status: 'open', attempt_count: null })), 'Not paid ye
   'an unreported attempt count prints no number — `?? 0` would have said "no attempts" for four tries');
 eq(invoiceStatusLine(inv({ status: 'open', attempt_count: 1 })), 'Not paid yet',
   'one attempt is the ordinary case and is not worth a number');
-eq(invoiceStatusLine(inv({ status: 'open', attempt_count: 4 })), 'Not paid — your card has been tried 4 times',
+eq(invoiceStatusLine(inv({ status: 'open', attempt_count: 4 })), 'Not paid. Your card has been tried 4 times',
   'a card tried four times is the thing the coach has to act on');
 ok(/uncollectible/.test(invoiceStatusLine(inv({ status: 'uncollectible' }))), 'written off says so');
 ok(/Stripe calls this/.test(invoiceStatusLine(inv({ status: 'weird_new_state' }))),

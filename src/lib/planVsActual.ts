@@ -452,7 +452,7 @@ export function coverageLine(pva: PlanVsActual, windowDays: number, who: string)
       + `movement${all.length === 1 ? '' : 's'} can be answered for. That is about the read, and it is not a statement about ${who}.`;
   }
   const head = `${logged} of ${all.length} prescribed movement${s(all.length)} logged in the last ${windowDays} days.`;
-  const tail = unknown ? ` ${unknown} of them cannot be answered for — the read did not cover the whole window.` : '';
+  const tail = unknown ? ` ${unknown} of them cannot be answered for. The read did not cover the whole window.` : '';
   const off = pva.offPlan.length
     ? ` ${pva.offPlan.length} movement${s(pva.offPlan.length)} logged that this program does not name.`
     : '';

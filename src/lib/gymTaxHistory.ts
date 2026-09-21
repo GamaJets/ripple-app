@@ -237,13 +237,13 @@ export function standingLine(d: TaxStandingDuring, periodLabel: string): string 
     case 'unread':
       return d.why;
     case 'unstated':
-      return `Nobody has said whether this gym was registered for a tax on its sales during ${periodLabel}. That is not the same as saying it was not — until somebody records it, Repple holds no tax fact about this business for this period at all.`;
+      return `Nobody has said whether this gym was registered for a tax on its sales during ${periodLabel}. That is not the same as saying it was not. Until somebody records it, Repple holds no tax fact about this business for this period at all.`;
     case 'gap':
       return d.from === d.to
         ? `This gym has recorded its registration for the rest of ${periodLabel} but not for ${d.from}. Nothing is claimed about that day; record it and this sentence covers the whole period.`
         : `This gym has recorded its registration for part of ${periodLabel} and not for ${d.from} to ${d.to}. Nothing is claimed about those days; record them and this sentence covers the whole period.`;
     case 'changed':
-      return `This gym's registration CHANGED inside ${periodLabel}, on ${d.on} — ${STANDING_WORD[d.before]} before that day and ${STANDING_WORD[d.after]} from it. There is no single answer to print over this period's figures, and a return covering it is not one thing either. Your accountant needs the date, which is the one above.`;
+      return `This gym's registration CHANGED inside ${periodLabel}, on ${d.on}: ${STANDING_WORD[d.before]} before that day and ${STANDING_WORD[d.after]} from it. There is no single answer to print over this period's figures, and a return covering it is not one thing either. Your accountant needs the date, which is the one above.`;
     case 'not_registered':
       return `This gym says it was not registered for a tax on its sales during ${periodLabel}. Nothing on this page is a tax figure either way.`;
     case 'registered':
@@ -335,10 +335,10 @@ export function standingBlockers(
   const out: string[] = [];
   const reg = d.registration.trim();
   if (!isoDay(d.fromOn)) {
-    out.push('The day this started has to be a real date — YYYY-MM-DD. A registration with no start day is the flag this replaces.');
+    out.push('The day this started has to be a real date (YYYY-MM-DD). A registration with no start day is the flag this replaces.');
   }
   if (d.toOn && !isoDay(d.toOn)) {
-    out.push('The day this ended has to be a real date — YYYY-MM-DD, or empty if it is still true.');
+    out.push('The day this ended has to be a real date (YYYY-MM-DD), or empty if it is still true.');
   }
   if (isoDay(d.fromOn) && isoDay(d.toOn) && d.toOn < d.fromOn) {
     out.push('That ends before it starts.');
@@ -354,7 +354,7 @@ export function standingBlockers(
     if (clash) {
       out.push(
         `This overlaps what is already recorded from ${clash.fromOn}${clash.toOn ? ` to ${clash.toOn}` : ' onwards'}. `
-        + 'Two statements about one day are two answers, and no screen can choose between them — close the '
+        + 'Two statements about one day are two answers, and no screen can choose between them. Close the '
         + 'existing period on the day before this one starts, then record this.',
       );
     }
@@ -454,7 +454,7 @@ export async function recordTaxStanding(
   const row = data as any;
   if (!row?.id) {
     throw new Error(
-      'That registration was NOT recorded — the row did not come back. Reload this screen and check '
+      'That registration was NOT recorded. The row did not come back. Reload this screen and check '
       + 'the list before entering it again; two statements about one day are refused by the database, '
       + 'so a duplicate will fail rather than double up.',
     );

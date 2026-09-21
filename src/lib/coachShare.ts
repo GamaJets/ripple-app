@@ -252,7 +252,7 @@ export const ALWAYS_SENT: string[] = [
 
 export const SENT_WITH_PERMISSION: string[] = [
   'your weight, body fat and skeletal muscle',
-  'your sleep — the hours, how many nights, and how many a device measured',
+  'your sleep: the hours, how many nights, and how many a device measured',
   'your readiness score and what it could not see',
   'your injuries, as the area and how bad it is',
   'the focus areas read off your progress photos',
@@ -309,7 +309,7 @@ export const CONSENT_BODY =
  * does not train around it, and the member needs to know that before choosing.
  */
 export const WITHHELD_NOTE =
-  'Your coach will not know your weight, your body fat, your sleep or your recovery, so it cannot tell you to train lighter on a bad night or judge whether your targets still fit you. It will not know about your injuries either, so it may suggest a movement that loads one — check anything it gives you against your own limitations, or turn this back on.';
+  'Your coach will not know your weight, your body fat, your sleep or your recovery, so it cannot tell you to train lighter on a bad night or judge whether your targets still fit you. It will not know about your injuries either, so it may suggest a movement that loads one. Check anything it gives you against your own limitations, or turn this back on.';
 
 /* ── the Weekly Report's half of the same door ─────────────────────────────
  *
@@ -388,7 +388,7 @@ export function weeklyFacts(
 export const WITHHELD_FACTS_INSTRUCTION =
   'Their body figures, their sleep, their tape measurements and their scans were withheld and are not among the facts above. '
   + 'Do not mention their weight, their body fat, their muscle, their measurements, their sleep, their recovery or a check-in. '
-  + 'Do not guess at any of them, and do not remark on their absence — write only from the training facts you were given.';
+  + 'Do not guess at any of them, and do not remark on their absence. Write only from the training facts you were given.';
 
 /** What the member is told the weekly summary loses when the answer is no.
  *  Specific, like `WITHHELD_NOTE`: the report is still written, from the
@@ -654,7 +654,7 @@ export function fillName(text: string, name: string | null | undefined, coach?: 
 /** What the coach is told about their assistant, on the screen. Sentence case;
  *  it is prose under a heading. */
 export const COACH_ASK_WHAT_GOES =
-  'Your own figures go — sessions, clients, adherence, takings and the currency they are in. When you ask about one client, what goes is their goal, how they are coached, whether they are turning up, what they are training and which areas they have flagged as injured.';
+  'Your own figures go: sessions, clients, adherence, takings and the currency they are in. When you ask about one client, what goes is their goal, how they are coached, whether they are turning up, what they are training and which areas they have flagged as injured.';
 
 export const COACH_ASK_WHAT_NEVER_GOES =
   'No name, no email and nothing that says who anybody is. No weight, body fat, scan, sleep or recovery figure. Nothing written in an injury note or read off a document, and nothing from your messages. Replies come back saying {name} and this screen fills it in.';

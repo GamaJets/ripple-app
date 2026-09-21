@@ -165,17 +165,17 @@ export function suggestProgression(
       nextWeight = Math.round((lastWeight + step(exercise)) * 2) / 2;
       nextReps = `${bottomRange}-${topRange}`;
       const add = bump(step(exercise));
-      rationale = `Cleared ${topRange}+ reps on every top set — add ${add ?? 'a step'} and reset to ${bottomRange}.`;
+      rationale = `Cleared ${topRange}+ reps on every top set. Add ${add ?? 'a step'} and reset to ${bottomRange}.`;
     } else if (lastReps >= bottomRange) {
       action = 'reps';
       nextWeight = lastWeight;
       nextReps = `${Math.min(topRange, lastReps + 1)}+`;
-      rationale = `In range${at ? ` at ${at}` : ''} — hold the weight and chase one more rep (aim ${Math.min(topRange, lastReps + 1)}).`;
+      rationale = `In range${at ? ` at ${at}` : ''}. Hold the weight and chase one more rep (aim ${Math.min(topRange, lastReps + 1)}).`;
     } else if (lastReps >= Math.max(3, bottomRange - 3)) {
       action = 'hold';
       nextWeight = lastWeight;
       nextReps = `${bottomRange}-${topRange}`;
-      rationale = `Just under range — repeat ${at ?? 'the same weight'} and build reps before adding load.`;
+      rationale = `Just under range. Repeat ${at ?? 'the same weight'} and build reps before adding load.`;
     } else {
       action = 'deload';
       nextWeight = Math.round((lastWeight * 0.9) * 2) / 2;
@@ -185,8 +185,8 @@ export function suggestProgression(
       // member decides the suggestion is guesswork.
       const easeTo = load(nextWeight);
       rationale = easeTo
-        ? `Reps fell off — ease to ~${easeTo} and rebuild.`
-        : 'Reps fell off — ease off about 10% and rebuild.';
+        ? `Reps fell off. Ease to ~${easeTo} and rebuild.`
+        : 'Reps fell off. Ease off about 10% and rebuild.';
     }
     // RPE / "felt" signal: the hardest feel logged on the top-weight sets (captured
     // per set in session mode) governs how aggressively to progress.
@@ -199,15 +199,15 @@ export function suggestProgression(
     const feltEasy = topFeels.length > 0 && topFeels.every((f) => f === 'easy');
     if (feltHard && action === 'increase') {
       action = 'reps'; nextWeight = lastWeight; nextReps = `${Math.min(topRange, lastReps)}+`;
-      rationale = `Cleared the range but the top sets felt hard — hold ${at ?? 'the same weight'} and bank the reps before adding load.`;
+      rationale = `Cleared the range but the top sets felt hard. Hold ${at ?? 'the same weight'} and bank the reps before adding load.`;
     } else if (feltHard && action === 'reps') {
       action = 'hold'; nextWeight = lastWeight; nextReps = `${bottomRange}-${topRange}`;
-      rationale = `In range but it felt hard — repeat ${at ?? 'the same weight'} to consolidate before progressing.`;
+      rationale = `In range but it felt hard. Repeat ${at ?? 'the same weight'} to consolidate before progressing.`;
     } else if (feltEasy && action === 'reps') {
       action = 'increase'; nextWeight = Math.round((lastWeight + step(exercise)) * 2) / 2; nextReps = `${bottomRange}-${topRange}`;
-      rationale = `In range and every top set felt easy — add ${bump(step(exercise)) ?? 'a step'} now.`;
+      rationale = `In range and every top set felt easy. Add ${bump(step(exercise)) ?? 'a step'} now.`;
     } else if (feltEasy && action === 'increase') {
-      rationale = rationale + ' Top sets felt easy — add with confidence.';
+      rationale = rationale + ' Top sets felt easy. Add with confidence.';
     }
     tips.push({ exercise, lastWeight, lastReps, nextWeight, nextReps, action, rationale, at: e.t });
   }
@@ -274,7 +274,7 @@ export function suggestNextWeight(
     return {
       weight: round(topW + increment),
       up: true,
-      reason: `You hit ${repsAtTop} reps at ${top ?? 'your top weight'} — add ${add}`,
+      reason: `You hit ${repsAtTop} reps at ${top ?? 'your top weight'}. Add ${add}`,
     };
   }
   return {

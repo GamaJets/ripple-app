@@ -73,7 +73,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ['client'],
         title: 'Your member number has changed',
-        note: 'The old one was not unique — two members could be given the same number, and at a busy gym they were. Yours is new and yours alone. If you have already given the old one to reception, show them this screen again: Access › Member Card.',
+        note: 'The old one was not unique. Two members could be given the same number, and at a busy gym they were. Yours is new and yours alone. If you have already given the old one to reception, show them this screen again: Access › Member Card.',
       },
       /* ── client ──────────────────────────────────────────────────────── */
       {
@@ -140,7 +140,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['trainer'],
         title: 'A session pack can be given a time limit',
-        note: 'Set the validity when you create or edit a package. Nothing already sold is affected — a pack only ever gets the window that existed on the day it was bought — and if one runs out with sessions left you are told, by name and with the number.',
+        note: 'Set the validity when you create or edit a package. Nothing already sold is affected (a pack only ever gets the window that existed on the day it was bought), and if one runs out with sessions left you are told, by name and with the number.',
       },
       {
         kind: 'new',
@@ -188,7 +188,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ['trainer'],
         title: 'Your data export contains your business',
-        note: 'It held only the member-side record. It now carries your packages, invoices, receipts, payouts, costs, enquiries and join codes — and nobody else’s.',
+        note: 'It held only the member-side record. It now carries your packages, invoices, receipts, payouts, costs, enquiries and join codes, and nobody else’s.',
       },
       {
         kind: 'fixed',
@@ -207,7 +207,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['owner'],
         title: 'Waivers, signatures and your filed documents are in the export',
-        note: 'Each signature says whether the member gave it themselves or a member of staff recorded it for them. The files themselves are not in the bundle — a spreadsheet cannot hold a scan — but every one is listed with where it is.',
+        note: 'Each signature says whether the member gave it themselves or a member of staff recorded it for them. The files themselves are not in the bundle (a spreadsheet cannot hold a scan), but every one is listed with where it is.',
       },
       {
         kind: 'new',
@@ -249,7 +249,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ['owner'],
         title: 'A gym that changed currency keeps its revenue trend',
-        note: 'The whole thirteen-month history used to be withheld. Each currency now gets its own thirteen months — still never added together, because they do not add.',
+        note: 'The whole thirteen-month history used to be withheld. Each currency now gets its own thirteen months, still never added together, because they do not add.',
       },
       {
         kind: 'fixed',
@@ -261,7 +261,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ['owner'],
         title: 'Growth says it measures trainers',
-        note: 'It was labelled as though it answered member churn. Nothing records when a membership was cancelled, so no figure was invented — the tab now says what it is.',
+        note: 'It was labelled as though it answered member churn. Nothing records when a membership was cancelled, so no figure was invented. The tab now says what it is.',
       },
       {
         kind: 'fixed',
@@ -284,7 +284,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['client'],
         title: 'Blood sugar from your monitor, beside what you ate',
-        note: 'Meals › Blood Sugar. A Dexcom, or a Libre through its own app, writes into Apple Health and Repple reads it from there — on iPhone; on Android you can type readings in yourself. Your coach sees none of it until you turn sharing on, and turning it off again hides the history too.',
+        note: 'Meals › Blood Sugar. A Dexcom, or a Libre through its own app, writes into Apple Health and Repple reads it from there on iPhone. On Android you can type readings in yourself. Your coach sees none of it until you turn sharing on, and turning it off again hides the history too.',
       },
       {
         kind: 'new',
@@ -296,7 +296,7 @@ export const RELEASES: Release[] = [
         kind: 'new',
         apps: ['trainer'],
         title: 'A client can choose to show you their glucose readings',
-        note: 'On their page, when they have turned it on. Readings and what they ate — not advice, and not something you can switch on for them.',
+        note: 'On their page, when they have turned it on. Readings and what they ate: not advice, and not something you can switch on for them.',
       },
       {
         kind: 'new',
@@ -481,7 +481,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ALL,
         title: 'Password rules are shown before you are refused',
-        note: 'Eight characters with a capital, a number and a symbol — all listed as you type. The apps used to say six and then refuse it.',
+        note: 'Eight characters with a capital, a number and a symbol, all listed as you type. The apps used to say six and then refuse it.',
       },
       {
         kind: 'fixed',
@@ -493,7 +493,7 @@ export const RELEASES: Release[] = [
         kind: 'fixed',
         apps: ALL,
         title: 'Figures we cannot read show a dash instead of a zero',
-        note: 'A roster, an inbox or a payroll total that failed to load used to render as 0 — indistinguishable from genuinely none.',
+        note: 'A roster, an inbox or a payroll total that failed to load used to render as 0, indistinguishable from genuinely none.',
       },
       {
         kind: 'fixed',
@@ -710,12 +710,12 @@ export function storeNotes(audience: Audience, version: string, releases: Releas
   const fixes = r.entries.filter((e) => e.kind === 'fixed');
   if (news.length) {
     lines.push('NEW');
-    for (const e of news) lines.push(`• ${e.title}${e.note ? ` — ${e.note}` : ''}`);
+    for (const e of news) lines.push(`• ${e.title}${e.note ? `: ${e.note}` : ''}`);
     if (fixes.length) lines.push('');
   }
   if (fixes.length) {
     lines.push('FIXED');
-    for (const e of fixes) lines.push(`• ${e.title}${e.note ? ` — ${e.note}` : ''}`);
+    for (const e of fixes) lines.push(`• ${e.title}${e.note ? `: ${e.note}` : ''}`);
   }
   return lines.join('\n');
 }

@@ -309,7 +309,7 @@ export function settledEmptyLine(v: PaidView): string {
     case 'unread': return SETTLEMENTS_UNREAD_NOTE;
     case 'none':
       return 'Your gym has not closed a payroll run for you yet, so there is nothing here to show. '
-        + 'Work you have done is not lost by being unsettled — it is waiting for the next run.';
+        + 'Work you have done is not lost by being unsettled. It is waiting for the next run.';
     default: return '';
   }
 }
@@ -481,7 +481,7 @@ export function lineTally(
  */
 export const NO_GYM_SETTLEMENTS_NOTE =
   'There is no gym attached to this account, so there is no payroll to show you. Nothing has been '
-  + 'settled for you because there is nobody to settle it — what you charge your own clients is the '
+  + 'settled for you because there is nobody to settle it. What you charge your own clients is the '
   + 'rest of this screen, and it is yours.';
 
 /** Said when the read did not come back. Deliberately NOT "your gym has paid
@@ -489,19 +489,19 @@ export const NO_GYM_SETTLEMENTS_NOTE =
  *  timeout, and it is the sentence that stops them asking. */
 export const SETTLEMENTS_UNREAD_NOTE =
   'Your payroll could not be read, so nothing about it is shown here. This is not a statement that you '
-  + 'have been paid nothing — whatever your gym has settled is unchanged and still on record.';
+  + 'have been paid nothing. Whatever your gym has settled is unchanged and still on record.';
 
 /** Said under a run whose `reimbursement_cents` is NULL. */
 export const SPLIT_NOT_STATED_NOTE =
   'This run did not record how much of it was pay and how much was money you spent and got back, so '
-  + 'Repple will not split it. That is not a claim that all of it was pay — runs closed before the app '
+  + 'Repple will not split it. That is not a claim that all of it was pay. Runs closed before the app '
   + 'recorded the split simply do not say, and there is no way to work it out now.';
 
 /** Said beside the lines, wherever they are drawn. */
 export const SNAPSHOT_IS_THE_RECORD =
   'The amount at the top is what your gym recorded handing over, saved as it stood on the day. The '
   + 'lines underneath are what the app holds about how it was made up. If the two disagree, the amount '
-  + 'is the payment and the lines are the working — take the difference to your gym rather than to the '
+  + 'is the payment and the lines are the working. Take the difference to your gym rather than to the '
   + 'figures.';
 
 /** Said above a reversed run. */

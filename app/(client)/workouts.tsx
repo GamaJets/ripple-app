@@ -702,8 +702,8 @@ export default function Train() {
     // successful one — in both directions, since it is also no longer the same
     // event as a lost one.
     if (out === 'stored') toast.say(`${lifts.length} exercise${lifts.length === 1 ? '' : 's'} added to today.`);
-    else if (out === 'unsent') Alert.alert('Saved on This Phone', `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet — nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and ${lifts.length === 1 ? 'goes' : 'go'} up on their own the next time you have signal.`);
-    else Alert.alert('Not Saved', 'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box — sending it again as it is will be rejected again.');
+    else if (out === 'unsent') Alert.alert('Saved on This Phone', `No connection, so ${lifts.length === 1 ? 'it has' : 'they have'} not reached your training log yet. Nothing is lost. ${lifts.length === 1 ? 'The exercise is' : `All ${lifts.length} exercises are`} saved here and ${lifts.length === 1 ? 'goes' : 'go'} up on their own the next time you have signal.`);
+    else Alert.alert('Not Saved', 'Your training log rejected what you typed, so it has not been recorded and it is not waiting to send. What you typed is still in the box. Sending it again as it is will be rejected again.');
   };
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
@@ -1109,7 +1109,7 @@ export default function Train() {
         Alert.alert(
           out === 'unsent' ? 'Saved on This Phone' : 'Not Imported',
           out === 'unsent'
-            ? 'No connection, so these have not reached your training log yet — they are saved on this phone and go up on their own next time you have signal. Your watch still has them either way.'
+            ? 'No connection, so these have not reached your training log yet. They are saved on this phone and go up on their own next time you have signal. Your watch still has them either way.'
             : 'Your training log rejected these, so nothing was imported and nothing is waiting to send. Your watch still has them.');
         return;
       }
@@ -1643,7 +1643,7 @@ export default function Train() {
           // Still an alert, and deliberately: this one says the log is not
           // what the screen just showed, and the entry is back on it.
           putBack();
-          Alert.alert('Not Deleted', `${movement(l.exercise)} is still in your log — we could not reach the server to remove it.`);
+          Alert.alert('Not Deleted', `${movement(l.exercise)} is still in your log. We could not reach the server to remove it.`);
         }
       },
     });
@@ -1856,8 +1856,8 @@ export default function Train() {
     // button is now offered for exactly those movements, so the line under it
     // has to agree.
     ? (customEx.length > 0
-      ? `Rest day — ${customEx.length} movement${customEx.length === 1 ? '' : 's'} you added`
-      : 'Rest day — nothing scheduled')
+      ? `Rest day · ${customEx.length} movement${customEx.length === 1 ? '' : 's'} you added`
+      : 'Rest day · nothing scheduled')
     // COUNTED, not estimated. This read `~${estMin} min`, where `estMin` was
     // `max(20, exercises × 9)` — a duration with no set count, no rest and no
     // measurement in it, printed on the first card of the tab beside the button
@@ -2011,7 +2011,7 @@ export default function Train() {
     const zoned = !!extra.zones && zoneSecondsTotal(extra.zones) > 0;
     if (out === 'unsent') {
       Alert.alert('Saved on This Phone',
-        `No connection, so your ${KIND_LABEL[kind].toLowerCase()} session has not reached your training log yet${zoned ? ' — heart-rate zones and all' : ''}. Nothing is lost: it is saved here and goes up on its own next time you have signal.`);
+        `No connection, so your ${KIND_LABEL[kind].toLowerCase()} session has not reached your training log yet${zoned ? ', heart-rate zones and all' : ''}. Nothing is lost: it is saved here and goes up on its own next time you have signal.`);
       // True, and the reason this is not `false`: the session is kept, so the
       // caller may clear its form. Nothing here says it was recorded.
       tapLight();
@@ -2019,7 +2019,7 @@ export default function Train() {
     }
     if (out === 'refused') {
       Alert.alert('Not Saved',
-        `Your training log rejected this ${KIND_LABEL[kind].toLowerCase()} session, so it has not been recorded${zoned ? ', and the heart-rate zones go with it' : ''}. It is not waiting to send either — logging it again as it is will be rejected again.`);
+        `Your training log rejected this ${KIND_LABEL[kind].toLowerCase()} session, so it has not been recorded${zoned ? ', and the heart-rate zones go with it' : ''}. It is not waiting to send either. Logging it again as it is will be rejected again.`);
       return false;
     }
     tapLight();
@@ -2117,14 +2117,14 @@ export default function Train() {
     // provider has written the entries to this device and will send them.
     if (out === 'refused') {
       Alert.alert('Not Saved',
-        'Your training log rejected this session, so it has not been recorded and it is not waiting to send. Your sets are still here — but saving them again as they are will be rejected again.',
+        'Your training log rejected this session, so it has not been recorded and it is not waiting to send. Your sets are still here, but saving them again as they are will be rejected again.',
         [{ text: 'OK' }]);
       return;
     }
     if (out === 'unsent') {
       setLogged({}); setCustomEx([]);
       Alert.alert('Saved on This Phone',
-        `No connection, so ${entries.length === 1 ? 'this exercise has' : `these ${entries.length} exercises have`} not reached your training log yet — nothing is lost. They are saved here, they are listed below, and they go up on their own next time you have signal. Your streak, records and your coach's dashboard will not know about them until then.`,
+        `No connection, so ${entries.length === 1 ? 'this exercise has' : `these ${entries.length} exercises have`} not reached your training log yet. Nothing is lost. They are saved here, they are listed below, and they go up on their own next time you have signal. Your streak, records and your coach's dashboard will not know about them until then.`,
         [{ text: 'OK' }]);
       return;
     }
@@ -2317,11 +2317,11 @@ export default function Train() {
             what this screen used to draw for all three. See `injRead`. */}
         {injLoading ? (
           <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
-            Reading what you have disclosed — nothing below has been checked against your injuries yet.
+            Reading what you have disclosed. Nothing below has been checked against your injuries yet.
           </Flag>
         ) : !injRead ? (
           <Notice tone={t.crit} kicker="Injury" title="Your Injuries Could Not Be Read"
-            note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or skip it, and pull down to try again." />
+            note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet. If something is hurt, take it easy on it or skip it, and pull down to try again." />
         ) : null}
         {start.canStart ? (
           <Cta label="Start Workout" wide onPress={() => { const at = Date.now(); setResumeAt(null); rememberSession({ kind: 'guided', startedAt: at }); void startLiveActivity(workout.focus || 'Workout', at); setSession(true); }} />
@@ -2381,7 +2381,7 @@ export default function Train() {
                 note={`Today’s session below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as it lands.`} />
             ) : (
               <Notice tone={t.warn} kicker="Your Plan" title="We Couldn’t Check for a Coach Plan"
-                note={`Today’s session below is ${BRAND.label}'s automatic program, not one your coach wrote. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
+                note={`Today’s session below is ${BRAND.label}'s automatic program, not one your coach wrote. If your coach has assigned you one it takes over as soon as we can read it. Open this screen again when you have signal.`} />
             )}
           </View>
         ) : null}
@@ -2466,7 +2466,7 @@ export default function Train() {
         {!logKnown ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {workoutLogStatus === 'loading'
-              ? 'Reading your log — the marks above are not complete yet.'
+              ? 'Reading your log. The marks above are not complete yet.'
               : workoutLogStatus === 'partial'
               ? 'Your log goes further back than this screen can read in one go, so days with no mark above may still have sessions in them.'
               : 'Your log could not be read, so a day with no mark above is a day we could not see rather than a day you did not train. Pull down to try again.'}
@@ -2634,7 +2634,7 @@ export default function Train() {
                         <Icon name="heart" size={15} color={t.crit} />
                         <View style={{ flex: 1 }}>
                           <Text style={{ ...ty.body, ...font('500'), color: t.ink3, textDecorationLine: 'line-through' }} numberOfLines={1}>{movement(e.name)}</Text>
-                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Hidden to protect your {inj ? areaLabel(inj.injury.area).toLowerCase() : 'injury'} (severe) — no safe swap in your plan.</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Hidden to protect your {inj ? areaLabel(inj.injury.area).toLowerCase() : 'injury'} (severe). There is no safe swap in your plan.</Text>
                         </View>
                         <Ghost label="Show Anyway" onPress={() => setInjRevealed((prev) => [...prev, _id])} />
                       </View>
@@ -3017,7 +3017,7 @@ export default function Train() {
                 <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
                   <Icon name="moon" size={26} color={t.ink3} />
                   <Text style={{ ...ty.head, color: t.ink, marginTop: sp.md }}>Rest Day</Text>
-                  <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>Nothing scheduled today — recovery is where the gains happen. Pick another day above to train, or switch to Cardio to log a session.</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>Nothing scheduled today. Recovery is where the gains happen. Pick another day above to train, or switch to Cardio to log a session.</Text>
                 </View>
               ) : null}
 
@@ -3068,7 +3068,7 @@ export default function Train() {
               ) : !isWhole(workoutLogStatus) ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   {workoutLogStatus === 'loading'
-                    ? 'Still reading your history — past sessions you can repeat will appear here.'
+                    ? 'Still reading your history. Past sessions you can repeat will appear here.'
                     : 'We could not read your history in full, so there are no past sessions to offer you yet. That is our end, not yours.'}
                 </Text>
               ) : null}
@@ -3146,7 +3146,7 @@ export default function Train() {
                 <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>Reading the stretch catalogue…</Text>
               ) : stretchCat.status === 'error' ? (
                 <Notice tone={t.warn} kicker="Stretch" title="We Could Not Read the Stretch List"
-                  note="That is our end, not yours — the stretches are still there, and the ready-made routines below are unaffected.">
+                  note="That is our end, not yours. The stretches are still there, and the ready-made routines below are unaffected.">
                   <View style={{ marginTop: sp.md }}>
                     <Ghost label="Try Again" onPress={() => { void stretchCat.reload(); }} />
                   </View>
@@ -3222,7 +3222,7 @@ export default function Train() {
                   onPress={() => { setStretchOn(r); tapLight(); }} />
               ))}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: layout.section }}>
-                A finished routine is written to your log as a mobility session called Stretching — the same entry the
+                A finished routine is written to your log as a mobility session called Stretching, the same entry the
                 Mobility chip makes, so it is counted once and not twice. That is true of a routine you built and one you
                 picked: both are the same session to your calendar and to your coach.
               </Text>
@@ -3290,8 +3290,8 @@ export default function Train() {
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {mode === 'recovery'
-                  ? 'Just how long it lasted. Recovery is not scored as calories burned — a sauna raises your heart rate, but the cost is keeping you cool rather than work done, so any figure here would be made up.'
-                  : 'Bikes, rowers & ski ergs: add your avg watts. Logging an Apple Watch workout by hand? Enter the minutes and the calories it shows — leave distance blank for studio classes like Pilates.'}
+                  ? 'Just how long it lasted. Recovery is not scored as calories burned. A sauna raises your heart rate, but the cost is keeping you cool rather than work done, so any figure here would be made up.'
+                  : 'Bikes, rowers & ski ergs: add your avg watts. Logging an Apple Watch workout by hand? Enter the minutes and the calories it shows, and leave distance blank for studio classes like Pilates.'}
               </Text>
 
               <View style={{ marginTop: layout.section }}>
@@ -3338,7 +3338,7 @@ export default function Train() {
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {workoutLogStatus === 'partial'
                 ? 'Your log is longer than this screen can read at once, so anything you saved on this day may not be listed here. Nothing is missing from your log.'
-                : 'Your log could not be read, so this cannot show what you have already saved on this day. Nothing has been lost — pull down to try again.'}
+                : 'Your log could not be read, so this cannot show what you have already saved on this day. Nothing has been lost. Pull down to try again.'}
             </Text>
           </Section>
         </>) : null}
@@ -3376,7 +3376,7 @@ export default function Train() {
               </View>
             ))}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Edit lets you fix the sets or swap the movement for the right one — the sets come with it, so you do not have to
+              Edit lets you fix the sets or swap the movement for the right one. The sets come with it, so you do not have to
               type them again. Deleting asks first, and only reports it done once the server has actually removed it.
             </Text>
           </Section>
@@ -3637,8 +3637,8 @@ export default function Train() {
                   <Text style={{ ...ty.label, color: t.ink3 }}>
                     {workoutLogStatus === 'loading' ? 'Reading your log…'
                       : workoutLogStatus === 'error' ? 'We couldn’t read your log, so we can’t say what you did on this day.'
-                      : workoutLogStatus === 'partial' ? 'Not read this far back — your log goes further than this screen can read in one go.'
-                      : 'Rest day — no workout logged.'}
+                      : workoutLogStatus === 'partial' ? 'Not read this far back. Your log goes further than this screen can read in one go.'
+                      : 'Rest day. No workout logged.'}
                   </Text>
                 ) : (
                   <View>
@@ -3801,7 +3801,7 @@ export default function Train() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), maxHeight: '76%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Repeat a Session</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-            The movements and sets you recorded, ready to run again. Today&rsquo;s plan is left exactly as it is — this runs instead of it for one session, and does not mark it done.
+            The movements and sets you recorded, ready to run again. Today&rsquo;s plan is left exactly as it is. This runs instead of it for one session, and does not mark it done.
           </Text>
           {/* The dot is the mark and the words are the meaning — a status
               colour is tuned for a 3:1 mark and not for the 4.5:1 that text
@@ -3812,7 +3812,7 @@ export default function Train() {
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: workoutLogStatus === 'loading' ? t.ink3 : t.warn, marginTop: 5 }} />
               <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
                 {workoutLogStatus === 'loading'
-                  ? 'Still reading — there may be more sessions than these.'
+                  ? 'Still reading. There may be more sessions than these.'
                   : 'Your history could not be read in full, so this is what we could see and not everything you have done.'}
               </Text>
             </View>
@@ -3960,7 +3960,7 @@ export default function Train() {
                 note={null} />
             ) : (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Say how many sets, and a row appears for each one — its own reps, its own weight. Leave a weight empty for no target.
+                Say how many sets, and a row appears for each one, with its own reps and its own weight. Leave a weight empty for no target.
               </Text>
             )}
           </View>
@@ -4505,8 +4505,8 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {sessionKcal != null && sessionKcal > 0
-                  ? 'Calories came from your watch for this session — change them if you would rather use the machine’s figure. Nothing here is required; leave a box empty and it is left out rather than saved as a zero.'
-                  : 'The clock was measured; these were not. Nothing here is required — leave a box empty and it is left out rather than saved as a zero.'}
+                  ? 'Calories came from your watch for this session. Change them if you would rather use the machine’s figure. Nothing here is required; leave a box empty and it is left out rather than saved as a zero.'
+                  : 'The clock was measured; these were not. Nothing here is required. Leave a box empty and it is left out rather than saved as a zero.'}
               </Text>
             </Section>
           )}
@@ -4542,7 +4542,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           ) : (
             <View>
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.md }}>
-                Under a minute on the clock — too short to log, and rounding it up to one would be a figure you did not train.
+                Under a minute on the clock. That is too short to log, and rounding it up to one would be a figure you did not train.
               </Text>
               <Cta label="Close" wide onPress={onClose} />
             </View>
@@ -4590,7 +4590,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           </Text>
         ) : liveSample == null ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            That bpm is today&apos;s average from your connected device, not a live reading — it can&apos;t be used for zones.
+            That bpm is today&apos;s average from your connected device, not a live reading, so it can&apos;t be used for zones.
             Live zones need an Apple Watch.
           </Text>
         ) : hrFresh.state !== 'live' ? (
@@ -4695,7 +4695,7 @@ function clipCaption(owner: ClipOwner): string {
     case 'platform': return `From the ${BRAND.label} library`;
     // Never the library's. There is no row behind this clip, nobody but this
     // device can see it, and no coach put it here for this member.
-    case 'local': return 'Saved on this device only — not from the library, and not your coach’s';
+    case 'local': return 'Saved on this device only, not from the library, and not your coach’s';
   }
 }
 
@@ -4757,7 +4757,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId, onNoMedia 
         <DemoAnimation uri={animUrl} label={name} stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
         {detail?.demoLicence !== 'commercial' ? (
           <View style={{ marginTop: sp.sm }}>
-            <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+            <Flag tone={t.warn}>Evaluation asset: licensed for review only, never for release.</Flag>
           </View>
         ) : null}
       </View>
@@ -4786,7 +4786,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId, onNoMedia 
           style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: radius.md, backgroundColor: t.surface2 }}
         />
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
-          The equipment, not a demonstration — this is a machine rather than a movement.
+          The equipment, not a demonstration. This is a machine rather than a movement.
         </Text>
       </View>
     );
@@ -4806,7 +4806,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId, onNoMedia 
     : signedOut
     ? 'The exercise library is only available once you are signed in, so this could not be looked up.'
     : detail
-    ? 'No demonstration for this one yet — no clip from your coach and no reference frames in the catalogue. Ask your coach how they want it done.'
+    ? 'No demonstration for this one yet: no clip from your coach and no reference frames in the catalogue. Ask your coach how they want it done.'
     : 'This movement is not in our catalogue, so there is no guide for it. If your coach wrote it into your program, ask them how they want it done.';
   return (
     <View style={{ paddingVertical: sp.md }}>
@@ -5276,7 +5276,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           // "1 set from this session were still on this phone".
           (() => {
             const n = rs.reduce((a, x) => a + (x ? x.length : 0), 0);
-            return `${n} set${n === 1 ? ' from this session was' : 's from this session were'} still on this phone and ${n === 1 ? 'is' : 'are'} back on screen. ${n === 1 ? 'It has' : 'They have'} not reached your log yet — finishing the session is what ${n === 1 ? 'saves it' : 'saves them'}.`;
+            return `${n} set${n === 1 ? ' from this session was' : 's from this session were'} still on this phone and ${n === 1 ? 'is' : 'are'} back on screen. ${n === 1 ? 'It has' : 'They have'} not reached your log yet. Finishing the session is what ${n === 1 ? 'saves it' : 'saves them'}.`;
           })(),
         );
       } catch { /* an unreadable draft is not worth an error the member cannot act on */ }
@@ -5774,7 +5774,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       'End This Session?',
       `${loggedSets} set${loggedSets === 1 ? '' : 's'} logged so far. Save them to your log, or discard the session.`
       + (undone.length
-        ? ` ${list(undone)} ${undone.length === 1 ? 'has' : 'have'} nothing logged and will be recorded as not done — not as zeroes, and not counted.`
+        ? ` ${list(undone)} ${undone.length === 1 ? 'has' : 'have'} nothing logged and will be recorded as not done, not as zeroes, and not counted.`
         : ''),
       [
         { text: 'Keep Going', style: 'cancel' },
@@ -5897,7 +5897,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                   the screen or to do anything at all, because there is nothing
                   they need to do. */}
               <Notice tone={t.warn} kicker="Your Training Log" title="Saved on This Phone, Not in Your Log Yet"
-                note={`${num(totalSets)} set${totalSets === 1 ? '' : 's'} are saved on this phone and listed below. They have not reached your log yet — they go up on their own the next time the app has signal, and it is safe to close this. Until then your streak, your records and your coach's dashboard do not know about them.`}>
+                note={`${num(totalSets)} set${totalSets === 1 ? '' : 's'} are saved on this phone and listed below. They have not reached your log yet. They go up on their own the next time the app has signal, and it is safe to close this. Until then your streak, your records and your coach's dashboard do not know about them.`}>
                 <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                   <Ghost label="Try Sending Now" onPress={() => { void retry(); }} />
                 </View>
@@ -5907,7 +5907,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           {saveState === 'idle' && totalSets === 0 ? (
             <View style={{ marginTop: sp.lg }}>
               <Notice tone={t.ink3} kicker="Nothing Logged" title="No Sets Were Recorded"
-                note="Nothing has been written to your log, because nothing was entered. Close this and the session is simply not there — no empty workout, no dot on the calendar." />
+                note="Nothing has been written to your log, because nothing was entered. Close this and the session is simply not there: no empty workout, no dot on the calendar." />
             </View>
           ) : null}
           <Section>
@@ -5945,7 +5945,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               const undone = notDoneNames();
               return undone.length ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                  {list(undone)} {undone.length === 1 ? 'has' : 'have'} no sets and {undone.length === 1 ? 'is' : 'are'} recorded as not done. {undone.length === 1 ? 'It is' : 'They are'} not in your log as zeroes and {undone.length === 1 ? 'does' : 'do'} not count against your figures — the session you did is the session above.
+                  {list(undone)} {undone.length === 1 ? 'has' : 'have'} no sets and {undone.length === 1 ? 'is' : 'are'} recorded as not done. {undone.length === 1 ? 'It is' : 'They are'} not in your log as zeroes and {undone.length === 1 ? 'does' : 'do'} not count against your figures. The session you did is the session above.
                 </Text>
               ) : null;
             })()}
@@ -6027,7 +6027,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                   );
                 })}
                 <Text style={{ ...ty.caption, color: t.ink3 }}>
-                  The clock was measured; these were not. Nothing here is required — leave a box empty and it is
+                  The clock was measured; these were not. Nothing here is required. Leave a box empty and it is
                   left out rather than saved as a zero.
                 </Text>
               </Section>
@@ -6040,7 +6040,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               promise. */}
           <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.xl, marginBottom: sp.xl }}>
             {saveState === 'saved'
-              ? "Logged to your history — strength trends and your coach's dashboard update automatically."
+              ? "Logged to your history. Strength trends and your coach's dashboard update automatically."
               : saveState === 'saving'
               ? 'Writing this session to your log…'
               : saveState === 'queued'
@@ -6062,7 +6062,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               if (saveState !== 'failed') { forgetGuidedDraft(); onClose(); return; }
               Alert.alert(
                 'Close Without Saving?',
-                'These sets have not reached your log. Closing loses them — there is no copy anywhere else.',
+                'These sets have not reached your log. Closing loses them. There is no copy anywhere else.',
                 [
                   { text: 'Try Saving Again', onPress: () => { void retry(); } },
                   { text: 'Close and Lose Them', style: 'destructive', onPress: () => { forgetGuidedDraft(); onClose(); } },
@@ -6402,7 +6402,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       <SetKindChip t={nt} on={tempoHit && !tempoOpen}
         onToggle={() => { setTempoOpen(false); setTempoText(''); setTempoHit((v) => !v); }}
         label={`Hit the ${askTempo} Tempo`}
-        onLabel={`Hit the ${askTempo} Tempo — recorded as ${askTempo}`}
+        onLabel={`Hit the ${askTempo} Tempo, recorded as ${askTempo}`}
         a11yHint={`Your coach asked for ${tempoMeaning(askTempo)}. Tick this to record that you did it. Leave it alone and this set is logged with no tempo.`} />
       <Pressable accessibilityRole="button"
         accessibilityLabel={tempoOpen ? 'Cancel the tempo you were typing' : 'Record a different tempo'}
@@ -6429,7 +6429,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               reading the other convention sees this one disagree with them
               here, rather than after the set is in the log. */}
           <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: 2, textAlign: 'center' }}>
-            {tempoMeaning(tempoText) ?? 'Down, pause, up — and a pause at the top if there was one.'}
+            {tempoMeaning(tempoText) ?? 'Down, pause, up, and a pause at the top if there was one.'}
           </Text>
         </View>
       ) : null}
@@ -6451,8 +6451,8 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: injuryStatus === 'loading' ? t.ink3 : t.crit, marginTop: 5 }} />
       <Text style={{ ...ty.caption, color: t.nightInk2, flex: 1 }}>
         {injuryStatus === 'loading'
-          ? 'Still reading what you have disclosed — this movement has not been checked against your injuries yet.'
-          : 'Your injuries could not be read, so this movement has not been checked against them. Nothing here has been swapped or held back — go easy if something is hurt.'}
+          ? 'Still reading what you have disclosed. This movement has not been checked against your injuries yet.'
+          : 'Your injuries could not be read, so this movement has not been checked against them. Nothing here has been swapped or held back. Go easy if something is hurt.'}
       </Text>
     </View>
   ) : (() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
@@ -6561,7 +6561,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           <Text style={{ ...ty.label, ...font('500'), color: t.ink2 }}>Undo Set {done.length}</Text>
         </Pressable>
         <Text style={{ ...ty.caption, color: t.ink3, flex: 1, minWidth: 160 }}>
-          Not in your log yet — finishing the session is what saves {done.length === 1 ? 'it' : 'them'}.
+          Not in your log yet. Finishing the session is what saves {done.length === 1 ? 'it' : 'them'}.
         </Text>
       </View>
     </View>
@@ -6628,7 +6628,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
         {wu.map((ws, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6 }}><Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{fig(liftLabel(ws.kg, unit))} × {ws.reps}</Text></View>)}
       </View>
-      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Ramp up first — these don't count as working sets.</Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Ramp up first. These don't count as working sets.</Text>
     </View>
   ) : null; })() : null;
 
@@ -6649,7 +6649,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{liveHrNote(reach ?? 'none', true)}</Text>
       ) : liveSample == null ? (
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-          That bpm is today&apos;s average from your connected device, not a live reading — it can&apos;t be used for zones.
+          That bpm is today&apos;s average from your connected device, not a live reading, so it can&apos;t be used for zones.
           Live zones need an Apple Watch.
         </Text>
       ) : hrFresh.state !== 'live' ? (
@@ -6764,7 +6764,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
               ) : null}
               <Text style={{ ...ty.caption, color: t.nightInk2 }}>
                 {pastPlan
-                  ? `All ${plan.length} sets done — set ${done.length + 1} is extra`
+                  ? `All ${plan.length} sets done. Set ${done.length + 1} is extra`
                   : plan.length ? `Set ${done.length + 1} of ${plan.length}` : `Set ${done.length + 1}`}
               </Text>
             </View>
@@ -6858,13 +6858,13 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap', justifyContent: 'center' }}>
               <SetKindChip t={nt} on={bwOn} onToggle={() => setBwOn((v) => !v)}
                 label="Bodyweight Set"
-                onLabel={`Bodyweight Set — the box above is what you added, in ${unit}`}
+                onLabel={`Bodyweight Set: the box above is what you added, in ${unit}`}
                 a11yHint={bwOn
                   ? `The box holds what you added on top of your own weight, in ${unit}. Turn this off for a set on a bar or a machine.`
                   : 'Turn this on for a pull-up, a dip or a press-up. Leaving the load box empty does the same thing.'} />
               <SetKindChip t={nt} on={timedOn} onToggle={() => setTimedOn((v) => !v)}
                 label="Timed Set"
-                onLabel="Timed Set — the first box is seconds held"
+                onLabel="Timed Set: the first box is seconds held"
                 a11yHint={timedOn
                   ? 'The first box is the seconds you held it for. Turn this off to count reps instead.'
                   : 'Turn this on for a plank, a hollow hold or a wall sit, where the set is a length of time rather than a count.'} />
@@ -6908,7 +6908,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                     ? `Per side: ${barLoad.plates.map((x) => plain(x)).join(', ')} ${unit}. ${barLoad.exact
                         ? `That makes ${plain(barLoad.total)} ${unit} on the bar.`
                         : `The nearest these plates make is ${plain(barLoad.total)} ${unit}.`}`
-                    : `Just the bar — ${plain(bar)} ${unit}.`}
+                    : `Just the bar: ${plain(bar)} ${unit}.`}
                   style={{ ...ty.body, ...numeric, color: nt.ink, marginTop: sp.xs }}
                 >
                   {barLoad.plates.length ? barLoad.plates.map((x) => plain(x)).join('  ·  ') : 'Just the bar'}
@@ -6919,7 +6919,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                     is how the bar ends up heavier than the set they logged. */}
                 {!barLoad.exact ? (
                   <Text style={{ ...ty.caption, color: nt.ink3, marginTop: 2 }}>
-                    These plates do not make that exactly — the nearest under it is {plain(barLoad.total)} {unit}.
+                    These plates do not make that exactly. The nearest under it is {plain(barLoad.total)} {unit}.
                   </Text>
                 ) : null}
               </View>
@@ -6994,7 +6994,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                     </Pressable>
                   ))}
                 </View>
-                <Text style={{ ...ty.caption, color: nt.ink3, marginTop: sp.sm }}>Tunes your next set — Easy adds weight, Hard eases it back.</Text>
+                <Text style={{ ...ty.caption, color: nt.ink3, marginTop: sp.sm }}>Tunes your next set: Easy adds weight, Hard eases it back.</Text>
               </View>
             ) : null}
             {/* Back and Pause, above everything that is only context. The
@@ -7131,7 +7131,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                 on exercise two is owed the reason. */}
             {onSwap && done.length > 0 && (ex.alternatives?.length ?? 0) > 0 ? (
               <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.lg, textAlign: 'center' }}>
-                You have logged a set of this, so it can no longer be swapped — the sets would end up filed under the movement you swapped to.
+                You have logged a set of this, so it can no longer be swapped, because the sets would end up filed under the movement you swapped to.
               </Text>
             ) : null}
 
@@ -7468,7 +7468,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
       // `retryLine` appends when the server DID read it and refuse. "did not
       // reach your record" is true either way, and is the thing the member
       // cares about: what their log now says.
-      Alert.alert('Not Saved', `Your correction did not reach your record, so this entry still reads as it did — on this phone as well. ${retryLine(reach)}`);
+      Alert.alert('Not Saved', `Your correction did not reach your record, so this entry still reads as it did, on this phone as well. ${retryLine(reach)}`);
     }
   };
 
@@ -7489,7 +7489,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
         <ScrollView contentContainerStyle={{ padding: sp.lg, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           {dayLabel ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              Logged on {dayLabel}. Correcting it leaves it on that day — your calendar, streak and history all read it from there.
+              Logged on {dayLabel}. Correcting it leaves it on that day. Your calendar, streak and history all read it from there.
             </Text>
           ) : null}
           <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Exercise</Text>
@@ -7522,7 +7522,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
               // typed, and saying so is the difference between "no matches" and
               // "you cannot do this here".
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                Nothing in today's plan or your history matches that. Type the movement in full above — anything you type is accepted.
+                Nothing in today's plan or your history matches that. Type the movement in full above. Anything you type is accepted.
               </Text>
             )
           ) : null}
@@ -7534,9 +7534,9 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
               </Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
                 {isCardio
-                  ? 'The minutes, distance and the heart-rate zones recorded against it stay — nobody can retype a heart rate, and they were measured whatever the session was called.'
+                  ? 'The minutes, distance and the heart-rate zones recorded against it stay. Nobody can retype a heart rate, and they were measured whatever the session was called.'
                   : setCount > 0
-                  ? `The ${setCount} set${setCount === 1 ? '' : 's'} below come with it, so you do not have to type them again. Your best one counts towards ${trimmed} from now on, and ${entry.exercise} falls back to whatever else you have logged against it — a record set on this work belongs to the movement you actually did.`
+                  ? `The ${setCount} set${setCount === 1 ? '' : 's'} below come with it, so you do not have to type them again. Your best one counts towards ${trimmed} from now on, and ${entry.exercise} falls back to whatever else you have logged against it. A record set on this work belongs to the movement you actually did.`
                   : 'There are no sets on this entry to move.'}
               </Text>
               {!isCardio && rows.length > 0 ? (
@@ -7638,7 +7638,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
               ))}
               <Ghost label="Add Set" onPress={() => setRows((p) => [...p, { reps: '', load: p.length ? p[p.length - 1].load : '', bw: p.length ? p[p.length - 1].bw : false, timed: p.length ? p[p.length - 1].timed : false }])} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Tick Bodyweight for a set you did with your own body — the load box is then whatever you added on top. Tick Timed for a hold, and the first box counts seconds.
+                Tick Bodyweight for a set you did with your own body. The load box is then whatever you added on top. Tick Timed for a hold, and the first box counts seconds.
               </Text>
             </View>
           )}

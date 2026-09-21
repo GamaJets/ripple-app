@@ -77,7 +77,7 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   ok(swap.theirs === 'Machine Chest Press', 'the swap names what they do instead');
   ok(swap.dayLabel === 'Mon · Push', 'the day is named out of the program');
   ok(swap.dayIdx === 0, 'the row index counts from zero because it subscripts days');
-  ok(planEditDiffLine(swap, 'Amy', kg) === 'Mon · Push — you wrote Bench Press; Amy does Machine Chest Press instead.',
+  ok(planEditDiffLine(swap, 'Amy', kg) === 'Mon · Push: you wrote Bench Press; Amy does Machine Chest Press instead.',
     `swap line read: ${planEditDiffLine(swap, 'Amy', kg)}`);
 
   const nums = d.rows.filter((r) => r.kind === 'numbers')[0];
@@ -95,7 +95,7 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   ok(numLine.indexOf('on Overhead Press') >= 0, `numbers line lost the movement: ${numLine}`);
 
   const gone = d.rows.filter((r) => r.kind === 'removed')[0];
-  ok(planEditDiffLine(gone, 'Amy', kg) === 'Wed · Pull — Amy has taken Bent-over Row off.',
+  ok(planEditDiffLine(gone, 'Amy', kg) === 'Wed · Pull: Amy has taken Bent-over Row off.',
     `removal line read: ${planEditDiffLine(gone, 'Amy', kg)}`);
 
   const added = d.rows.filter((r) => r.kind === 'custom')[0];
@@ -108,7 +108,7 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   // No sentence is built around a missing day or a missing name.
   for (const r of d.rows) {
     const line = planEditDiffLine(r, 'Amy', kg);
-    ok(line.indexOf('— ') !== 0, `a line opened with a dangling day separator: ${line}`);
+    ok(line.indexOf(': ') !== 0, `a line opened with a dangling day separator: ${line}`);
     ok(line.indexOf('undefined') < 0 && line.indexOf('null') < 0, `a line printed a hole: ${line}`);
     ok(line.indexOf('you wrote .') < 0 && line.indexOf('you wrote,') < 0, `a clause lost its figure: ${line}`);
   }
@@ -130,7 +130,7 @@ const kg = (v: number | null): string | null => (v == null ? null : `${v} kg`);
   ok(swap.assigned === null, 'an unresolved key names no movement rather than guessing one');
   ok(swap.resolved === false, 'and says so');
   const line = planEditDiffLine(swap, 'Amy', kg);
-  ok(line === 'Mon · Push — Amy does Machine Chest Press instead of what this program names here.',
+  ok(line === 'Mon · Push: Amy does Machine Chest Press instead of what this program names here.',
     `unresolved swap line read: ${line}`);
   const note = planEditsCoachNote({ diff: d, who: 'Amy', whenWords: '3 March 2026', ageWords: '2 days ago', stale: false });
   ok(note.indexOf('no longer') >= 0, `the note did not mention the strays: ${note}`);

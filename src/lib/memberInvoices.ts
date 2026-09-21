@@ -209,7 +209,7 @@ export function invoiceNote(s: InvoiceStanding): string {
         : `Unpaid. Your gym has asked for it by ${s.dueOn}.`;
     case 'overdue':
       return s.dueOn
-        ? `Your gym has this marked as past its date — it asked for it by ${s.dueOn}. If you have paid it, ask reception to check it against the payment; what the desk recorded is under Payments.`
+        ? `Your gym has this marked as past its date. It asked for it by ${s.dueOn}. If you have paid it, ask reception to check it against the payment; what the desk recorded is under Payments.`
         : 'Your gym has this marked as past its date, without recording what date that was. Ask reception what it refers to.';
     case 'paid':
       return 'Your gym has marked this paid. Nothing is outstanding on it.';
@@ -297,7 +297,7 @@ export function owedEmptyLine(
 
   const standings = invoices.map((inv) => invoiceStanding(inv, today));
   if (standings.some(isOwed)) {
-    return 'Your gym is still asking to be paid, and none of the unpaid invoices records both an amount and a currency — so there is no figure to put here. It is not a debt of nothing; reception can tell you what these cover.';
+    return 'Your gym is still asking to be paid, and none of the unpaid invoices records both an amount and a currency, so there is no figure to put here. It is not a debt of nothing; reception can tell you what these cover.';
   }
   const drafts = standings.filter((s) => s.kind === 'draft').length;
   if (drafts) {
@@ -401,7 +401,7 @@ export function invoiceCopyText(
     return out.join('\n');
   }
 
-  out.push('', '— Every invoice —');
+  out.push('', 'EVERY INVOICE');
   for (const inv of invoices) {
     const head = inv.number == null ? `Issued ${inv.issuedOn}` : `No. ${inv.number} · issued ${inv.issuedOn}`;
     out.push('', `${head} · ${amount(inv.amountCents, inv.currency)}`);
@@ -417,7 +417,7 @@ export function invoiceCopyText(
     // already at the top. One line saying the figure is absent and why.
     out.push('', 'No outstanding figure is stated in this copy, because it was not taken from a complete read of your invoices.');
   } else {
-    out.push('', '— Still owed —');
+    out.push('', 'STILL OWED');
     if (owed.pots.length) {
       for (const p of owed.pots) {
         out.push(`${amount(p.minorUnits, p.currency)} across ${p.count} unpaid invoice${p.count === 1 ? '' : 's'}`);
@@ -449,7 +449,7 @@ export function invoiceCopyText(
  * table is not read and why no policy is widened to read it.
  */
 export const COACH_INVOICE_NOT_HERE =
-  'These are invoices from your gym. An invoice from a personal trainer is a document they issue and hand to you themselves — it stays in their own records rather than arriving here, so ask them for a copy if you need one.';
+  'These are invoices from your gym. An invoice from a personal trainer is a document they issue and hand to you themselves. It stays in their own records rather than arriving here, so ask them for a copy if you need one.';
 
 /** Why the three letters beside the figure are the gym's and not this app's. */
 export const AMOUNT_AS_RECORDED =
@@ -459,4 +459,4 @@ export const AMOUNT_AS_RECORDED =
  *  apologetic: there is no pay button, and inventing one that opens nothing is
  *  the failure this sentence exists instead of. */
 export const NO_PAYMENT_HERE =
-  'You cannot pay an invoice in the app. Your gym takes payment the way it always has, and whatever it records taking appears under Payments — usually within a day or two of the money moving.';
+  'You cannot pay an invoice in the app. Your gym takes payment the way it always has, and whatever it records taking appears under Payments, usually within a day or two of the money moving.';

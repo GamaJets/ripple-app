@@ -230,7 +230,7 @@ export function strayLines(r: StrayReport, noun: string): string[] {
     return sentence(
       `${n} here state ${x.stated}, which appears nowhere else in this gym’s records.`,
       uses,
-      `Nothing has been changed — if that is a real ${noun} in ${x.stated} it is fine where it is,`
+      `Nothing has been changed. If that is a real ${noun} in ${x.stated} it is fine where it is,`
       + ' and if it is a slip it has to be corrected on the row.',
     );
   });

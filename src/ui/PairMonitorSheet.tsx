@@ -130,7 +130,7 @@ export function PairMonitorSheet({ t, visible, onClose, reach, hasSample, onPair
                 sheet from existing: the member is in the middle of a workout
                 and is being asked to touch a settings control. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-              Your session keeps running. Nothing here can lose a set — your sets, your clock and your time in each zone all stay where they are.
+              Your session keeps running. Nothing here can lose a set. Your sets, your clock and your time in each zone all stay where they are.
             </Text>
           </View>
           <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close and carry on with your session" hitSlop={8}>
@@ -171,7 +171,7 @@ export function PairMonitorSheet({ t, visible, onClose, reach, hasSample, onPair
           ))}
           {rows.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              Nothing on this phone can stream a live heart rate into a session. A ring or a band that syncs once a day cannot — it reports the day, not the minute.
+              Nothing on this phone can stream a live heart rate into a session. A ring or a band that syncs once a day cannot: it reports the day, not the minute.
             </Text>
           ) : null}
         </ScrollView>

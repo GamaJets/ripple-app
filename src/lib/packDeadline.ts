@@ -148,7 +148,7 @@ export function packDeadline(input: DeadlineInput): PackDeadline {
   if (left == null) {
     return {
       kind: 'unknown',
-      text: `This pack runs out on ${day} — ${when} — and we could not read how many sessions are still on it. Anything left on it that day is not refunded, so it is worth checking with your coach.`,
+      text: `This pack runs out on ${day} (${when}), and we could not read how many sessions are still on it. Anything left on it that day is not refunded, so it is worth checking with your coach.`,
       urgent: true, toBook: null, daysLeft,
     };
   }
@@ -162,7 +162,7 @@ export function packDeadline(input: DeadlineInput): PackDeadline {
   if (bookedByThen == null || !Number.isFinite(bookedByThen)) {
     return {
       kind: 'unknown',
-      text: `${sessions(left)} left on this pack and it runs out on ${day} — ${when}. We could not tell which of your bookings are going to use them, so check your diary covers what is on it.`,
+      text: `${sessions(left)} left on this pack and it runs out on ${day} (${when}). We could not tell which of your bookings are going to use them, so check your diary covers what is on it.`,
       urgent: true, toBook: null, daysLeft,
     };
   }
@@ -184,7 +184,7 @@ export function packDeadline(input: DeadlineInput): PackDeadline {
   if (toBook > daysLeft) {
     return {
       kind: 'tight',
-      text: `${sessions(toBook)} on this pack are not booked and there ${daysLeft === 1 ? 'is 1 day' : `are only ${daysLeft} days`} left before ${day}. That is more sessions than days, so some of what you have paid for will go unused unless your coach extends it — ask them.`,
+      text: `${sessions(toBook)} on this pack are not booked and there ${daysLeft === 1 ? 'is 1 day' : `are only ${daysLeft} days`} left before ${day}. That is more sessions than days, so some of what you have paid for will go unused unless your coach extends it. Ask them.`,
       urgent: true, toBook, daysLeft,
     };
   }
@@ -192,7 +192,7 @@ export function packDeadline(input: DeadlineInput): PackDeadline {
   const rate = cadence(toBook, daysLeft);
   return {
     kind: 'toBook',
-    text: `${sessions(toBook)} on this pack ${toBook === 1 ? 'is' : 'are'} not booked yet, and it runs out on ${day} — ${when}.`
+    text: `${sessions(toBook)} on this pack ${toBook === 1 ? 'is' : 'are'} not booked yet, and it runs out on ${day} (${when}).`
       + (rate ? ` That is ${rate}.` : '')
       + ' Anything still on it that day is not refunded.',
     urgent: true, toBook, daysLeft,

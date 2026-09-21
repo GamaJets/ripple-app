@@ -221,7 +221,7 @@ export default function Leaderboard() {
               most expensive sentence it can say. */}
           {status === 'error' ? (
             <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-              note="Nothing is ranked below because the roster did not come back — it does not mean nobody is on your book." />
+              note="Nothing is ranked below because the roster did not come back. It does not mean nobody is on your book." />
           ) : status === 'partial' ? (
             <Notice tone={t.warn} kicker="Roster" title="This Board Is Built from Part of Your Book"
               note="Your roster came back short, so the ranking below leaves people out and the order is not final." />
@@ -242,7 +242,7 @@ export default function Leaderboard() {
           {scored.length === 0 && unplaced.length === 0 && noAccount.length === 0 && isWhole(status) ? (
             <View>
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                No clients yet — your leaderboard fills in as clients join and log their workouts.
+                No clients yet. Your leaderboard fills in as clients join and log their workouts.
               </Text>
               {/* The sentence waits for clients to join and, until now, gave a
                   coach nothing to do about it. Same destination and same words
@@ -268,7 +268,7 @@ export default function Leaderboard() {
           ) : scored.length === 0 && noAccount.length > 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               There is nothing to rank on yet. Everyone on your book was added by hand, so none of
-              them has an app to check in from — they are listed below.
+              them has an app to check in from. They are listed below.
             </Text>
           ) : null}
 
@@ -398,8 +398,8 @@ export default function Leaderboard() {
               This is each client’s own rating from their most recent check-in, out of five and shown
               as a percentage. It is what they said about one day rather than something this app
               measured, and nothing else is folded into it. Weight movement is printed beside the
-              name and is deliberately not added to it. Nor is anything on the second line — how long
-              they have been with you, when they were last seen, their last scan score — or the
+              name and is deliberately not added to it. Nor is anything on the second line (how long
+              they have been with you, when they were last seen, their last scan score) or the
               injury and unread marks under it. Those are what the rating is read against, and none
               of them moves anybody’s place.
             </Text>
@@ -419,7 +419,7 @@ export default function Leaderboard() {
                 note={isWhole(status) ? `${unplaced.length}` : undefined} />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 These clients have never submitted a check-in, so there is no adherence to compare.
-                That is not a low score — it is no score.
+                That is not a low score. It is no score.
               </Text>
               {/* The same five facts, and this is the half of the screen they
                   are worth most on. Every row here says the identical thing
@@ -499,12 +499,12 @@ export default function Leaderboard() {
           <View>
             <Rule />
             <Section>
-              <SectionHead title="Added by Hand — No Account Yet"
+              <SectionHead title="Added by Hand, No Account Yet"
                 note={isWhole(status) ? `${noAccount.length}` : undefined} />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 You added these clients to your book yourself, so they have no Repple account and
                 nothing of theirs reaches this board. That is not a missing check-in and not a low
-                score — there is no app for them to check in from yet. Send them your coaching code
+                score. There is no app for them to check in from yet. Send them your coaching code
                 and they start appearing above from the day they join.
               </Text>
               {/* Said here because it is the one thing on this screen that is
@@ -514,8 +514,8 @@ export default function Leaderboard() {
                   list where every other row's badge is drawn from a real
                   answer, reads as an all-clear. It is not one. */}
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                Nobody has asked them about injuries either — there is no screen for them to
-                disclose one on — so nothing on this page says they are uninjured.
+                Nobody has asked them about injuries either. There is no screen for them to
+                disclose one on, so nothing on this page says they are uninjured.
               </Text>
               {noAccount.map((c, i) => (
                 <Pressable key={c.id}

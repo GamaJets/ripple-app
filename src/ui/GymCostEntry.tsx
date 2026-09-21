@@ -136,7 +136,7 @@ export function GymCostEntry({ costs, currency, closesUnread }: {
     setOpen(false);
     setMsg({
       bad: false,
-      text: `Recorded: ${r.cost.description} — ${money(r.cost.amountCents, r.cost.currency) ?? 'an amount this app cannot state'}`
+      text: `Recorded: ${r.cost.description} · ${money(r.cost.amountCents, r.cost.currency) ?? 'an amount this app cannot state'}`
         + `, paid ${calendarDateText(r.cost.paidOn) ?? r.cost.paidOn}. It is in the gym's ledger and on the console.`,
     });
   };
@@ -206,7 +206,7 @@ export function GymCostEntry({ costs, currency, closesUnread }: {
         </Field>
 
         <View style={{ height: sp.md }} />
-        <Field label="WHO WAS PAID" hint="optional — a cash purchase nobody wrote down is still a real cost">
+        <Field label="WHO WAS PAID" hint="optional: a cash purchase nobody wrote down is still a real cost">
           <TextInput value={draft.supplier} onChangeText={(v) => set({ supplier: v })}
             placeholder="—" placeholderTextColor={t.ink3}
             style={box(t)} />
@@ -266,7 +266,7 @@ export function GymCostEntry({ costs, currency, closesUnread }: {
         {!costs.today.atGym ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Your gym has not said which timezone it is in, so this opened on this phone&rsquo;s day. Which day a cost
-            is dated decides which month it is filed under — check it if you are not at the gym.
+            is dated decides which month it is filed under. Check it if you are not at the gym.
           </Text>
         ) : null}
         {closesUnread ? (

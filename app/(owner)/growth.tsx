@@ -306,10 +306,10 @@ export default function OwnerGrowth() {
           const note = loading
             ? 'Reading your roster…'
             : trainersUnread
-            ? 'Your roster could not be read — this is not a month with no signups in it.'
+            ? 'Your roster could not be read. This is not a month with no signups in it.'
             : roll.trainers > 0
             ? `${roll.trainers} on the roster · ${roll.trainers - idle} delivering sessions`
-            : 'No trainers yet — this fills in as they join your gym.';
+            : 'No trainers yet. This fills in as they join your gym.';
           return (
             /* The tab root's one night hero. The figure is two or three
                characters ("+2", "0", a dash), so the kit's wrapping title is
@@ -440,6 +440,7 @@ export default function OwnerGrowth() {
           <View style={{ marginTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               {churn.loading ? 'Reading your memberships…'
+                // dash-ok: the dash stands for a figure that could not be read, the app's unknown-not-zero sign (see fig() in src/ui/kit.tsx). Not punctuation.
                 : churn.status === 'error' ? `On the books: — (${unreadNote})`
                 // Never `?? 0`. A count that is not known is a dash; a zero
                 // here is the claim that the gym has nobody.
@@ -494,7 +495,7 @@ export default function OwnerGrowth() {
         <Expandable title="How Churn Is Counted">
           <Text style={{ ...ty.caption, color: t.ink3 }}>
             Churn is leavers over the roster the month opened with, counted per person
-            rather than per membership row. A month still running has no rate — the
+            rather than per membership row. A month still running has no rate: the
             leavers it has not had yet have not happened. Nothing in the record says WHEN
             a membership was cancelled, only the end date somebody wrote, so a month that
             lost anybody undated withholds the rate rather than printing the smaller one.
@@ -575,9 +576,9 @@ export default function OwnerGrowth() {
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : trainersUnread ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read — an empty funnel here would say nobody signed up, which is not something this screen found out.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read. An empty funnel here would say nobody signed up, which is not something this screen found out.</Text>
           ) : roll.trainers === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No trainers at your gym yet — the funnel fills in as they join.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>No trainers at your gym yet. The funnel fills in as they join.</Text>
           ) : funnel.map(([label, count, pct], i) => bar(label, {
             // One hue per stage, so the narrowing reads as four named steps
             // stacked rather than one bar drawn four times.
@@ -615,9 +616,9 @@ export default function OwnerGrowth() {
               one row per member per code and nothing here buckets them by
               month, so no period is claimed. */}
           {promoStatus === 'error' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Your codes could not be read just now — this is not a statement that you have none.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your codes could not be read just now. This is not a statement that you have none.</Text>
           ) : promos.length === 0 ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>{promoStatus === 'loading' ? 'Loading.' : 'No codes yet — create one below.'}</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>{promoStatus === 'loading' ? 'Loading.' : 'No codes yet. Create one below.'}</Text>
           ) : null}
           {promos.map((p, i) => (
             <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md,
@@ -705,7 +706,7 @@ export default function OwnerGrowth() {
             <Flag tone={t.warn}>
               “{lastCaveat.code}” is live. {lastCaveat.note} Two codes spelled the same
               way can both be saved, and a member typing one of them gets whichever the
-              database reaches first — so pull down to read your codes again and check
+              database reaches first, so pull down to read your codes again and check
               this one is the only one.
             </Flag>
           ) : null}

@@ -627,27 +627,27 @@ export function habitStreakNote(s: HabitStreak): string {
   const parts: string[] = [];
   if (s.days === 0) {
     if (!s.lastTicked) {
-      return 'No run going just now. Nothing on the record for this one in the days we can see — which is not the same as a day you skipped.';
+      return 'No run going just now. Nothing on the record for this one in the days we can see, which is not the same as a day you skipped.';
     }
     parts.push(`No run going just now. Last ticked ${dayLabel(s.lastTicked)}.`);
   } else {
     const span = s.days + s.silentDays;
     parts.push(s.bounded
-      ? `Ticked ${s.days} ${s.days === 1 ? 'day' : 'days'} running, and the run reaches as far back as this screen can read — so it may well be longer.`
+      ? `Ticked ${s.days} ${s.days === 1 ? 'day' : 'days'} running, and the run reaches as far back as this screen can read, so it may well be longer.`
       : `Ticked ${s.days} ${s.days === 1 ? 'day' : 'days'} running.`);
     // Said BEFORE the hole inside the run, because it is the fact that decides
     // what the figure means. A run that stopped being kept up a fortnight ago
     // is not a current run, and the number alone reads as one.
     if (s.silentAbove > 0) {
       parts.push(
-        `That run ended ${dayLabel(s.lastTicked ?? '')} — nothing at all has been recorded since, `
+        `That run ended ${dayLabel(s.lastTicked ?? '')}. Nothing at all has been recorded since, `
         + `for ${s.silentAbove} ${s.silentAbove === 1 ? 'day' : 'days'}. It has not been broken, `
         + 'we simply have no record of those days either way.');
     }
     if (s.silentDays > 0) {
       parts.push(
         `${s.silentDays} ${s.silentDays === 1 ? 'day' : 'days'} inside that run of ${span} `
-        + `${s.silentDays === 1 ? 'has' : 'have'} nothing recorded at all — we have counted `
+        + `${s.silentDays === 1 ? 'has' : 'have'} nothing recorded at all. We have counted `
         + `${s.silentDays === 1 ? 'it' : 'them'} as neither kept nor skipped.`);
     }
   }

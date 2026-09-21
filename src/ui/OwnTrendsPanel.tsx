@@ -214,14 +214,14 @@ export function OwnTrendsPanel({ log, status, weights, unit, nowMs }: {
   return (
     <View>
       <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-        Your own training over time. Every figure here is worked out from what you logged — nothing
+        Your own training over time. Every figure here is worked out from what you logged. Nothing
         is a target and nothing is a judgement.
       </Text>
 
       {status === 'error' ? (
         <Text style={{ ...ty.body, color: t.ink2 }}>
           Your training log could not be read, so there is nothing honest to chart. Your history is
-          intact — this cannot see it right now.
+          intact. This screen cannot see it right now.
         </Text>
       ) : status === 'loading' ? (
         <Text style={{ ...ty.body, color: t.ink3 }}>Reading your log…</Text>

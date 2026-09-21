@@ -169,7 +169,7 @@ export function previewLiftingImport(text: string): LiftingImportPreview {
     return {
       source: null, entries: [], setsRead: 0, skipped: [],
       blocker: 'This does not look like a Strong or Hevy export. Both start with a header row naming the '
-        + 'exercise, the set number and the reps — export again from the app rather than editing the file, '
+        + 'exercise, the set number and the reps. Export again from the app rather than editing the file, '
         + 'and if the weights are in pounds switch that app to kilograms first.',
     };
   }
@@ -183,7 +183,7 @@ export function previewLiftingImport(text: string): LiftingImportPreview {
   if (iAt < 0 || iEx < 0 || iReps < 0 || iKg < 0) {
     return {
       source, entries: [], setsRead: 0, skipped: [],
-      blocker: 'That export is missing a column this reader needs — the date, the exercise, the reps or the '
+      blocker: 'That export is missing a column this reader needs: the date, the exercise, the reps or the '
         + 'weight. Export the full history rather than a filtered view.',
     };
   }
@@ -309,6 +309,6 @@ export function liftingImportNote(p: LiftingImportPreview): string {
   if (!p.skipped.length) return head;
   const dropped = p.skipped.reduce((a, s) => a + s.rows, 0);
   const why = p.skipped.map((s) => `${s.rows} with ${s.reason}`).join(', ');
-  return `${head} ${dropped} row${dropped === 1 ? '' : 's'} will not be imported — ${why}. `
+  return `${head} ${dropped} row${dropped === 1 ? '' : 's'} will not be imported: ${why}. `
     + `Those are left out rather than guessed at.`;
 }

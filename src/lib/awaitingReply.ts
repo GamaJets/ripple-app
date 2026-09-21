@@ -210,7 +210,7 @@ function withheldFor(status: LoadStatus): string | null {
     case 'partial':
       return 'Your book came back short, so this is drawn from the threads that arrived and not from all of them. Somebody may be waiting who is not here.';
     case 'error':
-      return 'Your conversations could not be read, so this is not a list of who is waiting on you — it is what we had before the read failed.';
+      return 'Your conversations could not be read, so this is not a list of who is waiting on you. It is what we had before the read failed.';
   }
 }
 
@@ -302,7 +302,7 @@ export function waitingNote(book: WaitingBook): string | null {
     // Said once, under the list, and it is the honest description of what the
     // rows are. A coach who reads this as a list of failures will stop opening
     // it the first time a "thanks" appears on it.
-    parts.push(`These are the conversations where your client spoke last and it has been at least ${WAITING_HOURS} hours. Some of them will be a thank-you — this list can tell who wrote last, not who is owed an answer.`);
+    parts.push(`These are the conversations where your client spoke last and it has been at least ${WAITING_HOURS} hours. Some of them will be a thank-you. This list can tell who wrote last, not who is owed an answer.`);
   }
   return parts.length ? parts.join(' ') : null;
 }

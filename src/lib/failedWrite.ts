@@ -175,7 +175,7 @@ export function failedWriteSentence(
       + `Nothing was sent, so ${still}.`;
   }
   return `${what} was sent and nothing came back: ${because(reason, 'the request timed out')} `
-    + 'So this cannot tell you whether it went through — it may have been saved and only the '
+    + 'So this cannot tell you whether it went through. It may have been saved and only the '
     + `reply lost, and it may equally not exist at all. Do not enter it again until you know which. `
     + `${check}`.trimEnd();
 }

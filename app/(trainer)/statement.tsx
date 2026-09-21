@@ -413,7 +413,7 @@ export default function StatementOfRecord() {
         : 'This build cannot produce a PDF, so it goes as plain text instead. Nothing is left out of it: every line and every caveat is in the text.'),
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, `Statement of record — ${period.label}`); } },
+        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, `Statement of record · ${period.label}`); } },
       ],
     );
   };
@@ -667,7 +667,7 @@ export default function StatementOfRecord() {
             {/* The card of prose that opened the page, behind a fold. */}
             <Expandable title="What This Is" note="What this app recorded, and only that">
               <Text style={{ ...ty.caption, color: t.ink3 }}>
-                It calculates no tax and it is not a tax document — it says so on its own face, so nobody has to take your word for what it is. Where Stripe took the payment, Stripe's own record is the one that proves it.
+                It calculates no tax and it is not a tax document. It says so on its own face, so nobody has to take your word for what it is. Where Stripe took the payment, Stripe's own record is the one that proves it.
               </Text>
             </Expandable>
 
@@ -696,7 +696,7 @@ export default function StatementOfRecord() {
                 <Notice
                   kicker="Nothing Recorded"
                   title="This Period Has Nothing in It"
-                  note="Every read came back in full, so this is your record rather than a failure. This app only holds what went through it — money a client handed you in cash, sent by transfer, or paid at a gym's front desk was never here to list. You can put those on the record yourself by issuing an invoice for them, and they will be on next year's statement."
+                  note="Every read came back in full, so this is your record rather than a failure. This app only holds what went through it. Money a client handed you in cash, sent by transfer, or paid at a gym's front desk was never here to list. You can put those on the record yourself by issuing an invoice for them, and they will be on next year's statement."
                 />
                 <Rule />
               </>
@@ -818,7 +818,7 @@ export default function StatementOfRecord() {
                   {g.lines.map((l) => (
                     <View key={l.key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: 6 }}>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.label, color: t.ink }}>{l.who ? `${l.who} — ${l.what}` : l.what}</Text>
+                        <Text style={{ ...ty.label, color: t.ink }}>{l.who ? `${l.who} · ${l.what}` : l.what}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{l.when} · {l.status}</Text>
                         {/* On the line, beside the empty figure, rather than
                             once at the top: a row is read on its own, and a

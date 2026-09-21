@@ -243,7 +243,7 @@ export default function Settings() {
     if (res === 'on' || res === 'off') return;
     if (res === 'no-build') {
       Alert.alert('Not on This Build Yet',
-        'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
+        'This version of the app cannot receive push notifications at all. That needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
       return;
     }
     if (res === 'os-refused') {
@@ -257,7 +257,7 @@ export default function Settings() {
     // turned notifications off and then gets one needs to have been told it
     // might happen.
     Alert.alert('Saved, but Not Confirmed',
-      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
+      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list. You may still get one until the next time you open the app. Nothing else has changed.");
   };
 
   const signOut = () => {
@@ -452,7 +452,7 @@ export default function Settings() {
         // to a company they have never heard of, that cannot act for their gym,
         // and whose existence they were never told about.
         if (!ok) { Alert.alert('Not Requested', `We couldn't record your request just now, so nothing has been scheduled. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`); return; }
-        Alert.alert('Deletion Requested', 'Your account is scheduled for deletion and your data will be erased. Signing you out of this phone now.\n\nYou can withdraw the request from Settings until it is actioned — sign back in to do that.', [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }]);
+        Alert.alert('Deletion Requested', 'Your account is scheduled for deletion and your data will be erased. Signing you out of this phone now.\n\nYou can withdraw the request from Settings until it is actioned. Sign back in to do that.', [{ text: 'OK', onPress: () => { void leaveNow(() => router.replace('/welcome')); } }]);
       } },
       ],
     );
@@ -466,7 +466,7 @@ export default function Settings() {
           const ok = await withdrawAccountDeletion();
           if (!ok) {
             reportError('settings.withdrawDeletion', new Error('withdraw_account_deletion did not clear the request'));
-            Alert.alert('Not Withdrawn', `Your deletion request is still in place — nothing has changed. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
+            Alert.alert('Not Withdrawn', `Your deletion request is still in place. Nothing has changed. ${retryLine(reach)} You can also email ${BRAND.supportEmail} from the address on your account.`);
             return;
           }
           // Re-read rather than assume: what the screen shows next comes from the
@@ -677,7 +677,7 @@ export default function Settings() {
             <Row t={t} label="Delete My Account" sub="Checking whether you already have a request in…" right={<Icon name={FORWARD_ICON} size={15} color={t.ink3} />} />
           ) : deletion === 'failed' ? (
             <>
-              <Row t={t} label="Deletion Status Unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer — it does not mean you have none." right={
+              <Row t={t} label="Deletion Status Unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer. It does not mean you have none." right={
                 <Pressable onPress={() => { void loadDeletion(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel="Check your deletion status again"
                   style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                   <Text style={{ ...ty.label, ...font('600'), color: t.ink2 }}>Try Again</Text>

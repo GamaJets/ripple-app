@@ -116,7 +116,7 @@ export function isCurrent(s: ReadState): boolean {
  */
 export function staleNote(what: string, reason?: string | null): string {
   const why = (reason ?? '').trim();
-  return `Refreshing the ${what} did not come back${why ? ` — ${why}` : ''}. `
+  return `Refreshing the ${what} did not come back${why ? ` (${why})` : ''}. `
     + `What is shown is the last read that DID land, so it is real but not confirmed current. `
     + `Nothing in your gym has changed because a refresh failed.`;
 }
@@ -130,7 +130,7 @@ export function staleNote(what: string, reason?: string | null): string {
  */
 export function failedNote(what: string, reason?: string | null): string {
   const why = (reason ?? '').trim();
-  return `Your ${what} could not be read${why ? ` — ${why}` : ''}. `
+  return `Your ${what} could not be read${why ? ` (${why})` : ''}. `
     + `This is a read that did not come back, not an empty ${what}. `
     + `Nothing has been cleared and nothing has lapsed.`;
 }

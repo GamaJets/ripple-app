@@ -101,7 +101,7 @@ export function acceptedLine(count: number | null, required: boolean): string | 
   if (count > 0) return `${count} ${count === 1 ? 'person has' : 'people have'} accepted this`;
   return required
     ? 'Nobody has accepted this yet'
-    : 'Nobody has accepted this — you are not asking them to';
+    : 'Nobody has accepted this. You are not asking them to';
 }
 
 /** True when the line needs a mark beside it: a required document nobody has
@@ -126,4 +126,4 @@ export const COUNTABLE_DOCUMENTS_CAP = 100;
 
 export const ACCEPTANCE_COUNTS_UNCOUNTABLE_NOTE =
   'How many people have accepted each document could not be worked out just now. Nobody’s acceptance has '
-  + 'changed — open Who’s Accepted on a document to see where it stands.';
+  + 'changed. Open Who’s Accepted on a document to see where it stands.';

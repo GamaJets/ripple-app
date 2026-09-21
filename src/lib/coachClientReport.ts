@@ -338,7 +338,7 @@ export interface CoachClientReportDoc {
  */
 export const COACH_REPORT_PROVENANCE = [
   'This is a record of what was entered in this app about the person named above, printed by their coach.',
-  'Sessions are the ones booked in this app and the outcome their coach recorded against each. Training is what was logged, by the client or by their coach. Body-composition figures are transcribed from body-composition machine printouts — read automatically from a photograph, or typed in by hand — and are not measured by this app. Tape measurements are taken by hand.',
+  'Sessions are the ones booked in this app and the outcome their coach recorded against each. Training is what was logged, by the client or by their coach. Body-composition figures are transcribed from body-composition machine printouts (read automatically from a photograph, or typed in by hand) and are not measured by this app. Tape measurements are taken by hand.',
   'Dates are the dates recorded against each entry. Where something was not recorded it is shown as a dash, never as a zero.',
 ];
 
@@ -357,7 +357,7 @@ export const COACH_REPORT_LIMITS =
  *  coach, which a forwarded file would quietly turn into a share with
  *  everybody. */
 export const COACH_REPORT_NO_PHOTOS =
-  'No photographs are included. Progress photographs are shared by the client with one coach at a time and are never attached to a document. Documents a client uploaded about an injury are likewise not included — only the injury they recorded from them.';
+  'No photographs are included. Progress photographs are shared by the client with one coach at a time and are never attached to a document. Documents a client uploaded about an injury are likewise not included, only the injury they recorded from them.';
 
 /**
  * Why there is no attendance percentage on this page.
@@ -458,7 +458,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
   // ground and would vanish into it.
   H.push(logoImgHtml(input.logoDataUri));
   H.push(`<div class="h"><h1>Coaching record</h1><p>${escapeHtml(who)} · prepared ${escapeHtml(dayLabel(input.generatedOn))} · ${escapeHtml(brand)}</p></div>`);
-  T.push(`${who} — coaching record`);
+  T.push(`${who} · coaching record`);
   T.push(`Prepared ${dayLabel(input.generatedOn)} · ${brand}`);
 
   /* ── who prepared it ───────────────────────────────────────────────────── */
@@ -471,7 +471,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
   T.push('', 'WHO PREPARED THIS');
   if (!coachRead) {
     H.push(unreadableBlock('The name of the coach preparing this'));
-    T.push('Not read — the name of the coach preparing this could not be read. This document is NOT an assessment produced by the app.');
+    T.push('Not read: the name of the coach preparing this could not be read. This document is NOT an assessment produced by the app.');
   } else if (!coach) {
     H.push(emptyBlock('The coach preparing this has not recorded a name on their account.'));
     T.push('The coach preparing this has not recorded a name on their account.');
@@ -509,7 +509,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'SESSIONS BOOKED IN THIS APP');
     if (st === 'unreadable' || tally.state === 'unreadable') {
       H.push(unreadableBlock('Sessions'));
-      T.push('Not read — sessions could not be read. This is not a statement that none were booked.');
+      T.push('Not read: sessions could not be read. This is not a statement that none were booked.');
     } else if (tally.state === 'none') {
       H.push(emptyBlock('No sessions were booked with this coach in this app. Sessions arranged any other way are not recorded here.'));
       T.push('No sessions were booked with this coach in this app. Sessions arranged any other way are not recorded here.');
@@ -561,7 +561,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'TRAINING LOGGED');
     if (st === 'unreadable' || b.state === 'unreadable') {
       H.push(unreadableBlock('Logged training'));
-      T.push('Not read — logged training could not be read. This is not a statement that none was logged.');
+      T.push('Not read: logged training could not be read. This is not a statement that none was logged.');
     } else if (!b.days.length && b.undatedCount < 1) {
       H.push(emptyBlock('No training sessions are logged in this app.'));
       T.push('No training sessions are logged in this app.');
@@ -620,7 +620,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'BODY COMPOSITION');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Body-composition scans'));
-      T.push('Not read — body-composition scans could not be read. This is not a statement that there are none.');
+      T.push('Not read: body-composition scans could not be read. This is not a statement that there are none.');
     } else if (!scans.length) {
       H.push(emptyBlock('No body-composition scans are recorded.'));
       T.push('No body-composition scans are recorded.');
@@ -652,8 +652,8 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
           H.push(`<p>First reading to latest: ${escapeHtml(lines.join(' · '))}</p>`);
           T.push('First reading to latest: ' + lines.join(' · '));
         } else {
-          H.push('<p class="lede">One reading of each figure so far — a change needs two.</p>');
-          T.push('One reading of each figure so far — a change needs two.');
+          H.push('<p class="lede">One reading of each figure so far. A change needs two.</p>');
+          T.push('One reading of each figure so far. A change needs two.');
         }
       } else {
         // The text fallback carries the WHOLE sentence, not a shortened one.
@@ -675,7 +675,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'TAPE MEASUREMENTS');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Tape measurements'));
-      T.push('Not read — tape measurements could not be read. This is not a statement that there are none.');
+      T.push('Not read: tape measurements could not be read. This is not a statement that there are none.');
     } else if (!entries.length || !cols.length) {
       H.push(emptyBlock('No tape measurements are recorded.'));
       T.push('No tape measurements are recorded.');
@@ -710,7 +710,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
     T.push('', 'INJURIES DISCLOSED IN THE APP');
     if (st === 'unreadable') {
       H.push(unreadableBlock('Disclosed injuries'));
-      T.push('Not read — disclosed injuries could not be read. THIS IS NOT A STATEMENT THAT NONE WERE DISCLOSED.');
+      T.push('Not read: disclosed injuries could not be read. THIS IS NOT A STATEMENT THAT NONE WERE DISCLOSED.');
     } else if (!items.length) {
       H.push(emptyBlock('No injuries have been recorded in the app. This records only what has been entered here, and is not a medical history.'));
       T.push('No injuries have been recorded in the app. This records only what has been entered here, and is not a medical history.');
@@ -726,7 +726,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
         + `<td>${escapeHtml(dayLabel(i.at))}</td>`
         + `<td>${escapeHtml(i.note || '—')}</td></tr>`).join('');
       H.push(`<table><tr><th>Area</th><th>Severity as recorded</th><th>State</th><th>Recorded on</th><th>Their note</th></tr>${body}</table>`);
-      for (const i of items) T.push(`  ${i.label} — ${i.severity}, ${i.status}, recorded ${dayLabel(i.at)}${i.note ? ' — "' + i.note + '"' : ''}`);
+      for (const i of items) T.push(`  ${i.label} · ${i.severity}, ${i.status}, recorded ${dayLabel(i.at)}${i.note ? ' · "' + i.note + '"' : ''}`);
       const grading = 'Severity and state are as the person themselves recorded them, in the app’s own three-step wording. They are not a clinical grading and the coach did not assign them.';
       H.push(`<p class="lede">${escapeHtml(grading)}</p>`);
       T.push(grading);
@@ -761,7 +761,7 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
   /* ── foot ──────────────────────────────────────────────────────────────── */
   const foot = complete
     ? `Every section of this document was read successfully on ${dayLabel(input.generatedOn)}. Generated by ${brand}.`
-    : `PARTS OF THIS DOCUMENT COULD NOT BE READ — see "This record is incomplete" above. Generated by ${brand}.`;
+    : `PARTS OF THIS DOCUMENT COULD NOT BE READ. See "This record is incomplete" above. Generated by ${brand}.`;
   H.push(`<p class="foot">${escapeHtml(foot)}</p>`);
   T.push('', foot);
 

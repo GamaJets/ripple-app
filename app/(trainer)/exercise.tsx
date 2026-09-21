@@ -261,7 +261,7 @@ export default function TrainerExercise() {
           </View>
         ) : status === 'error' ? (
           <Notice tone={t.warn} kicker="Exercise" title="This Could Not Be Read"
-            note="Nothing below is missing because it does not exist — we could not reach the catalogue. Try again once you have signal." />
+            note="Nothing below is missing because it does not exist. We could not reach the catalogue. Try again once you have signal." />
         ) : clip ? (
           <View style={hero}><View style={heroClip}><ExerciseVideo video={clip} exerciseName={detail?.name || name} /></View></View>
         ) : animUrl ? (
@@ -275,7 +275,7 @@ export default function TrainerExercise() {
             </View></View>
             {detail?.demoLicence !== 'commercial' ? (
               <View style={{ marginTop: sp.sm }}>
-                <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
+                <Flag tone={t.warn}>Evaluation asset: licensed for review only, never for release.</Flag>
               </View>
             ) : null}
           </>
@@ -308,16 +308,16 @@ export default function TrainerExercise() {
               ? clipsKnown
                 ? 'Nobody has filmed this movement and the catalogue has no illustration for it, so your client sees its name, its muscles and the written steps. Record a clip from Videos and it appears here for them.'
                 : vidStatus === 'error'
-                  ? 'The catalogue has no illustration for this movement, and your clip library could not be read — so whether you or your gym have already filmed it is unknown rather than no. Try again, and record one only if there is nothing there.'
+                  ? 'The catalogue has no illustration for this movement, and your clip library could not be read, so whether you or your gym have already filmed it is unknown rather than no. Try again, and record one only if there is nothing there.'
                   : vidStatus === 'partial'
-                    ? 'The catalogue has no illustration for this movement, and only part of your clip library came back — so a clip of this may be on the other side of that limit. Nothing here says you have not filmed it.'
+                    ? 'The catalogue has no illustration for this movement, and only part of your clip library came back, so a clip of this may be on the other side of that limit. Nothing here says you have not filmed it.'
                     : 'The catalogue has no illustration for this movement. Your clip library is still being read, so whether one of yours covers it is not known yet.'
               // See the matching note on the client screen. Saying "no
               // catalogue entry" while signed out told a coach exploring the
               // demo that Back Squat is not in a catalogue that contains it.
               : signedOut
                 ? 'The exercise catalogue is only available once you are signed in, so this screen could not look this movement up. Sign in and its illustration, muscles and steps appear here.'
-                : 'This movement has no catalogue entry, so there is no illustration, description or muscle data for it. You can still put it in a program — your client sees the name you typed and whatever you write in the note.'} />
+                : 'This movement has no catalogue entry, so there is no illustration, description or muscle data for it. You can still put it in a program. Your client sees the name you typed and whatever you write in the note.'} />
         )}
 
         {/* Directly under the thing it is about. Gated on the catalogue read
@@ -353,7 +353,7 @@ export default function TrainerExercise() {
 
         {FRAMES_ARE_UNHOSTED && frames.length ? (
           <View style={{ marginTop: sp.sm }}>
-            <Flag tone={t.warn}>Illustrations are served from the source dataset — not for release.</Flag>
+            <Flag tone={t.warn}>Illustrations are served from the source dataset, not for release.</Flag>
           </View>
         ) : null}
 
@@ -394,7 +394,7 @@ export default function TrainerExercise() {
                       read having finished, so a row still arriving is never
                       described as having no steps. */}
                   <Text style={{ ...ty.label, color: t.ink3 }}>
-                    No written steps for this one yet — your client sees no instructions, so put the cue in the program note.
+                    No written steps for this one yet. Your client sees no instructions, so put the cue in the program note.
                   </Text>
                 </Section>
               </>
@@ -603,7 +603,7 @@ export default function TrainerExercise() {
                   )) : null}
                   {rosterAsk === 'ready' && rosterJudged.some((c) => c.e1rmKg != null) ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                      Any one-rep max behind these is an estimate off logged sets — nobody has tested one.
+                      Any one-rep max behind these is an estimate off logged sets. Nobody has tested one.
                     </Text>
                   ) : null}
                 </View>

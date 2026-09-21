@@ -295,7 +295,7 @@ export function cueRefusal(draft: string, name: string): string | null {
   }
   const c = (draft || '').trim();
   if (c === '') {
-    return 'Type the cue first. Saving an empty box would not clear your cue — use Remove for that.';
+    return 'Type the cue first. Saving an empty box would not clear your cue. Use Remove for that.';
   }
   if (c.length > CUE_MAX) {
     return `That is ${c.length} characters and a cue holds ${CUE_MAX}. A cue is the one sentence you say every time; the longer version belongs in the note for the client it is about.`;
@@ -312,7 +312,7 @@ export function cueRefusal(draft: string, name: string): string | null {
  * the absence of a table.
  */
 export const CUES_UNAVAILABLE_NOTE =
-  'Saved cues are not switched on for this app yet, so there is nothing to prefill from. This is not a record that you have written none — keep typing notes here as you always have, and they are unaffected.';
+  'Saved cues are not switched on for this app yet, so there is nothing to prefill from. This is not a record that you have written none. Keep typing notes here as you always have, and they are unaffected.';
 
 /** What it says under a movement the coach has no cue for yet. True only when
  *  the read succeeded, which is why it is separate from the sentence above. */
@@ -322,7 +322,7 @@ export const NO_CUE_YET_NOTE =
 /** The promise the coach is owed, said where they can see it before they tap.
  *  It is the rule this module exists to keep. */
 export const CUE_NEVER_OVERWRITES =
-  'A saved cue only ever fills an EMPTY note. Notes you have already written — here or on any other client — are never changed by it.';
+  'A saved cue only ever fills an EMPTY note. Notes you have already written, here or on any other client, are never changed by it.';
 
 /** The a11y hint on the control that fills an empty box from the cue. */
 export const USE_CUE_HINT = 'Copies your saved cue into this note. Only available while the note is empty.';
@@ -471,14 +471,14 @@ export async function saveCue(
     if (isMissingCueTable(error)) {
       return { ok: false, said: CUES_UNAVAILABLE_NOTE };
     }
-    return { ok: false, said: `That cue was not saved — ${error.message || 'the write was refused'}.` };
+    return { ok: false, said: `That cue was not saved: ${error.message || 'the write was refused'}.` };
   }
   // Counted, not assumed. An upsert refused by RLS resolves with no error and
   // no rows on some paths; a zero-row answer is a write that did not happen.
   const rows = (data ?? []) as any[];
   const saved = rows.length ? rowToCue(rows[0]) : null;
   if (!saved) {
-    return { ok: false, said: 'That cue was not saved — the write came back with no row, so nothing was stored.' };
+    return { ok: false, said: 'That cue was not saved. The write came back with no row, so nothing was stored.' };
   }
   return { ok: true, cue: saved };
 }
@@ -506,10 +506,10 @@ export async function deleteCue(
     .select('exercise_id');
   if (error) {
     if (isMissingCueTable(error)) return { ok: false, said: CUES_UNAVAILABLE_NOTE };
-    return { ok: false, said: `That cue was not removed — ${error.message || 'the delete was refused'}.` };
+    return { ok: false, said: `That cue was not removed: ${error.message || 'the delete was refused'}.` };
   }
   if (!((data ?? []) as any[]).length) {
-    return { ok: false, said: 'That cue was not removed — nothing came back, so it may still be there.' };
+    return { ok: false, said: 'That cue was not removed. Nothing came back, so it may still be there.' };
   }
   return { ok: true };
 }

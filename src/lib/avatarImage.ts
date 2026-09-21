@@ -133,7 +133,7 @@ export function avatarSource(value: string | null | undefined): string | null {
  * which would read as though they had never set one.
  */
 export const DEVICE_AVATAR_NOTE =
-  'Your photo was saved as a file on the phone that chose it, so nobody else could ever see it — your coach has been looking at a blank circle. Choose it again and it will be uploaded properly this time.';
+  'Your photo was saved as a file on the phone that chose it, so nobody else could ever see it. Your coach has been looking at a blank circle. Choose it again and it will be uploaded properly this time.';
 
 /** What to say when the upload did not happen. Never "saved". */
 export const AVATAR_UPLOAD_FAILED_NOTE =
@@ -154,6 +154,6 @@ export const AVATAR_NO_SERVER_NOTE =
  * see it, because their own handset opens its own file.
  */
 export const DEVICE_AVATAR_NOTE_COACH =
-  'Your photo was saved as a file on the phone that chose it, so nobody else has ever been able to see it — '
-  + 'your clients, your booking screen and your directory card have all been showing a blank circle. '
+  'Your photo was saved as a file on the phone that chose it, so nobody else has ever been able to see it. '
+  + 'Your clients, your booking screen and your directory card have all been showing a blank circle. '
   + 'Choose it again and it will be uploaded properly this time.';

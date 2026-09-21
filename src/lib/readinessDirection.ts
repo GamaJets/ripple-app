@@ -302,7 +302,7 @@ export function readinessDirection(
   if (prev == null || typeof prev.score !== 'number' || !Number.isFinite(prev.score)) {
     return {
       state: 'no-record', delta: null, against: y.day,
-      detail: 'no readiness on record for yesterday, so there is no direction to show — it does not mean nothing changed',
+      detail: 'no readiness on record for yesterday, so there is no direction to show, which does not mean nothing changed',
       caveat: null,
     };
   }
@@ -316,7 +316,7 @@ export function readinessDirection(
       // the same distinction `readinessSleep` draws between 'stale' and 'none'.
       return {
         state: 'no-record', delta: null, against: y.day,
-        detail: 'no readiness on record for yesterday — the most recent day you have is older than that',
+        detail: 'no readiness on record for yesterday; the most recent day you have is older than that',
         caveat: null,
       };
     }

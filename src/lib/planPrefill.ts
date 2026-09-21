@@ -265,7 +265,7 @@ export function prefillLine(p: DayPrefill): string {
   const parts: string[] = [];
   const ex = t.exercises === 1 ? '1 exercise' : `${t.exercises} exercises`;
   const st = t.sets === 1 ? '1 set' : `${t.sets} sets`;
-  parts.push(`${ex} and ${st} added — the plan's figures, not a record of anything yet. Edit them to what was actually done.`);
+  parts.push(`${ex} and ${st} added: the plan's figures, not a record of anything yet. Edit them to what was actually done.`);
   if (t.open) {
     parts.push(t.open === 1
       ? '1 set has a target the plan does not state as a single number, so its reps are blank.'
@@ -422,7 +422,7 @@ export function planOffer(
     return {
       ...bare,
       state: 'unreadable',
-      line: `Your program assignments could not be read in full, so whether ${who} has one is not known here. That is a connection problem, not a client without a program — add what they did below, or try again once you are connected.`,
+      line: `Your program assignments could not be read in full, so whether ${who} has one is not known here. That is a connection problem, not a client without a program. Add what they did below, or try again once you are connected.`,
     };
   }
 

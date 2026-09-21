@@ -238,7 +238,7 @@ export function docLine(d: CoachDoc): string {
     case 'must-accept':
       return 'Your coach asks you to read and accept this';
     case 'optional':
-      return 'For you to read — no acceptance needed';
+      return 'For you to read · no acceptance needed';
     case 'withdrawn':
       return 'Withdrawn by your coach';
   }
@@ -253,7 +253,7 @@ export function docLine(d: CoachDoc): string {
  */
 export const COACH_DOC_ACCEPT_RULE =
   'Accepting records the date against your name for your coach to see. It can’t be edited or withdrawn '
-  + 'afterwards, by you or by them — that permanence is what makes it worth anything.';
+  + 'afterwards, by you or by them. That permanence is what makes it worth anything.';
 
 /** The distinction that must never blur — and it blurs the moment the sentence
  *  names a company that is not on the member's phone. Same reason as
@@ -266,7 +266,7 @@ export const COACH_DOC_NOT_REPPLE =
 /** What a coach is told about editing. */
 export const COACH_DOC_IMMUTABLE_NOTE =
   'A document can’t be edited once it’s here, because people may already have accepted it. Changed the '
-  + 'wording? Upload the new version and retire the old one — everyone who accepted the old one keeps that '
+  + 'wording? Upload the new version and retire the old one. Everyone who accepted the old one keeps that '
   + 'record, and can still read what they agreed to.';
 
 /** Who can open the file. Said plainly, because a coach uploading a document is
@@ -288,7 +288,7 @@ export const COACH_DOC_IMMUTABLE_NOTE =
  *  told their leavers keep the paperwork they signed. They do not, and the
  *  acceptance RECORD that does survive is a document id and a timestamp. */
 export const COACH_DOC_REACH_NOTE =
-  'Only you and the clients you currently coach can open these. Nobody else at the gym can — and if a '
+  'Only you and the clients you currently coach can open these. Nobody else at the gym can, and if a '
   + 'client moves to another coach they lose access to all of it, including anything they accepted. '
   + 'Their record of having accepted it stays.';
 
@@ -314,7 +314,7 @@ export const COACH_DOC_REACH_NOTE =
  */
 export const COACH_DOC_ACCESS_ENDS_NOTE =
   'You can open these while this coach is your coach. If you move to another coach, or your coaching '
-  + 'ends, they stop opening for you — including anything you have accepted, which is why it is worth '
+  + 'ends, they stop opening for you, including anything you have accepted, which is why it is worth '
   + 'saving a copy of anything you may need later. Your record of having accepted it stays either way.';
 
 /**
@@ -352,7 +352,7 @@ export const STANDING_ROW_CAP = 500;
 
 export const STANDING_TRUNCATED_NOTE =
   'You have more clients than this list could bring back, so how many have accepted cannot be stated here. '
-  + 'The names below are real but they are not all of them — do not read this as everybody being covered.';
+  + 'The names below are real but they are not all of them. Do not read this as everybody being covered.';
 
 /** "4 of 9 have accepted" — the coach's summary for one document.
  *

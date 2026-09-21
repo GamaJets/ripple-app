@@ -107,6 +107,7 @@ export function activityLabel(lastActive: string | null | undefined): string | n
   // idle. It is shown, because "we do not know when they were last in" is worth
   // a coach's attention, and it is shown as the dash this app uses everywhere
   // else for a figure nobody measured.
+  // dash-ok: the dash stands for a figure that could not be read, the app's unknown-not-zero sign (see fig() in src/ui/kit.tsx). Not punctuation.
   if (s === '—') return 'last seen —';
   return /\d+[mhd] ago$/.test(s) ? `last seen ${s}` : s;
 }
@@ -136,6 +137,7 @@ export interface UnreadMark {
  */
 export function unreadMark(unread: number | null | undefined): UnreadMark | null {
   if (unread == null) {
+    // dash-ok: the dash stands for a figure that could not be read, the app's unknown-not-zero sign (see fig() in src/ui/kit.tsx). Not punctuation.
     return { text: 'unread —', known: false, spoken: 'their unread message count could not be read' };
   }
   if (!Number.isFinite(unread) || unread <= 0) return null;

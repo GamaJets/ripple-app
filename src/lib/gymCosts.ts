@@ -117,13 +117,13 @@ export type GymCostCategory =
 export const GYM_COST_CATEGORIES: ReadonlyArray<{ id: GymCostCategory; label: string; note: string }> = [
   { id: 'rent', label: 'Rent and Rates', note: 'Premises rent, the service charge, business rates' },
   { id: 'utilities', label: 'Utilities', note: 'Electricity, gas, water, waste' },
-  { id: 'staff', label: 'Staff Not on Payroll', note: 'Reception, cleaning, a manager, employer taxes — NOT trainer session pay, which is already settled on Payroll' },
+  { id: 'staff', label: 'Staff Not on Payroll', note: 'Reception, cleaning, a manager, employer taxes. NOT trainer session pay, which is already settled on Payroll' },
   { id: 'maintenance', label: 'Maintenance and Cleaning', note: 'Servicing, repairs, an engineer, hygiene supplies' },
   { id: 'equipment', label: 'Equipment', note: 'A machine, plates, a rack, anything the floor is made of' },
   { id: 'insurance', label: 'Insurance', note: 'Public liability, employer’s liability, buildings and contents' },
   { id: 'licensing', label: 'Licences', note: 'A music licence, a local-authority licence, a certification' },
   { id: 'marketing', label: 'Marketing', note: 'Ads, print, a photographer, the website' },
-  { id: 'software', label: 'Software', note: 'Booking, till, music, accounting — and this gym’s own Repple bill, which is on no screen you can open' },
+  { id: 'software', label: 'Software', note: 'Booking, till, music, accounting, and this gym’s own Repple bill, which is on no screen you can open' },
   { id: 'stock', label: 'Stock', note: 'Drinks, supplements, anything the gym sells on' },
   { id: 'professional', label: 'Professional Fees', note: 'An accountant, a solicitor, a payroll bureau' },
   { id: 'finance', label: 'Bank and Finance', note: 'Bank charges, card processing fees, interest on a loan' },
@@ -207,7 +207,7 @@ export function gymCostBlockers(d: GymCostDraft): string[] {
   // unreadable figure except the person who typed it.
   const cur = (d.currency || '').trim();
   if (!cur) {
-    out.push('This gym has not set its currency, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym — set one on the Gym screen.');
+    out.push('This gym has not set its currency, so there is nothing to record this in. Repple is white-labelled and there is no default that is right for every gym. Set one on the Gym screen.');
   } else if (!/^[A-Za-z]{3}$/.test(cur)) {
     out.push('The currency on record is not a three-letter code, so no amount can be recorded in it.');
   } else {
@@ -224,7 +224,7 @@ export function gymCostBlockers(d: GymCostDraft): string[] {
     else if (read.minorUnits <= 0) {
       out.push('Enter an amount greater than zero. A cost of nothing is not a cost, and a nought here would be a statement that this supplier was free.');
     } else if (read.minorUnits >= GYM_COST_MAX_MINOR) {
-      out.push('That is more than Repple will record on one cost line — check the zeros.');
+      out.push('That is more than Repple will record on one cost line. Check the zeros.');
     }
   }
 
@@ -329,7 +329,7 @@ export const GYM_COSTS_ARE_NEVER_NETTED =
  * supplier's own invoice, which this product does not hold.
  */
 export const GYM_COSTS_ARE_NOT_TAX_ADVICE =
-  'No cost here is marked allowable or reclaimable, and none of them has been treated as a deduction. Whether something can be set against the gym’s income, and whether any tax on it can be reclaimed, depends on the country, the trade and your accountant’s judgement — and the evidence for either is the supplier’s own invoice, which Repple does not hold. This is a list of what the gym says it paid, for them to work from.';
+  'No cost here is marked allowable or reclaimable, and none of them has been treated as a deduction. Whether something can be set against the gym’s income, and whether any tax on it can be reclaimed, depends on the country, the trade and your accountant’s judgement, and the evidence for either is the supplier’s own invoice, which Repple does not hold. This is a list of what the gym says it paid, for them to work from.';
 
 /**
  * The two things already counted, which must not be written down again.
@@ -341,7 +341,7 @@ export const GYM_COSTS_ARE_NOT_TAX_ADVICE =
  * so the screen says it.
  */
 export const GYM_COSTS_NOT_TWICE =
-  'Leave out what you pay trainers for sessions and anything you have refunded a member. Trainer session pay is settled on Payroll and is already the whole of what /accounting calls money out; a refund is recorded against the original payment, which is what keeps your takings right. Writing either down here counts it twice, and nothing can tell that two rows are the same money. Wages for people you do not settle through Payroll — reception, cleaning, a manager — do belong here.';
+  'Leave out what you pay trainers for sessions and anything you have refunded a member. Trainer session pay is settled on Payroll and is already the whole of what /accounting calls money out; a refund is recorded against the original payment, which is what keeps your takings right. Writing either down here counts it twice, and nothing can tell that two rows are the same money. Wages for people you do not settle through Payroll (reception, cleaning, a manager) do belong here.';
 
 /**
  * The sentence under an empty list, which depends entirely on the read.

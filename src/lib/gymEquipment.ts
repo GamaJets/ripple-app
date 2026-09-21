@@ -180,8 +180,8 @@ export function capacityFor(
   return {
     limit, usable, down, supported: false,
     note: down > 0
-      ? `${down} of ${usable + down} ${category} out of action — this class seats ${limit}, not ${statedCapacity}.`
-      : `Only ${usable} ${category} registered — this class seats ${limit}, not ${statedCapacity}.`,
+      ? `${down} of ${usable + down} ${category} out of action, so this class seats ${limit}, not ${statedCapacity}.`
+      : `Only ${usable} ${category} registered, so this class seats ${limit}, not ${statedCapacity}.`,
   };
 }
 
@@ -678,7 +678,7 @@ export function logBlocker(
   kind: LogKind, equipmentId: string | null, findings: string, cost: string, currency: string | null,
 ): string | null {
   if (!equipmentId && !findings.trim()) {
-    return 'An entry has to be about something. With no machine chosen, say what happened — otherwise this is a blank row in an accident book.';
+    return 'An entry has to be about something. With no machine chosen, say what happened. Otherwise this is a blank row in an accident book.';
   }
   if (kind === 'incident' && !findings.trim()) {
     return 'An incident with no account of it is not a record of anything. Write what happened while it is fresh.';

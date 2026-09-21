@@ -934,7 +934,7 @@ export default function ClientTraining() {
         {cardio ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{cardio}</Text> : null}
         {!lifted && !cardio ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-            Recorded with no sets and no distance — the movement was logged, what was done to it was not.
+            Recorded with no sets and no distance. The movement was logged; what was done to it was not.
           </Text>
         ) : null}
         {effort ? (
@@ -1044,7 +1044,7 @@ export default function ClientTraining() {
             stop a small figure being read as an easy hour. */}
         {d.volumeKg == null && d.sets > 0 ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-            No load was recorded against any set, so there is no tonnage to total — a dash rather
+            No load was recorded against any set, so there is no tonnage to total, so a dash rather
             than a nought. Bodyweight work reads exactly like this.
           </Text>
         ) : d.bodyweightSets > 0 ? (
@@ -1056,7 +1056,7 @@ export default function ClientTraining() {
         {!alone ? (
           <Flag tone={t.warn} style={{ marginTop: 2 }}>
             Logged in {d.sessions.length} separate entries, listed below. The totals above add all of
-            them up — if {who} saved the same work twice, this day reads high and the entries show it.
+            them up. If {who} saved the same work twice, this day reads high and the entries show it.
           </Flag>
         ) : null}
 
@@ -1087,7 +1087,7 @@ export default function ClientTraining() {
             {r.status === 'error' ? (
               <Section>
                 <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-                  note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+                  note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
               </Section>
             ) : null}
 
@@ -1128,12 +1128,12 @@ export default function ClientTraining() {
                     <Flag tone={t.warn} style={{ marginTop: sp.md }}>
                       {who} has more training on record than one request returns, so every total on this
                       screen is a dash. Ask for a shorter range and the read comes back whole and the
-                      figures come back with it — the training itself is not going anywhere.
+                      figures come back with it. The training itself is not going anywhere.
                     </Flag>
                   ) : (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                       {rangeDays == null
-                        ? 'Everything on record. A long history can come back at the row limit, at which point every total here becomes a dash — narrow the range and they come back.'
+                        ? 'Everything on record. A long history can come back at the row limit, at which point every total here becomes a dash. Narrow the range and they come back.'
                         : `The last ${rangeDays} days only. Sessions before that are still on record and are not in any figure on this screen.`}
                     </Text>
                   )}
@@ -1441,7 +1441,7 @@ export default function ClientTraining() {
                     <SectionHead title="Program Checks" note={review.findings.length ? `${review.findings.length}` : undefined} />
                     <Text style={{ ...ty.caption, color: t.ink3 }}>{checksLine()}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                      Run again here against what {who} is on now and what they have logged since — the same seven
+                      Run again here against what {who} is on now and what they have logged since, using the same seven
                       rules the builder runs before a program is assigned, over a history that has moved since.
                     </Text>
                     {review.findings.length === 0 ? (
@@ -1488,21 +1488,21 @@ export default function ClientTraining() {
                 {!askable ? (
                   <Section>
                     <Notice kicker="No Account" title={`${fullName || 'This client'} has no Repple account`}
-                      note={`You added ${who} to your book by hand, so there is no account for workouts to belong to and nothing of theirs was asked for. That is not an empty training record and not a failed read — a workout row has to hang off an account, and there is not one yet. Invite them from your client list and everything on this page starts filling in from the day they join.`} />
+                      note={`You added ${who} to your book by hand, so there is no account for workouts to belong to and nothing of theirs was asked for. That is not an empty training record and not a failed read. A workout row has to hang off an account, and there is not one yet. Invite them from your client list and everything on this page starts filling in from the day they join.`} />
                   </Section>
                 ) : status === 'loading' ? (
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their logged sessions&hellip;</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their training could not be read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has logged nothing — that is a different fact and a different conversation.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has logged nothing. That is a different fact and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
                     <SectionHead title={fullName || 'Their Training'} note="nothing logged" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       The read came back and {who} has no logged sessions at all. That is about them
-                      rather than about the connection, which makes it worth raising — and a session
+                      rather than about the connection, which makes it worth raising. A session
                       you run together can go in from Log a Session on their page, which lands in
                       their own record marked as logged by you.
                     </Text>
@@ -1571,10 +1571,10 @@ export default function ClientTraining() {
                         {board.dayCount == null
                           ? 'Every total here is a dash on purpose: the read came back at its row limit, so a sum over what arrived would be a subtotal wearing a total’s label.'
                           : board.volumeKg == null
-                            ? 'Across everything on record. Nothing carried a load, so there is no tonnage to total — a dash rather than a nought.'
+                            ? 'Across everything on record. Nothing carried a load, so there is no tonnage to total, so a dash rather than a nought.'
                             : 'Across everything on record, over sets that carried a load. Bodyweight sets count on the left and contribute no tonnage.'}
                         {board.entryCount != null && board.dayCount != null && board.entryCount > board.dayCount
-                          ? ` Those ${board.dayCount} day${board.dayCount === 1 ? '' : 's'} were logged in ${board.entryCount} separate entries — some days hold more than one, and the days that do say so.`
+                          ? ` Those ${board.dayCount} day${board.dayCount === 1 ? '' : 's'} were logged in ${board.entryCount} separate entries. Some days hold more than one, and the days that do say so.`
                           : ''}
                       </Text>
                       </Expandable>
@@ -1626,7 +1626,7 @@ export default function ClientTraining() {
                       ) : !muscleWindowRead ? (
                         <Flag tone={t.warn}>
                           The read stops before the start of this window, so nothing is said about which muscles
-                          were worked. Narrow the range above and it comes back — an empty board here would be
+                          were worked. Narrow the range above and it comes back; an empty board here would be
                           about the query, not about {who}.
                         </Flag>
                       ) : !muscles.groups.length ? (
@@ -1736,7 +1736,7 @@ export default function ClientTraining() {
                         <Flag tone={t.warn}>
                           The read came back at its row limit, so no monthly roll-up is drawn. Over a truncated
                           log the oldest months come out short and the newest whole, which draws {who} tailing
-                          off backwards — the opposite of what their record says. Narrow the range above.
+                          off backwards, the opposite of what their record says. Narrow the range above.
                         </Flag>
                       ) : !lifetime || stage === 'empty' ? (
                         <Text style={{ ...ty.body, color: t.ink3 }}>
@@ -1944,8 +1944,8 @@ export default function ClientTraining() {
                     </View>
                   ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                    Read-only. Putting an old block back is an assign — it writes over what {who} is training
-                    this evening — so it goes through the builder, behind the same refusals every other assign does.
+                    Read-only. Putting an old block back is an assign (it writes over what {who} is training
+                    this evening), so it goes through the builder, behind the same refusals every other assign does.
                   </Text>
                 </Section>
 
@@ -1973,13 +1973,13 @@ export default function ClientTraining() {
         {/* What this page is, said once and below the record: the board opens
             on the figure, not on a paragraph. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-          Every day {who} has trained, newest first — what they logged themselves and what was
+          Every day {who} has trained, newest first: what they logged themselves and what was
           logged for them, with the exercises, sets, reps and loads as they were recorded.
           Read-only: this is their record, and nothing on this screen changes it.
         </Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
           Grouped by the day it was done on, in your own timezone. Inside a day, each entry is the
-          exercises saved together in one go — a client who logs a movement at a time makes several,
+          exercises saved together in one go. A client who logs a movement at a time makes several,
           and a day that holds more than one says so above them rather than reading as several
           workouts. Loads are shown in {unit}.
         </Text>
@@ -2029,8 +2029,8 @@ function FormChecks({ memberId }: { memberId: string }) {
       <SectionHead title="Form Checks" note={clips ? `${clips.length}` : undefined} />
       {clips === null ? (
         <Text style={{ ...ty.label, color: t.ink2 }}>
-          Their form checks could not be read just now. This is not a statement that they have sent none —
-          pull down to ask again.
+          Their form checks could not be read just now. This is not a statement that they have sent none.
+          Pull down to ask again.
         </Text>
       ) : clips.map((c, i) => (
         <View key={c.id} style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>

@@ -73,7 +73,7 @@ export function isOwnClipPath(uid: string | null | undefined, path: string | nul
  * those are the two things somebody weighs before filming themselves.
  */
 export const MEMBER_CONSENT_NOTE =
-  'This clip goes to your coach and to nobody else — not your gym, not reception, not another coach. '
+  'This clip goes to your coach and to nobody else: not your gym, not reception, not another coach. '
   + 'If you change coach or stop coaching, the old one loses it the same day. You can delete it yourself at any time, and deleting it is final.';
 
 /** Why a clip cannot be attached. Each wants a different next action. */
@@ -120,7 +120,7 @@ export function clipRefusalLine(r: ClipRefusal): string | null {
     case 'no-coach':
       return 'A form check goes to your coach, and you do not have one yet. Find a coach first and this appears on every set.';
     case 'too-long':
-      return `That clip is longer than ${MAX_CLIP_SECONDS} seconds. Film one set rather than the whole exercise — it is what your coach will watch anyway.`;
+      return `That clip is longer than ${MAX_CLIP_SECONDS} seconds. Film one set rather than the whole exercise. It is what your coach will watch anyway.`;
     case 'too-big':
       return 'That clip is too large to send. Film a shorter one, or record at a lower quality in your phone’s camera settings.';
   }

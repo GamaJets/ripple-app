@@ -279,7 +279,7 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
 
           <Section>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              This is saved as a mobility session called Stretching — the same entry Train&apos;s Mobility chip makes, so it
+              This is saved as a mobility session called Stretching, the same entry Train&apos;s Mobility chip makes, so it
               counts once and shows up on your calendar the way your other mobility sessions do.
             </Text>
           </Section>
@@ -293,7 +293,7 @@ export function StretchRunner({ t, routine, onSave, onClose }: {
           ) : (
             <View>
               <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.md }}>
-                Under a minute of stretching — too short to log, and rounding it up to one would be a figure you did not spend.
+                Under a minute of stretching is too short to log, and rounding it up to one would be a figure you did not spend.
               </Text>
               <Cta label="Close" wide onPress={onClose} />
             </View>

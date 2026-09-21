@@ -606,7 +606,7 @@ export default function MyCoach() {
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xl }}>Loading.</Text>
         ) : status === 'error' ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xl }}>
-            This could not be read just now. It is not a statement that you have no coach — try again when
+            This could not be read just now. It is not a statement that you have no coach. Try again when
             you have signal.
           </Text>
         ) : !coach ? (
@@ -818,7 +818,7 @@ export default function MyCoach() {
                   one only when there is none. The note is what keeps them
                   apart — asking is not booking, which is the rule that whole
                   screen exists to hold. */}
-              <ListRow icon="clock" tone="teal" title="Ask for a Time" note="A time they haven’t opened — it asks, it doesn’t book" onPress={() => go('/(client)/request-session')} />
+              <ListRow icon="clock" tone="teal" title="Ask for a Time" note="A time they haven’t opened. It asks; it doesn’t book" onPress={() => go('/(client)/request-session')} />
             </Section>
 
             {/* Moved up, above the bio and the qualifications: the review's
@@ -854,7 +854,7 @@ export default function MyCoach() {
             <Expandable title="What They Can See" note="Your log, check-ins, scans and any injury you disclosed">
               <Text style={{ ...ty.label, color: t.ink2 }}>
                 Your training log, your check-ins, your scans and measurements, and any injury you have
-                disclosed. Not the document behind an injury — only what was read out of it. Not your blood
+                disclosed. Not the document behind an injury, only what was read out of it. Not your blood
                 sugar, unless you turn sharing on yourself.
               </Text>
             </Expandable>
@@ -960,12 +960,12 @@ export default function MyCoach() {
                    failed, has been told something false about that coach. */
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   We couldn’t load this. It is not a statement that {coach.name ?? 'your coach'} has listed
-                  nothing — try again when you have signal.
+                  nothing. Try again when you have signal.
                 </Text>
               ) : (creds ?? []).length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   {coach.name ?? 'Your coach'} hasn’t listed any qualifications or insurance in {BRAND.label}. Ask
-                  them directly — it is a normal thing to ask.
+                  them directly. It is a normal thing to ask.
                 </Text>
               ) : (<>
                 {sortCredentials(creds ?? [], today).map((c, i) => (

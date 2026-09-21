@@ -103,7 +103,7 @@ export function rosterPlan(
  */
 export function planBlocker(preview: ImportPreview<CoachClientRow>, plan: RosterPlan): string | null {
   if (preview.missingRequired.length) {
-    return 'This file has no column this recognises as a name. Add a header row with a “Name” column and try again — nothing has been imported.';
+    return 'This file has no column this recognises as a name. Add a header row with a “Name” column and try again. Nothing has been imported.';
   }
   if (!preview.sheet.rows.length) {
     return 'This file has a header and no rows under it, so there is nobody to import.';
@@ -174,7 +174,7 @@ export function resultSummary(r: RosterResult): string {
     parts.push(`${inviteFailed} of them ${inviteFailed === 1 ? 'is' : 'are'} on your roster with NO invite recorded, so they will not link to you when they sign in. Send them your coaching code instead.`);
   }
   if (failed) {
-    parts.push(`${failed} row${failed === 1 ? '' : 's'} did not save at all and ${failed === 1 ? 'is' : 'are'} not on your roster. ${failed === 1 ? 'It is' : 'They are'} named above — import ${failed === 1 ? 'it' : 'them'} again rather than the whole file.`);
+    parts.push(`${failed} row${failed === 1 ? '' : 's'} did not save at all and ${failed === 1 ? 'is' : 'are'} not on your roster. ${failed === 1 ? 'It is' : 'They are'} named above. Import ${failed === 1 ? 'it' : 'them'} again rather than the whole file.`);
   }
   return parts.join(' ');
 }

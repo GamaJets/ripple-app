@@ -134,8 +134,8 @@ export const unsignedCount = (items: readonly PaperworkItem[]): number =>
 export function paperworkLine(read: LoadStatus, items: readonly PaperworkItem[], who: string): string {
   if (read === 'loading') return `Reading whether ${who} has signed your paperwork.`;
   if (read === 'error') {
-    return `Whether ${who} has signed your paperwork could not be read. That is a read that failed, not a record of them having signed nothing — `
-      + 'do not take it either way.';
+    return `Whether ${who} has signed your paperwork could not be read. That is a read that failed, not a record of them having signed nothing. `
+      + 'Do not take it either way.';
   }
   if (read === 'partial') {
     return `You have more paperwork than this could bring back, so it cannot say whether ${who} has signed all of it. `

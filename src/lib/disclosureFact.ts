@@ -275,7 +275,7 @@ function unread(why: UnreadWhy, who: string): DisclosureFact {
 
 const NEVER_ASKED = (who: string): string =>
   `${who} was added by hand and has no Repple account, so they have never been asked about injuries. `
-  + 'Nothing here says they are uninjured — ask them yourself before you build around it.';
+  + 'Nothing here says they are uninjured. Ask them yourself before you build around it.';
 
 const NO_LIST = (who: string): string =>
   `${who}'s row came back without an injury list at all, so this screen cannot tell whether they have `

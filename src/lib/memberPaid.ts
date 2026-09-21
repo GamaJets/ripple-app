@@ -290,7 +290,7 @@ export function paidReason(status: LoadStatus, missing: readonly string[]): stri
   if (status === 'partial') {
     return `There is more on record under ${list} than could be read in one request, so no total is stated. Everything listed below is real; it is not all of it.`;
   }
-  return `We couldn’t read ${list}, so no total is stated. That is a read that failed, not a statement that you paid nothing — ask your gym for a statement if you need the figure today.`;
+  return `We couldn’t read ${list}, so no total is stated. That is a read that failed, not a statement that you paid nothing. Ask your gym for a statement if you need the figure today.`;
 }
 
 /* ── what the figure covers, said on the screen ───────────────────────────── */
@@ -304,7 +304,7 @@ export function paidReason(status: LoadStatus, missing: readonly string[]): stri
  * the member is the only person who can supply the missing part from memory.
  */
 export const PAID_EXCLUDES_CASH =
-  'Cash or a bank transfer you gave a personal trainer directly is not here. Your trainer writes those into their own book, which this app keeps private to them, so this figure covers only money that went through your gym’s desk or through Repple. If you have paid a trainer another way, ask them for an invoice — that is the document they can hand you.';
+  'Cash or a bank transfer you gave a personal trainer directly is not here. Your trainer writes those into their own book, which this app keeps private to them, so this figure covers only money that went through your gym’s desk or through Repple. If you have paid a trainer another way, ask them for an invoice. That is the document they can hand you.';
 
 /**
  * What a total over four sources is, and is not.
@@ -314,7 +314,7 @@ export const PAID_EXCLUDES_CASH =
  * the sources that are here were added.
  */
 export const PAID_IS_EVERY_SOURCE =
-  'This adds up your gym’s own record of what it took, anything you paid for a pass, and anything you bought from a personal trainer through the app. Amounts in different currencies are never added together — each currency is its own figure, because there is no exchange rate in this app and a single number over two currencies would be a number in neither.';
+  'This adds up your gym’s own record of what it took, anything you paid for a pass, and anything you bought from a personal trainer through the app. Amounts in different currencies are never added together. Each currency is its own figure, because there is no exchange rate in this app and a single number over two currencies would be a number in neither.';
 
 /** Said where a refund has been made, beside the smaller figure it caused. A
  *  member reading a total lower than they expected is owed the reason before
@@ -368,9 +368,9 @@ export function paidEmptyLine(status: LoadStatus, recorded = 0): string {
   if (status === 'partial') return 'There is more on record than could be read in one request, so nothing here is a total.';
   if (status === 'loading') return 'Still reading.';
   if (recorded > 0) {
-    return 'There is no figure here because nothing recorded against your account states both an amount and a currency — not because nothing was paid. What is listed below is real; your gym can tell you what each payment covered.';
+    return 'There is no figure here because nothing recorded against your account states both an amount and a currency, not because nothing was paid. What is listed below is real; your gym can tell you what each payment covered.';
   }
-  return 'Nothing has been recorded against your account — not at your gym’s desk, not on a pass, and not through Repple. If you have paid, it has not been entered, and reception can add it.';
+  return 'Nothing has been recorded against your account: not at your gym’s desk, not on a pass, and not through Repple. If you have paid, it has not been entered, and reception can add it.';
 }
 
 /**

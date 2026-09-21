@@ -151,6 +151,7 @@ export function shapeJoinCodes(rows: RawJoinCode[] | null | undefined): JoinCode
 export function codeCountLine(status: LoadStatus, row: JoinCodeRow): string {
   if (status === 'loading') return 'Counting who has used it…';
   if (status === 'error') return 'We couldn’t check how many people have used it.';
+  // dash-ok: the dash stands for a figure that could not be read, the app's unknown-not-zero sign (see fig() in src/ui/kit.tsx). Not punctuation.
   if (status === 'partial') return '— joined · — waiting: not all of your requests could be read.';
   if (row.joined === 0 && row.pending === 0) {
     return row.isLive ? 'Nobody has used it yet.' : 'Nobody used it.';
@@ -182,7 +183,7 @@ export const DEFAULT_CODE_NOTE =
 export function spentCodeMessage(raw: string | null | undefined): string | null {
   const m = (raw || '').toLowerCase();
   if (m.includes('no longer in use')) {
-    return 'That code has been turned off by the coach who gave it to you. Ask them for a current one — it is not a typo.';
+    return 'That code has been turned off by the coach who gave it to you. Ask them for a current one. It is not a typo.';
   }
   return null;
 }

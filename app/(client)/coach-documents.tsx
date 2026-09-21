@@ -202,7 +202,7 @@ export default function ClientCoachDocumentsScreen() {
   function accept(d: CoachDoc) {
     if (!uid) { Alert.alert('Not Signed In', 'Sign in again and this will be here.'); return; }
     if (!opened.includes(d.id)) {
-      Alert.alert('Read It First', 'Open the document and read it — then you can accept it.');
+      Alert.alert('Read It First', 'Open the document and read it, then you can accept it.');
       return;
     }
     Alert.alert(

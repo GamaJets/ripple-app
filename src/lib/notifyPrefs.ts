@@ -111,7 +111,7 @@ export const CATEGORIES: readonly CategoryDef[] = [
     // the server. It now points at the control instead of naming an effect,
     // because whether the server applies it is a fact about the installation
     // and `quietAvailability` is what reads it.
-    note: 'Messages, notices and invoices. These are sent from the server, so the switches on this list do not reach them — the ones below, which are stored on your account, are what does. Quiet Hours is stored there too, which is why it reaches them as well.',
+    note: 'Messages, notices and invoices. These are sent from the server, so the switches on this list do not reach them. The ones below, which are stored on your account, are what does. Quiet Hours is stored there too, which is why it reaches them as well.',
   },
 ];
 
@@ -279,7 +279,7 @@ export const MEMBER_CHANNELS_ACCOUNT =
  * "do not tell me".
  */
 export const MEMBER_CHANNELS_STILL_RECORDED =
-  'Turning one off stops your phone buzzing about it. It is still written into your notifications list either way, so nothing is lost — you find out when you next open the app instead of as it happens.';
+  'Turning one off stops your phone buzzing about it. It is still written into your notifications list either way, so nothing is lost. You find out when you next open the app instead of as it happens.';
 
 /**
  * How far a switch reaches, stated rather than implied.
@@ -290,7 +290,7 @@ export const MEMBER_CHANNELS_STILL_RECORDED =
  * off is the kind of sentence that teaches people the controls do not work.
  */
 export const MEMBER_CHANNELS_REACH =
-  'Messages is the complete one — every message your coach sends is checked against it. The other four stop everything the app’s own server sends on them, but some of these can also be sent straight from your coach’s or your gym’s phone, and those do not pass through the check.';
+  'Messages is the complete one: every message your coach sends is checked against it. The other four stop everything the app’s own server sends on them, but some of these can also be sent straight from your coach’s or your gym’s phone, and those do not pass through the check.';
 
 /**
  * The one kind no switch here covers.
@@ -304,7 +304,7 @@ export const MEMBER_CHANNELS_REACH =
  * decoration.
  */
 export const MEMBER_CHANNELS_NOT_COVERED =
-  'Notices from your coach or your gym are not on this list. They are sent without a category on them, so none of these switches can stop one — Quiet Hours can, and turning off Push Notifications stops them at every hour.';
+  'Notices from your coach or your gym are not on this list. They are sent without a category on them, so none of these switches can stop one. Quiet Hours can, and turning off Push Notifications stops them at every hour.';
 
 export interface NotifyPrefs {
   /** Per category. A category absent from the map is ON — see `allows`. */
@@ -612,7 +612,7 @@ export function movedNote(
 ): string | null {
   const out = timeToDeliver(hour, minute, category, prefs);
   if (out.hour === hour && out.minute === minute) return null;
-  return `That is inside your quiet hours (${quietLabel(prefs)}), so this one will arrive at ${label(out.hour, out.minute)} instead. Nothing is dropped — it waits.`;
+  return `That is inside your quiet hours (${quietLabel(prefs)}), so this one will arrive at ${label(out.hour, out.minute)} instead. Nothing is dropped. It waits.`;
 }
 
 /** "10pm to 7am" — for the sentence under the switch. Sentence case, no stop. */

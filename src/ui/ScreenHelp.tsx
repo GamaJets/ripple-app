@@ -110,7 +110,7 @@ export function ScreenHelp({ screen }: { screen: ScreenHelpKey }) {
             // who turned their text up is the reader it clips.
             <Text key={l.term} style={{ ...ty.caption, color: t.ink3, lineHeight: grown(18) }}>
               <Text style={{ color: t.ink2, fontWeight: '600' }}>{l.term}</Text>
-              {' — '}{l.means}
+              {': '}{l.means}
             </Text>
           ))}
           <View style={{ flexDirection: 'row', marginTop: sp.sm }}>

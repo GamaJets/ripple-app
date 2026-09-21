@@ -181,7 +181,7 @@ export function quietAvailability(enforced: boolean | null): QuietAvailability {
     return {
       available: false,
       note:
-        'Quiet hours are not switched on for this server yet. The part that holds them back is not in the app — it '
+        'Quiet hours are not switched on for this server yet. The part that holds them back is not in the app. It '
         + 'is the piece that decides who gets a notification, and it has to be updated before a quiet hour would '
         + 'stop anything. Rather than give you a switch that does nothing, there is no switch until it is. Your '
         + 'category switches above are unaffected and still work.',
@@ -191,7 +191,7 @@ export function quietAvailability(enforced: boolean | null): QuietAvailability {
     available: false,
     note:
       'Whether this server applies quiet hours could not be read, so nothing is offered here. That is a read that '
-      + 'failed rather than an answer — open this again once you have signal.',
+      + 'failed rather than an answer. Open this again once you have signal.',
   };
 }
 
@@ -201,7 +201,7 @@ export function quietAvailability(enforced: boolean | null): QuietAvailability {
  *  to offer: nothing is lost, and nothing arrives later either. */
 export const QUIET_HELD_NOT_DELAYED =
   'Inside these hours your phone stays quiet. The notification is still written into your notifications list, so '
-  + 'nothing is lost — but it is not held back and delivered in the morning either. You find it when you open the '
+  + 'nothing is lost, but it is not held back and delivered in the morning either. You find it when you open the '
   + 'app, the same as a category you have muted.';
 
 /** That the zone is the one stored, not the one the phone is in now. */

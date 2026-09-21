@@ -131,14 +131,14 @@ export function videoUploadRefusal(error: unknown): VideoUploadRefusal {
 export function videoUploadFailureLine(reason: VideoUploadRefusal): string {
   switch (reason) {
     case 'signed-out':
-      return 'That clip was not uploaded because you are not signed in on this device. Sign in and add it again — the video is still on your phone.';
+      return 'That clip was not uploaded because you are not signed in on this device. Sign in and add it again. The video is still on your phone.';
     case 'taken':
       return 'That clip was not uploaded because another file was already stored under the same name. Tap add again; it will be given a new one.';
     case 'unreachable':
-      return 'That clip was not uploaded — we could not reach the server. The video is still on your phone; try again when you have a connection.';
+      return 'That clip was not uploaded. We could not reach the server. The video is still on your phone; try again when you have a connection.';
     case 'refused':
     default:
-      return 'That clip was not uploaded. The server refused the file and nothing was saved, so nobody has been given a link to it. The video is still on your phone — try again in a moment.';
+      return 'That clip was not uploaded. The server refused the file and nothing was saved, so nobody has been given a link to it. The video is still on your phone. Try again in a moment.';
   }
 }
 

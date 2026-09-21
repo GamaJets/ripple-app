@@ -187,11 +187,11 @@ export function useClientDrift(
 
   const note: string | null =
     error
-      ? 'Their training records could not be read, so nothing below is based on who has stopped training — only on what your roster rows already say.'
+      ? 'Their training records could not be read, so nothing below is based on who has stopped training, only on what your roster rows already say.'
       : !coverage
         ? null
         : coverage.truncated
-          ? 'More activity is on record than one request returns, so nobody’s silence can be proved from it. Nothing below is based on who has stopped training — a nudge sent on a short read reaches somebody who trained yesterday.'
+          ? 'More activity is on record than one request returns, so nobody’s silence can be proved from it. Nothing below is based on who has stopped training. A nudge sent on a short read reaches somebody who trained yesterday.'
           : coverage.notAsked.size
             ? `${coverage.notAsked.size} of these were added by hand and have no Repple account, so there is no training record to judge them by and none of them appears here on one.`
             : null;

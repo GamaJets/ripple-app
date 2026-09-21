@@ -443,7 +443,7 @@ export default function OwnerRota() {
   const lab = { ...ty.caption, color: t.ink2, marginBottom: 6 } as const;
 
   const heroNote = (): string => {
-    if (failed) return 'This week could not be read, so cover is not known — that is a failed read, not a covered week.';
+    if (failed) return 'This week could not be read, so cover is not known. That is a failed read, not a covered week.';
     if (!zoneRead) return 'Checking what time it is at the gym, before the week is bucketed by it.';
     if (!loaded) return 'Reading the rota…';
     if (cov?.blocker) return cov.blocker;
@@ -549,10 +549,10 @@ export default function OwnerRota() {
           {!zoneRead
             ? 'Checking what time it is at the gym…'
             : zoneErr
-            ? `The gym’s timezone could not be read, so the times below are this device’s. That is a failed read, not a gym without a timezone — ${zoneErr}`
+            ? `The gym’s timezone could not be read, so the times below are this device’s. That is a failed read, not a gym without a timezone: ${zoneErr}`
             : clock.atGym
             ? `Times are ${clock.zone}, this gym’s own clock, and the hours you type are read as the gym’s too.`
-            : `Times are this device’s, not the gym’s — ${clock.note}. Set the gym’s timezone and this screen becomes the gym’s clock.`}
+            : `Times are this device’s, not the gym’s: ${clock.note}. Set the gym’s timezone and this screen becomes the gym’s clock.`}
         </Text>
 
 
@@ -614,7 +614,7 @@ export default function OwnerRota() {
               delta: share.gap === 'ok'
                 ? 'this week’s wage bill over this week’s takings'
                 : share.gap === 'loading' ? 'not read yet'
-                : 'no single percentage — see below',
+                : 'no single percentage; see below',
             },
             {
               label: 'Unpriced Shifts',
@@ -624,7 +624,7 @@ export default function OwnerRota() {
               // read as "seven free shifts" unless somebody writes this down.
               delta: !loaded ? 'not read yet'
                 : cost!.unpriced === 0 ? 'nothing unaccounted for'
-                : 'rostered, and costing an unknown amount — not nothing',
+                : 'rostered, and costing an unknown amount, not nothing',
             },
           ]} />
           {/* The sentence the figure could not be. `labourShare` returns one
@@ -658,7 +658,7 @@ export default function OwnerRota() {
             <Text style={{ ...ty.label, color: t.ink3 }}>{cov.blocker}</Text>
           ) : (cov!.uncovered!.length === 0 && cov!.idle!.length === 0) ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              The rota and the timetable agree this week — nothing booked without cover, and no
+              The rota and the timetable agree this week: nothing booked without cover, and no
               rostered hour with nothing in it.
             </Text>
           ) : (
@@ -712,7 +712,7 @@ export default function OwnerRota() {
           {failed ? (
             <View>
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                This week’s rota could not be read. Nobody has been taken off it — this screen
+                This week’s rota could not be read. Nobody has been taken off it. This screen
                 simply does not know who is on, which is not the same as nobody being on.
               </Text>
               <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
@@ -792,14 +792,14 @@ export default function OwnerRota() {
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               <Text style={{ ...ty.head, color: t.ink }}>Add a Shift</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-                One row per block on the floor. Shifts are written for this week only — cover and
+                One row per block on the floor. Shifts are written for this week only. Cover and
                 swaps are edits to a single day, not to a pattern.
               </Text>
 
               <Text style={lab}>Trainer</Text>
               {trainersFailed ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  Your trainers could not be read, so nobody can be offered here — this is a failed
+                  Your trainers could not be read, so nobody can be offered here. This is a failed
                   read, not a gym with no staff.
                 </Text>
               ) : trainers === null ? (
@@ -842,8 +842,8 @@ export default function OwnerRota() {
 
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {clock.atGym
-                  ? `Those hours are ${clock.zone}, the gym’s own clock — wherever you are typing them.`
-                  : `Those hours are this device’s, not the gym’s — ${clock.note}.`}
+                  ? `Those hours are ${clock.zone}, the gym’s own clock, wherever you are typing them.`
+                  : `Those hours are this device’s, not the gym’s: ${clock.note}.`}
               </Text>
 
               <Text style={{ ...lab, marginTop: sp.lg }}>On For</Text>

@@ -154,11 +154,11 @@ export async function spotifyStatus(): Promise<SpotifyStatus> {
 export async function connectSpotify(): Promise<{ name?: string }> {
   const clientId = spotifyClientId();
   if (!clientId) {
-    raise({ kind: 'not_configured', message: 'Spotify isn’t set up in this build — the owner sets EXPO_PUBLIC_SPOTIFY_CLIENT_ID (register an app at developer.spotify.com).' });
+    raise({ kind: 'not_configured', message: 'Spotify isn’t set up in this build. The owner sets EXPO_PUBLIC_SPOTIFY_CLIENT_ID (register an app at developer.spotify.com).' });
   }
   const AuthSession = authSession();
   if (!AuthSession) {
-    raise({ kind: 'unknown', message: 'This build can’t open a sign-in browser yet — a native rebuild adds it.' });
+    raise({ kind: 'unknown', message: 'This build can’t open a sign-in browser yet. A native rebuild adds it.' });
   }
   const WB = webBrowser(); if (WB?.maybeCompleteAuthSession) { try { WB.maybeCompleteAuthSession(); } catch { /* ignore */ } }
 
@@ -178,7 +178,7 @@ export async function connectSpotify(): Promise<{ name?: string }> {
     if (result?.type === 'dismiss' || result?.type === 'cancel') {
       raise({
         kind: 'cancelled',
-        message: 'Sign-in closed before it finished. If Spotify showed an error page instead of a login, the redirect URI is not registered — it must be exactly ' + SPOTIFY_REDIRECT + ' in the Spotify developer dashboard.',
+        message: 'Sign-in closed before it finished. If Spotify showed an error page instead of a login, the redirect URI is not registered. It must be exactly ' + SPOTIFY_REDIRECT + ' in the Spotify developer dashboard.',
       });
     }
     raise({ kind: 'redirect_rejected', message: 'Spotify never came back to the app. Check that ' + SPOTIFY_REDIRECT + ' is registered as a redirect URI in the Spotify developer dashboard.' });

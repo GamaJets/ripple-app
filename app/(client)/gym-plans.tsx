@@ -355,7 +355,7 @@ export default function GymPlans() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                     {mStatus === 'loading'
                       ? 'Reading your membership before this can be offered.'
-                      : 'Buying is not offered until your membership can be read — starting a second term over one that is still running is not something this screen can undo. Pull down to try again.'}
+                      : 'Buying is not offered until your membership can be read. Starting a second term over one that is still running is not something this screen can undo. Pull down to try again.'}
                   </Text>
                 ) : null}
                 {priced && offer.label && canSell && membershipKnown ? (

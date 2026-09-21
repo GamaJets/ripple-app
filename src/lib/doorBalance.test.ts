@@ -80,7 +80,7 @@ eq(doorBalance([inv(), inv()], TODAY, 'partial', true).state, 'unreadable',
 {
   const why = doorBalanceLine(doorBalance(null, TODAY, 'error', true)) ?? '';
   ok(/NOT a member who is up to date/.test(why), 'the refused-read sentence says what it is not');
-  ok(/do not tell them either way/.test(why), 'and tells the desk not to say anything to the person in front of them');
+  ok(/do not tell them either way/i.test(why), 'and tells the desk not to say anything to the person in front of them');
 }
 // The two silences share no words with "clear", which has none at all — the
 // property that matters is that neither can be mistaken for the other.

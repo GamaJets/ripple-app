@@ -515,7 +515,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
     steps = [
       base.step ?? `Prepare the ${base.n}.`,
       `Top with ${top.n}${boost.n ? ` and stir in the ${boost.n.replace('+ ', '')}` : ''}.`,
-      `Finish${style.n ? ` — ${style.n}` : ' with a pinch of cinnamon or sea salt to taste'}, then serve.`,
+      `Finish${style.n ? `, ${style.n}` : ' with a pinch of cinnamon or sea salt to taste'}, then serve.`,
     ];
   } else if (slot === 'Snack') {
     const [a, b, prep] = [at(0), at(1), at(2)];
@@ -523,7 +523,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
     ico = a.ico ?? '🍎';
     steps = [
       `Portion the ${a.n} into a bowl or container.`,
-      `Add the ${b.n} alongside${prep.n ? ` — ideal ${prep.n}` : ''}, then enjoy.`,
+      `Add the ${b.n} alongside${prep.n ? ` (ideal ${prep.n})` : ''}, then enjoy.`,
     ];
   } else {
     const [pr, cb, vg, fl] = [at(0), at(1), at(2), at(3)];

@@ -323,7 +323,7 @@ export default function Activity() {
       // is what the app does everywhere else it has no figure.
       const mins = typeof e.sessionMins === 'number' && Number.isFinite(e.sessionMins) && e.sessionMins > 0
         ? Math.round(e.sessionMins) : null;
-      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${movement(e.exercise)}` : `Logged ${movement(e.exercise)}`, sub: e.sets.map((_s, i) => setText(e, i)).join(' · '), note: by, route: pr ? '/(client)/records' : '/(client)/trends', hr: mins == null ? undefined : { title: movement(e.exercise), startISO: e.t, durationMin: mins } });
+      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR · ${movement(e.exercise)}` : `Logged ${movement(e.exercise)}`, sub: e.sets.map((_s, i) => setText(e, i)).join(' · '), note: by, route: pr ? '/(client)/records' : '/(client)/trends', hr: mins == null ? undefined : { title: movement(e.exercise), startISO: e.t, durationMin: mins } });
     } else if (e.cardio) {
       events.push({ at: e.t, icon: 'heart', title: `Logged ${movement(e.exercise)}`, note: by, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: e.cardio.mins > 0 ? { title: movement(e.exercise), startISO: e.t, durationMin: e.cardio.mins } : undefined });
     }
@@ -501,7 +501,7 @@ export default function Activity() {
               </Text>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
                 {feedStatus === 'loading' ? 'Your training, check-ins and bookings are on their way.'
-                  : feedStatus === 'error' ? 'This is not an empty record — it is one we could not open. Pull down or come back when you have signal.'
+                  : feedStatus === 'error' ? 'This is not an empty record. It is one we could not open. Pull down or come back when you have signal.'
                   : feedStatus === 'partial' ? 'You have more on record than we can read in one go, and none of it landed in this page. This is not a claim that nothing has happened. Pull down to ask again.'
                   : 'Log a workout or send a check-in to get started.'}
               </Text>

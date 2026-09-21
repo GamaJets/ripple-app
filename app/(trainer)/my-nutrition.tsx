@@ -390,7 +390,7 @@ export default function MyNutrition() {
     if (out === 'stored') {
       notifySuccess();
       clearForm();
-      Alert.alert('Logged', `${read.value.name} — ${num(read.value.kcal)} kcal — is on your own food log for today.`);
+      Alert.alert('Logged', `${read.value.name} (${num(read.value.kcal)} kcal) is on your own food log for today.`);
       return;
     }
     if (out === 'unsent') {
@@ -400,7 +400,7 @@ export default function MyNutrition() {
       // against the same day.
       clearForm();
       Alert.alert('Saved on This Phone',
-        `No connection, so ${read.value.name} has not reached your food log yet — nothing is lost. It is saved here, it is already counted in today's total above, and it goes up on its own the next time you have signal.`);
+        `No connection, so ${read.value.name} has not reached your food log yet. Nothing is lost. It is saved here, it is already counted in today's total above, and it goes up on its own the next time you have signal.`);
       return;
     }
     // 'refused'. The boxes are deliberately NOT cleared. What was typed is now
@@ -408,8 +408,8 @@ export default function MyNutrition() {
     // today's total — and this is the one path where the coach may want to try
     // again.
     setProblem(home === 'no-record'
-      ? 'Not saved. We could not find a profile for this account, so there is nowhere on the server to store a meal against it — see the note at the top of this screen. It is not counting toward today.'
-      : 'Not saved — your food log rejected this meal, so it has not been recorded, it is not counting toward today, and it is not waiting to send. What you typed is still in the boxes; saving it again as it is will be rejected again.');
+      ? 'Not saved. We could not find a profile for this account, so there is nowhere on the server to store a meal against it. See the note at the top of this screen. It is not counting toward today.'
+      : 'Not saved. Your food log rejected this meal, so it has not been recorded, it is not counting toward today, and it is not waiting to send. What you typed is still in the boxes; saving it again as it is will be rejected again.');
   };
 
   /**
@@ -421,11 +421,11 @@ export default function MyNutrition() {
    * with the day's total quietly different again.
    */
   const remove = (e: FoodEntry) => {
-    Alert.alert('Remove This Meal?', `${e.name} — ${num(e.kcal)} kcal — comes off your own log for today, and today's totals go back down by it.`, [
+    Alert.alert('Remove This Meal?', `${e.name} (${num(e.kcal)} kcal) comes off your own log for today, and today's totals go back down by it.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         if (!(await fl.removeFood(e.id))) {
-          Alert.alert('Not Removed', `${e.name} is still on your log — we could not reach the server to take it out, so it is still counting toward today.`);
+          Alert.alert('Not Removed', `${e.name} is still on your log. We could not reach the server to take it out, so it is still counting toward today.`);
         }
       } },
     ]);
@@ -459,7 +459,7 @@ export default function MyNutrition() {
       : `${num(fl.consumed.kcal)} kcal logged today · ${
         !gate.ok && gate.reason === 'unasked' ? 'no target until you answer the three questions below'
         : !gate.ok && gate.reason === 'unread' ? 'no target, because what it is built from could not be read'
-        : !gate.ok && gate.reason === 'reading' ? 'no target yet — still reading'
+        : !gate.ok && gate.reason === 'reading' ? 'no target yet, still reading'
         : 'no target, because nothing here has measured you'}`;
 
   /**
@@ -497,7 +497,7 @@ export default function MyNutrition() {
           {fl.status === 'error' ? (
             <Section>
               <Notice tone={t.warn} kicker="Your Food Log" title="We Couldn’t Read Your Food Log"
-                note="Your own meals are safe — this screen cannot see them right now. Nothing has been reset, and an empty list below means unknown rather than none." />
+                note="Your own meals are safe. This screen cannot see them right now. Nothing has been reset, and an empty list below means unknown rather than none." />
             </Section>
           ) : fl.status === 'partial' ? (
             <Section>
@@ -571,7 +571,7 @@ export default function MyNutrition() {
                 : 'Apple Health is not connected'}
               note={appleState === 'connected'
                 ? 'The figure above counts what you have eaten and nothing you have burned, so it is lower than the truth. Pull down to read Apple Health again.'
-                : 'The figure above counts what you have eaten and nothing you have burned. Connect Apple Health and it will include the day’s activity — your Apple Watch needs nothing of its own, because it syncs into the iPhone’s Health app and Repple reads it from there.'}>
+                : 'The figure above counts what you have eaten and nothing you have burned. Connect Apple Health and it will include the day’s activity. Your Apple Watch needs nothing of its own, because it syncs into the iPhone’s Health app and Repple reads it from there.'}>
               {appleState === 'connected' ? null : (
                 <View style={{ marginTop: sp.lg }}>
                   <Cta label="Connect Apple Health" wide onPress={onConnectApple} />
@@ -737,7 +737,7 @@ export default function MyNutrition() {
                     adjustment is layered on, because `coach_nutrition` is a
                     coach's note to a client and nobody is coaching the coach. */}
                 {' '}Your goal, how you eat and how active your week is are your own answers, named above
-                the macros — change any of them and this moves. Nothing is layered on top of them: a
+                the macros. Change any of them and this moves. Nothing is layered on top of them: a
                 coach&rsquo;s nutrition adjustment is a note to a client, and there is nobody coaching you.
               </Text>
             ) : null}
@@ -749,7 +749,7 @@ export default function MyNutrition() {
             <SectionHead title="Log a Meal" note={home === 'no-record' ? 'closed' : undefined} />
             {home === 'no-record' ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Closed until this account has somewhere to store a meal — see the note above. Nothing
+                Closed until this account has somewhere to store a meal. See the note above. Nothing
                 you typed here would be kept, so there is nothing to type.
               </Text>
             ) : (<>
@@ -757,7 +757,7 @@ export default function MyNutrition() {
                 Search the common-foods table for the figures, or fill them in yourself. Goes onto your
                 own log, dated today.
               </Text>
-              <TextInput value={query} onChangeText={setQuery} placeholder="Search foods — “chicken breast”"
+              <TextInput value={query} onChangeText={setQuery} placeholder="Search foods, e.g. “chicken breast”"
                 placeholderTextColor={t.ink3} accessibilityLabel="Search common foods"
                 style={[inp, { marginBottom: sp.sm }]} />
               {hits.length ? (
@@ -802,7 +802,7 @@ export default function MyNutrition() {
               </View>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 Leave a macro empty for none. A box that is not a number is refused rather than read as
-                a zero — a mistyped figure that quietly becomes nothing is a meal that stops counting.
+                a zero: a mistyped figure that quietly becomes nothing is a meal that stops counting.
               </Text>
             </>)}
           </Section>
@@ -835,7 +835,7 @@ export default function MyNutrition() {
               // coach's own day that a failed read gives nobody the standing to
               // make.
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Whether you logged anything today is not known — your food log could not be read.
+                Whether you logged anything today is not known. Your food log could not be read.
               </Text>
             ) : (
               // The empty state names whose log is empty, for the same reason
@@ -854,7 +854,7 @@ export default function MyNutrition() {
           <Section>
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               Adjusting a client&rsquo;s calories or macros? That goes on their record, from their card
-              on the Clients tab — not here.
+              on the Clients tab, not here.
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
               <Icon name="people" size={14} color={t.ink3} />

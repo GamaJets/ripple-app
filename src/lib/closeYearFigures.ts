@@ -179,7 +179,7 @@ export function yearFigureNote(f: YearFigure, year: number): string {
     // the calendar built out of a failed query.
     return f.running > 0 && f.running === months
       ? `No month of ${year} has finished yet, so there is nothing filed to read down this column.`
-      : `No month of ${year} is closed, so there is no filed figure to read. That is not a year in which nothing happened — it is a year nobody has signed off.`;
+      : `No month of ${year} is closed, so there is no filed figure to read. That is not a year in which nothing happened. It is a year nobody has signed off.`;
   }
 
   const parts: string[] = [];
@@ -196,7 +196,7 @@ export function yearFigureNote(f: YearFigure, year: number): string {
     const holes: string[] = [];
     if (f.q.unpriced) holes.push(`${f.q.unpriced} filed no amount for it`);
     if (f.q.unlabelled) holes.push(`${f.q.unlabelled} filed an amount and no currency`);
-    parts.push(`Of the closed months, ${holes.join(' and ')} — ${short === 1 ? 'that month is' : 'those months are'} outside the figure rather than inside it at nothing.`);
+    parts.push(`Of the closed months, ${holes.join(' and ')}: ${short === 1 ? 'that month is' : 'those months are'} outside the figure rather than inside it at nothing.`);
   }
 
   if (f.q.pots.length > 1) {

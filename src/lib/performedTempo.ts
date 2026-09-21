@@ -101,10 +101,10 @@ export function tempoVerdict(prescribed: string | null | undefined, performed: s
   const askedT = asked.ok ? asked.tempo : null;
   const didT = did.ok ? did.tempo : null;
   if (!askedT && !didT) return { state: 'none', line: null };
-  if (!askedT) return { state: 'unasked', line: `Tempo ${didT} — ${tempoMeaning(didT)}.` };
+  if (!askedT) return { state: 'unasked', line: `Tempo ${didT}: ${tempoMeaning(didT)}.` };
   if (!didT) return { state: 'unrecorded', line: `Tempo ${askedT} was asked for. No tempo was recorded for this set.` };
-  if (askedT === didT) return { state: 'met', line: `Tempo ${askedT} as asked — ${tempoMeaning(askedT)}.` };
-  return { state: 'differed', line: `Asked for ${askedT}, did ${didT} — ${tempoMeaning(didT)}.` };
+  if (askedT === didT) return { state: 'met', line: `Tempo ${askedT} as asked: ${tempoMeaning(askedT)}.` };
+  return { state: 'differed', line: `Asked for ${askedT}, did ${didT}: ${tempoMeaning(didT)}.` };
 }
 
 /**
@@ -127,7 +127,7 @@ export function tempoSummary(e: Pick<WorkoutEntry, 'sets' | 'tempos'>): string |
   const distinct = Array.from(new Set(said.map((s) => s.tempo)));
   if (distinct.length === 1) {
     const where = said.length === n ? 'every set' : setsPhrase(said.map((s) => s.set));
-    return `Tempo ${distinct[0]} on ${where} — ${tempoMeaning(distinct[0])}.`;
+    return `Tempo ${distinct[0]} on ${where}: ${tempoMeaning(distinct[0])}.`;
   }
   return said.map((s) => `Set ${s.set} ${s.tempo}`).join(' · ');
 }

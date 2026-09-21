@@ -100,7 +100,7 @@ export function trainerHealth(tr: TrainerLike): Health {
     // EVIDENCE, and the size of the roster has no bearing on whether the
     // evidence exists.
     risk = 'high';
-    reason = `${plural(unmarked)} finished but unmarked — no evidence any were delivered, and no pay can be computed.`;
+    reason = `${plural(unmarked)} finished but unmarked. No evidence any were delivered, and no pay can be computed.`;
   } else if (clients > 0 && evidenced === 0) {
     risk = 'high';
     reason = `${clients} client${clients === 1 ? '' : 's'} but no sessions delivered in 30 days.`;
@@ -113,7 +113,7 @@ export function trainerHealth(tr: TrainerLike): Health {
   } else if (unmarked > 0) {
     // Delivering, but part of the month cannot be valued. Not healthy-green.
     risk = 'watch';
-    reason = `Delivering, but ${plural(unmarked)} still unmarked — that part cannot be valued.`;
+    reason = `Delivering, but ${plural(unmarked)} still unmarked. That part cannot be valued.`;
   } else {
     risk = 'ok';
     reason = 'Carrying clients and delivering sessions.';

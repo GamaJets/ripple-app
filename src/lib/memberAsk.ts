@@ -134,12 +134,12 @@ export function bodyGap(status: LoadStatus): string {
  */
 export function coachingFact(mode: CoachingMode, status: LoadStatus): string {
   if (!isWhole(status)) {
-    return `not known — ${profileGap(status)}, so do not assume anyone is coaching them and do not refer them to a coach`;
+    return `not known: ${profileGap(status)}, so do not assume anyone is coaching them and do not refer them to a coach`;
   }
-  return mode === 'solo' ? 'training alone — no coach to refer them to'
-    : mode === 'inperson' ? 'coached in person — their coach is in the room for their booked sessions'
-    : mode === 'hybrid' ? 'coached in person for booked sessions and remotely in between — some weeks they train alone'
-    : 'coached remotely — their coach writes the plan but is never in the room';
+  return mode === 'solo' ? 'training alone, with no coach to refer them to'
+    : mode === 'inperson' ? 'coached in person: their coach is in the room for their booked sessions'
+    : mode === 'hybrid' ? 'coached in person for booked sessions and remotely in between, so some weeks they train alone'
+    : 'coached remotely: their coach writes the plan but is never in the room';
 }
 
 /**
@@ -156,10 +156,10 @@ export function coachingFact(mode: CoachingMode, status: LoadStatus): string {
 export function sleepFact(sleep: ReadinessSleep): string {
   if (sleep.avgHours == null) {
     if (sleep.state === 'stale') {
-      return `nothing in the last ${sleep.windowNights} nights — they have nights on record, but the most recent is older than that, so do not say they have never logged sleep`;
+      return `nothing in the last ${sleep.windowNights} nights. They have nights on record, but the most recent is older than that, so do not say they have never logged sleep`;
     }
     if (sleep.state === 'unknown') {
-      return 'not known — we could not work out which nights to read, so do not say anything about how they have slept';
+      return 'not known: we could not work out which nights to read, so do not say anything about how they have slept';
     }
     return `no nights recorded in the last ${sleep.windowNights}`;
   }
@@ -181,13 +181,13 @@ export function memberAskFacts(i: MemberAskInput): MemberAskFacts {
   const pGap = profileGap(i.profileStatus);
   const bWhole = isWhole(i.scansStatus);
   const bGap = bodyGap(i.scansStatus);
-  const bodyUnknown = `not known — ${bGap}`;
+  const bodyUnknown = `not known: ${bGap}`;
 
   return {
     coaching: coachingFact(i.coachingMode, i.profileStatus),
-    goal: pWhole ? i.goal : `not known — ${pGap}, so do not assume what they are training for`,
-    diet: pWhole ? i.diet : `not known — ${pGap}, so do not assume what they will eat`,
-    mealsPerDay: pWhole ? i.mealsPerDay : `not known — ${pGap}`,
+    goal: pWhole ? i.goal : `not known: ${pGap}, so do not assume what they are training for`,
+    diet: pWhole ? i.diet : `not known: ${pGap}, so do not assume what they will eat`,
+    mealsPerDay: pWhole ? i.mealsPerDay : `not known: ${pGap}`,
     // "not recorded" is a statement about what the member has done, and only a
     // scan read that answered may make it.
     weightKg: i.weightKg != null
@@ -204,7 +204,7 @@ export function memberAskFacts(i: MemberAskInput): MemberAskFacts {
     // returns from the defaults are a bulking day's macros presented as this
     // person's plan.
     kcal: i.macros?.kcal ?? (i.targetInputsUnknown
-      ? `not known — ${i.adjustUnread ? 'their coach’s adjustment could not be read' : pGap}, so these were not worked out`
+      ? `not known: ${i.adjustUnread ? 'their coach’s adjustment could not be read' : pGap}, so these were not worked out`
       : 'not set'),
     protein: i.macros?.protein ?? (i.targetInputsUnknown ? 'not known' : 'not set'),
     carbs: i.macros?.carbs ?? (i.targetInputsUnknown ? 'not known' : 'not set'),
@@ -215,7 +215,7 @@ export function memberAskFacts(i: MemberAskInput): MemberAskFacts {
     // `getProgram` serves this device's copy for up to thirty days, which the
     // screen flagged to the reader and never to the model.
     programTitle: i.programUnknown
-      ? `${i.programTitle} — this is ${i.brandLabel}'s automatic program, not their coach's; we could not read whether a coach has assigned them one, so do not call it their coach's plan`
+      ? `${i.programTitle}. This is ${i.brandLabel}'s automatic program, not their coach's; we could not read whether a coach has assigned them one, so do not call it their coach's plan`
       : i.programCachedNote ? `${i.programTitle} (${i.programCachedNote})` : i.programTitle,
     programFocus: i.programFocus,
     // The gate that matters most. The empty list and the unread list are the
@@ -224,9 +224,9 @@ export function memberAskFacts(i: MemberAskInput): MemberAskFacts {
     // all-clear nobody gave.
     injuries: pWhole
       ? (sharedInjuries(i.injuries as Injury[]) || 'none disclosed')
-      : `not known — ${pGap}. Do not say they have none, and do not treat any movement as safe on the strength of it.`,
+      : `not known: ${pGap}. Do not say they have none, and do not treat any movement as safe on the strength of it.`,
     focusAreas: pWhole
       ? (i.focusAreas.length ? i.focusAreas.join(', ') : 'none set')
-      : `not known — ${pGap}`,
+      : `not known: ${pGap}`,
   };
 }

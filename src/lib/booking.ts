@@ -229,7 +229,7 @@ export function unstatedCurrency(currency: string | null | undefined): string {
  * figure comes through bare.
  */
 export function unstatedCurrencyCoach(currency: string | null | undefined): string {
-  return currency ? '' : ' You have not set a currency, so that figure has no unit on it — set one in Settings and it will be priced everywhere.';
+  return currency ? '' : ' You have not set a currency, so that figure has no unit on it. Set one in Settings and it will be priced everywhere.';
 }
 
 /** How the notice period reads in a sentence: "24 hours", "1 hour", "48 hours". */
@@ -251,11 +251,11 @@ export function cancelWarningLine(v: FeeVerdict, noticeHours: number): string {
     case 'no-policy':
       return `This is inside ${w}, but your coach doesn't charge for a late cancellation.`;
     case 'unknown':
-      return `This is inside ${w}. We couldn't read your coach's cancellation policy, so we can't say whether a fee applies — check with them.`;
+      return `This is inside ${w}. We couldn't read your coach's cancellation policy, so we can't say whether a fee applies. Check with them.`;
     case 'unpriced':
-      return `This is inside ${w}, so your coach's late-cancellation policy applies. They haven't set an amount here, so ask them what it is — Repple doesn't charge it.`;
+      return `This is inside ${w}, so your coach's late-cancellation policy applies. They haven't set an amount here, so ask them what it is. Repple doesn't charge it.`;
     case 'fee':
-      return `This is inside ${w}, so your coach's late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} applies. Repple doesn't take this payment — it's recorded for you and your coach to settle.${unstatedCurrency(v.currency)}`;
+      return `This is inside ${w}, so your coach's late-cancellation fee of ${feeAmountLine(v.amount, v.currency)} applies. Repple doesn't take this payment. It's recorded for you and your coach to settle.${unstatedCurrency(v.currency)}`;
   }
 }
 
@@ -273,8 +273,8 @@ export function feeRecordedLine(
   if (!charged) return null;
   const sum = amount != null && Number.isFinite(amount) ? feeAmountLine(amount, currency) : null;
   return sum
-    ? `A late-cancellation fee of ${sum} has been recorded on your account. Repple doesn't take this payment — settle it with your coach.${unstatedCurrency(currency)}`
-    : 'A late-cancellation fee has been recorded on your account. Repple doesn’t take this payment — settle it with your coach.';
+    ? `A late-cancellation fee of ${sum} has been recorded on your account. Repple doesn't take this payment, so settle it with your coach.${unstatedCurrency(currency)}`
+    : 'A late-cancellation fee has been recorded on your account. Repple doesn’t take this payment, so settle it with your coach.';
 }
 
 /* ── The waitlist, as an order ────────────────────────────────────────────── */
@@ -351,8 +351,8 @@ export function waitlistLine(position: number, waiting: number): string {
   }
   if (position === 1) {
     return waiting > 1
-      ? `You're next in line — if it frees up it's yours, ahead of ${waiting - 1} other${waiting - 1 === 1 ? '' : 's'}.`
-      : `You're next in line — if it frees up it's yours.`;
+      ? `You're next in line. If it frees up it's yours, ahead of ${waiting - 1} other${waiting - 1 === 1 ? '' : 's'}.`
+      : `You're next in line. If it frees up it's yours.`;
   }
   return `You're ${ordinal(position)} in line of ${waiting}. The slot goes to whoever is in front of you.`;
 }
@@ -563,7 +563,7 @@ export function slotWindowLine(w: SlotWindow, clientsOnBook?: number | null): st
     // that makes anybody open the sheet.
     const n = clientsOnBook ?? 0;
     const who = n === 1 ? 'Your client cannot book you' : `Your ${n} clients cannot book you`;
-    return `${who}. You have no weekly hours set, so there is nothing for them to take — `
+    return `${who}. You have no weekly hours set, so there is nothing for them to take: `
       + 'their booking screen is empty and nothing on it says why. '
       + 'Set the times you offer, then open the next four weeks.';
   }

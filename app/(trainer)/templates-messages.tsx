@@ -81,7 +81,7 @@ export default function SavedMessages() {
 
   const remove = (tpl: MessageTemplate) => {
     if (!tpl.id) return;
-    Alert.alert('Delete This Message?', `“${tpl.title}” goes for good. Nothing you have already sent is affected — this is the template, not the messages written from it.`, [
+    Alert.alert('Delete This Message?', `“${tpl.title}” goes for good. Nothing you have already sent is affected. This is the template, not the messages written from it.`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => { void (async () => {
         const ok = await deleteTemplate(tpl.id as string);
@@ -197,7 +197,7 @@ export default function SavedMessages() {
                 style={{ ...inp, marginBottom: sp.md }} />
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>The Message</Text>
               <TextInput value={body} onChangeText={setBody} multiline maxLength={MAX_TEMPLATE_BODY}
-                placeholder="Hey {name} — " placeholderTextColor={t.ink3}
+                placeholder="Hey {name}, " placeholderTextColor={t.ink3}
                 style={{ ...inp, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.sm }} />
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
                 {TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ')}.

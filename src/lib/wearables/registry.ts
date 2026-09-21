@@ -42,8 +42,8 @@ export const PROVIDERS: WearableProvider[] = [
   // Repple has never heard of their device, and has no way to discover that
   // Apple Health already carries its nights. A named absence answers the
   // question; a missing row leaves them to guess.
-  cloud({ id: 'garmin', name: 'Garmin', icon: '⌚', kind: 'cloud', blurb: 'Needs Garmin’s approval before Repple can read it — on iPhone it comes through Apple Health', metrics: [] }),
-  cloud({ id: 'fitbit', name: 'Fitbit', icon: '⌚', kind: 'cloud', blurb: 'Not set up in Repple yet — nothing to connect to', metrics: [] }),
+  cloud({ id: 'garmin', name: 'Garmin', icon: '⌚', kind: 'cloud', blurb: 'Needs Garmin’s approval before Repple can read it. On iPhone it comes through Apple Health', metrics: [] }),
+  cloud({ id: 'fitbit', name: 'Fitbit', icon: '⌚', kind: 'cloud', blurb: 'Not set up in Repple yet, so there is nothing to connect to', metrics: [] }),
   // This row carried `metrics: []` and a blurb saying Repple read no training
   // from Health Connect, and both were true: an Android member could sync
   // nothing but blood sugar, which was the whole Android wearable story.
@@ -60,7 +60,7 @@ export const PROVIDERS: WearableProvider[] = [
   // ask is that Connect fails with a sentence naming both reasons it might have
   // — see cloudProvider.connect() — rather than a blurb hedging a capability
   // for everybody in order to describe a minority of installs.
-  cloud({ id: 'googlefit', name: 'Google Fit / Health Connect', icon: '🟢', kind: 'health-connect', blurb: 'Android’s health store — the steps, heart rate, calories, workouts and sleep your phone and watch write into it', metrics: ['Steps', 'Heart rate', 'Calories', 'Workouts', 'Sleep'] }),
+  cloud({ id: 'googlefit', name: 'Google Fit / Health Connect', icon: '🟢', kind: 'health-connect', blurb: 'Android’s health store: the steps, heart rate, calories, workouts and sleep your phone and watch write into it', metrics: ['Steps', 'Heart rate', 'Calories', 'Workouts', 'Sleep'] }),
 ];
 
 export function providerById(id: ProviderId): WearableProvider | undefined {

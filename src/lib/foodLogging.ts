@@ -288,7 +288,7 @@ export function backdateNote(day: string, today: string): string | null {
  * from today's list.
  */
 export function backdatedStoredNote(day: string, today: string): string {
-  return `Added to ${dayLongLabel(day, today)}. Today’s list and today’s totals are unchanged — look under Recent Days to see it.`;
+  return `Added to ${dayLongLabel(day, today)}. Today’s list and today’s totals are unchanged. Look under Recent Days to see it.`;
 }
 
 /**
@@ -301,7 +301,7 @@ export function backdatedStoredNote(day: string, today: string): string {
  * about a day plan, for the reasons this file's header sets out.
  */
 export function backdatedUnsentNote(day: string, today: string): string {
-  return `Saved on this phone against ${dayLongLabel(day, today)}. No connection just now, so it isn’t in your food log on the server yet — it goes up on its own next time you have signal, and it keeps its own day when it does.`;
+  return `Saved on this phone against ${dayLongLabel(day, today)}. No connection just now, so it isn’t in your food log on the server yet. It goes up on its own next time you have signal, and it keeps its own day when it does.`;
 }
 
 /* ── which meal it was ─────────────────────────────────────────────────── */

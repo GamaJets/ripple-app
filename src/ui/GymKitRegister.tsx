@@ -66,9 +66,9 @@ function downSince(d: DownItem): string {
 function serviceSince(s: ServiceItem): string {
   const what = KIT_SERVICE_NOTE[s.state];
   if (s.state === 'overdue' && s.daysOverdue != null && s.dueOn) {
-    return `Due ${fmtDay(s.dueOn)} — ${num(s.daysOverdue)} ${plural(s.daysOverdue, 'day', 'days')} ago.`;
+    return `Due ${fmtDay(s.dueOn)}, ${num(s.daysOverdue)} ${plural(s.daysOverdue, 'day', 'days')} ago.`;
   }
-  if (s.dueOn) return `${what[0].toUpperCase()}${what.slice(1)} — due ${fmtDay(s.dueOn)}.`;
+  if (s.dueOn) return `${what[0].toUpperCase()}${what.slice(1)}, due ${fmtDay(s.dueOn)}.`;
   // No date to name. The sentence still has to be whole: `unrecorded` means a
   // schedule exists and nothing was ever logged against it, and there is
   // genuinely no day to print.

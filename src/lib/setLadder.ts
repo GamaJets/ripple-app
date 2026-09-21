@@ -237,7 +237,7 @@ export function ladderNote(rows: LadderRow[]): string | null {
   const done = ladderDone(rows);
   if (done === total) return null;
   if (done === 0) {
-    return `Nothing ticked yet. Tick each set as you finish it — ${total === 1 ? 'the set' : 'a set'} that is not ticked is not saved.`;
+    return `Nothing ticked yet. Tick each set as you finish it. ${total === 1 ? 'The set' : 'A set'} that is not ticked is not saved.`;
   }
   const left = total - done;
   // numbers-ok: `total` is `rows.length` — the set rows on ONE exercise the

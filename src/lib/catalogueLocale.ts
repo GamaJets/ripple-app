@@ -345,7 +345,7 @@ export function validateTranslations(
     if (!isTranslationLocale(loc)) {
       problems.push(
         `"${id || '(no exercise)'}" is translated into "${loc || '(nothing)'}", which is not a catalogue language. `
-        + `The supported set is ${TRANSLATION_LOCALES.join(', ')} — a row in any other locale is stored, read by nothing, `
+        + `The supported set is ${TRANSLATION_LOCALES.join(', ')}. A row in any other locale is stored, read by nothing, `
         + 'and looks from a row count like the language is finished.',
       );
     }

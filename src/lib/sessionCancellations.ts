@@ -199,14 +199,14 @@ export function actorLine(actor: Actor, audience: Audience, who: string): string
     switch (actor) {
       case 'client': return 'You cancelled this one.';
       case 'coach': return 'Your coach cancelled this one.';
-      case 'other': return 'Somebody else cancelled this one — not you and not your coach. Your gym’s front desk can do this.';
+      case 'other': return 'Somebody else cancelled this one, not you and not your coach. Your gym’s front desk can do this.';
       case 'unattributed': return 'Who cancelled this one was not recorded, so it is not known whether it was you, your coach or the gym.';
     }
   }
   switch (actor) {
     case 'client': return `${who} cancelled this one.`;
     case 'coach': return 'You cancelled this one.';
-    case 'other': return `Somebody else cancelled this one — not you and not ${who}. Your gym’s front desk can do this.`;
+    case 'other': return `Somebody else cancelled this one, not you and not ${who}. Your gym’s front desk can do this.`;
     case 'unattributed': return `Who cancelled this one was not recorded, so it is not known whether it was you, ${who} or the gym.`;
   }
 }
@@ -310,7 +310,7 @@ export function noticeWords(minutes: number): string {
 export function noticeLine(c: Cancellation): string {
   const m = noticeMinutes(c);
   if (m == null) {
-    return 'How much notice this was is not known — one of the two times on the record could not be read.';
+    return 'How much notice this was is not known. One of the two times on the record could not be read.';
   }
   if (m <= 0) {
     return m === 0
@@ -393,7 +393,7 @@ export function groupActions(rows: Cancellation[]): CancelAction[] {
  *  src/lib/sessionHistory.ts makes about a boundary. */
 export function actionLine(a: CancelAction): string | null {
   if (a.rows.length < 2) return null;
-  return `One cancellation, ${num(a.rows.length)} hours — these were removed together, in a single action, `
+  return `One cancellation, ${num(a.rows.length)} hours. These were removed together, in a single action, `
     + 'and are counted here as one.';
 }
 
@@ -494,8 +494,8 @@ export function tallyCancellations(rows: Cancellation[]): CancelTally {
  */
 export const NO_RATE_NOTE =
   'There is no cancellation rate on this page and there cannot be one. A rate needs the number of '
-  + 'sessions these were cancelled out of, and cancelling hands the hour back — the booking stops '
-  + 'being anybody’s and is offered to somebody else — so there is no set left to count them against. '
+  + 'sessions these were cancelled out of, and cancelling hands the hour back (the booking stops '
+  + 'being anybody’s and is offered to somebody else), so there is no set left to count them against. '
   + 'What is here is how many, by whom, and how much notice.';
 
 /** Why the list can be shorter than the truth, and never longer. */
@@ -513,7 +513,7 @@ export const RECORD_START_NOTE =
  *  DELETEs the remaining occurrences and never touches `client_id`, and the
  *  trigger fires on an UPDATE of `client_id`. */
 export const ENDED_SERIES_NOTE =
-  'Ending a standing appointment is not a cancellation and leaves nothing here — the remaining hours '
+  'Ending a standing appointment is not a cancellation and leaves nothing here. The remaining hours '
   + 'are removed rather than handed back. Somebody who ended an arrangement will not appear on this '
   + 'page for having done so.';
 
@@ -549,7 +549,7 @@ export function emptyCancellationsLine(
       return `Still reading ${whose} cancelled sessions.`;
     case 'error':
       return `We could not read ${whose} cancelled sessions, so this is not a record of nothing having `
-        + 'been cancelled — it is a read that failed. Pull down to try again.';
+        + 'been cancelled. It is a read that failed. Pull down to try again.';
     case 'partial':
       return `Only part of ${whose} record could be read, and none of that part is here. There may be `
         + 'more on the server that this screen has not seen.';

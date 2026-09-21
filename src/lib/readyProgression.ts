@@ -81,7 +81,7 @@ const ALREADY_GENTLE: ProgressAction[] = ['hold', 'deload'];
 function basis(r: Readiness): string {
   const made = r.from.join(', ');
   return r.confidence === 'partial'
-    ? `today's readiness is ${r.score} from ${made} — one signal was not recorded, so that is a partial reading`
+    ? `today's readiness is ${r.score} from ${made}, but one signal was not recorded, so that is a partial reading`
     : `today's readiness is ${r.score}, from ${made}`;
 }
 
@@ -126,7 +126,7 @@ export function temperByReadiness(
       tip: { ...tip, action: 'reps', nextWeight: tip.lastWeight },
       temper: 'hold-load',
       note: `Keeping ${lastWeightLabel ?? 'the same load'} rather than adding to it, because ${basis(readiness)}. `
-        + `Add the load next time if today feels easy — nothing here measures how strong you are, only how the last few days went.`,
+        + `Add the load next time if today feels easy. Nothing here measures how strong you are, only how the last few days went.`,
     };
   }
 
@@ -134,7 +134,7 @@ export function temperByReadiness(
   return {
     tip: { ...tip, action: 'hold', nextWeight: tip.lastWeight, nextReps: String(tip.lastReps) },
     temper: 'repeat-last',
-    note: `Repeating last session${lastWeightLabel ? ` — ${tip.lastReps} at ${lastWeightLabel} — ` : ' '}rather than asking for more, because ${basis(readiness)}. `
+    note: `Repeating last session${lastWeightLabel ? ` (${tip.lastReps} at ${lastWeightLabel}) ` : ' '}rather than asking for more, because ${basis(readiness)}. `
       + `That is a reading of your sleep and recent training, not a verdict on you: if it feels wrong, follow the plan instead.`,
   };
 }

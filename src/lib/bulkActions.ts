@@ -181,7 +181,7 @@ export function overwriteBrief(
   const lead = r === n
     ? (n === 1
       ? `${who} is on a program now. Assigning “${templateName}” replaces it.`
-      : `All ${num(n)} of these are on a program now — ${who}. Assigning “${templateName}” replaces every one of them.`)
+      : `All ${num(n)} of these are on a program now: ${who}. Assigning “${templateName}” replaces every one of them.`)
     : `${num(r)} of these ${num(n)} are on a program now, including ${who}. Assigning “${templateName}” replaces what they are training.`;
 
   // Said every time, and not softened. This is the whole of why the dialog
@@ -190,7 +190,7 @@ export function overwriteBrief(
   const cost = 'There is no undo, no record of what was there before, and nothing tells them their next session changed.';
 
   const rest = fresh.length
-    ? `\n\nThe other ${num(fresh.length)} — ${namesWithRest(fresh.map((x) => x.name))} — ${fresh.length === 1 ? 'is' : 'are'} on no coach-assigned program, so for them this is new work rather than a replacement.`
+    ? `\n\nThe other ${num(fresh.length)} (${namesWithRest(fresh.map((x) => x.name))}) ${fresh.length === 1 ? 'is' : 'are'} on no coach-assigned program, so for them this is new work rather than a replacement.`
     : '';
 
   return {
@@ -249,7 +249,7 @@ export function unassignBrief(targets: readonly AssignTarget[]): OverwriteBrief 
     title: n === 1 ? 'Take Them Off This Program?' : `Take ${num(n)} Clients Off Their Programs?`,
     body:
       `${who} ${n === 1 ? 'goes' : 'go'} back to an auto-generated plan built from ${n === 1 ? 'their' : 'their own'} goal. `
-      + `Every session ${n === 1 ? 'they have' : 'they have'} already logged stays exactly where it is — a program is a plan, and the sets somebody did are their record, not the plan's. `
+      + `Every session ${n === 1 ? 'they have' : 'they have'} already logged stays exactly where it is. A program is a plan, and the sets somebody did are their record, not the plan's. `
       + `Put the same program back later and that history is still underneath it.`,
     confirmLabel: n === 1 ? 'Take Them Off' : `Take ${num(n)} Off`,
     replacing: on,
@@ -358,13 +358,13 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
   if (!bad.length) {
     return {
       title: verbTitle,
-      body: `${verbBody} ${num(n)} ${n === 1 ? 'client' : 'clients'} — ${namesWithRest(ok.map((r) => r.name))}. ${landed(n)}`,
+      body: `${verbBody} ${num(n)} ${n === 1 ? 'client' : 'clients'}: ${namesWithRest(ok.map((r) => r.name))}. ${landed(n)}`,
       retry: [],
     };
   }
 
   const failureLines = bad.length <= REASONS_IN_REPORT
-    ? bad.map((r) => `· ${r.name} — ${r.why ?? 'the server did not say why.'}`).join('\n')
+    ? bad.map((r) => `· ${r.name}: ${r.why ?? 'the server did not say why.'}`).join('\n')
     : `${listNames(bad.map((r) => r.name))}.\n\n${distinctReasons(bad)}`;
 
   if (!ok.length) {
@@ -381,7 +381,7 @@ export function bulkReport(kind: BulkKind, results: readonly WriteOutcome[]): Bu
   return {
     title: kind === 'assign' ? 'Partly Assigned' : kind === 'unassign' ? 'Partly Taken Off' : kind === 'end' ? 'Partly Removed' : kind === 'checklist' ? 'Partly Copied' : 'Partly Sent',
     body:
-      `${num(ok.length)} of ${num(n)} landed — ${namesWithRest(ok.map((r) => r.name))}. ${landed(ok.length)}\n\n`
+      `${num(ok.length)} of ${num(n)} landed: ${namesWithRest(ok.map((r) => r.name))}. ${landed(ok.length)}\n\n`
       + `${num(bad.length)} did not, and ${bad.length === 1 ? 'is' : 'are'} still selected so you can try again:\n\n`
       + failureLines,
     retry,
@@ -506,7 +506,7 @@ export function guardRecipients(
       return {
         allowed: false,
         label: 'Reading Who That Is…',
-        reason: `Still reading who is in ${segment}. Sending now would reach whoever has loaded so far — this takes a moment.`,
+        reason: `Still reading who is in ${segment}. Sending now would reach whoever has loaded so far. This takes a moment.`,
       };
     case 'partial':
       return {
@@ -565,7 +565,7 @@ export function guardRecipients(
 export function bulkThreadNote(count: number): string | null {
   if (count < 2) return null;
   return `Each of these ${num(count)} people gets this as an ordinary message from you, in their own thread. `
-    + 'Nothing marks it as having gone to anybody else, so it will read as though you wrote it to them — if you want it to say it went to everyone, say so in the message.';
+    + 'Nothing marks it as having gone to anybody else, so it will read as though you wrote it to them. If you want it to say it went to everyone, say so in the message.';
 }
 
 /* ── ending the coaching for many people at once ───────────────────────────── */
@@ -638,7 +638,7 @@ export function endCoachingBrief(targets: readonly EndTarget[]): OverwriteBrief 
 
   const lead = n === 1
     ? `${who} comes off your roster.`
-    : `All ${num(n)} of these come off your roster — ${who}.`;
+    : `All ${num(n)} of these come off your roster: ${who}.`;
 
   // Said for the linked half only, because it is the only half it is true of,
   // and said in full: the photo grant is the one part of this that re-joining
@@ -647,12 +647,12 @@ export function endCoachingBrief(targets: readonly EndTarget[]): OverwriteBrief 
   const linkedCost = linked.length
     ? `${linked.length === n ? (n === 1 ? 'They keep' : 'They all keep') : `${num(linked.length)} of them keep`} their account and everything logged in it, and ${linked.length === 1 ? 'they are' : 'they are each'} told the coaching has ended. `
       + `You stop seeing ${linked.length === 1 ? 'their' : 'their'} workouts, measurements, check-ins and food logs, and your thread ${linked.length === 1 ? 'with them closes' : 'with each of them closes'}. `
-      + `Every progress photo ${linked.length === 1 ? 'they' : 'they'} shared is un-shared straight away and that part cannot be undone — joining you again later does not hand the photos back.`
+      + `Every progress photo ${linked.length === 1 ? 'they' : 'they'} shared is un-shared straight away and that part cannot be undone. Joining you again later does not hand the photos back.`
     : '';
 
   // And for the hand-added half, which is a delete rather than an ending.
   const handCost = hand.length
-    ? `${hand.length === n ? (n === 1 ? 'This one is' : `All ${num(n)} are`) : `${num(hand.length)} of them — ${namesWithRest(hand.map((x) => x.name))} — are`} clients you added by hand, with no account behind them. `
+    ? `${hand.length === n ? (n === 1 ? 'This one is' : `All ${num(n)} are`) : `${num(hand.length)} of them (${namesWithRest(hand.map((x) => x.name))}) are`} clients you added by hand, with no account behind them. `
       + `Removing ${hand.length === 1 ? 'that row deletes it' : 'those rows deletes them'}, along with the name and goal you typed. There is no undo and nothing to re-join.`
     : '';
 

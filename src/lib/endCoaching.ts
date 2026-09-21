@@ -130,7 +130,7 @@ export function leaveCoachPrompt(coachName: string | null | undefined): LeavePro
     title: `Leave ${who}?`,
     body:
       `${who} stops being able to see your workouts, measurements, check-ins, habits, scans, food logs, goals and daily targets, and your message thread with them closes.\n\n` +
-      `Any progress photo you sent them is un-shared straight away, and that part cannot be undone — joining them again later does not hand the photos back. Nothing of yours is deleted: your own history stays exactly as it is, and so does their record of the sessions they delivered.\n\n` +
+      `Any progress photo you sent them is un-shared straight away, and that part cannot be undone. Joining them again later does not hand the photos back. Nothing of yours is deleted: your own history stays exactly as it is, and so does their record of the sessions they delivered.\n\n` +
       `Sessions you have already booked with them are not cancelled. Cancel those yourself if you no longer want them. You can join ${who} again any time with their coaching code.`,
     confirmLabel: `Leave ${who}`,
     cancelLabel: 'Stay',
@@ -381,7 +381,7 @@ export function clientEndConfirmBody(name: string | null | undefined): string {
   return `${who} stops being your coach. They can no longer see your training, your check-ins, your scans or anything you have disclosed, and their screens empty of you.
 
 `
-    + 'Nothing you have logged is deleted and nothing you have bought is refunded here — sessions you have already paid for and anything still on your account are settled with them directly. You can be coached by them again later if you both want that.';
+    + 'Nothing you have logged is deleted and nothing you have bought is refunded here. Sessions you have already paid for and anything still on your account are settled with them directly. You can be coached by them again later if you both want that.';
 }
 
 /** What actually happened, said without overclaiming. `reasonStored` false with
@@ -395,7 +395,7 @@ export function clientEndOutcomeLine(ended: boolean, reasonGiven: boolean, reaso
   if (!reasonGiven) return `${head} Nothing was recorded about why.`;
   return reasonStored
     ? `${head} Your reason has been passed on to them.`
-    : `${head} Your reason could not be recorded, so they have not been told why — the ending itself did happen.`;
+    : `${head} Your reason could not be recorded, so they have not been told why. The ending itself did happen.`;
 }
 
 /** Longest note the server stores against an ending. */
@@ -503,7 +503,7 @@ export function endReasonPrompt(rec: EndRecordRead): string {
     return 'Nothing on record says this coaching relationship has ended.';
   }
   if (rec.reason == null) {
-    return 'Nothing was recorded about why this ended. It is the cheapest thing you will ever learn about your own business, and this is the only moment it exists — write down what you know, even if all you know is that they did not say.';
+    return 'Nothing was recorded about why this ended. It is the cheapest thing you will ever learn about your own business, and this is the only moment it exists. Write down what you know, even if all you know is that they did not say.';
   }
   return END_REASON_NOTE[rec.reason];
 }

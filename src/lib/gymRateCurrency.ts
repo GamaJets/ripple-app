@@ -151,7 +151,7 @@ export function settleCurrencyBlocker(
     case 'none':
       return null;
     case 'mixed':
-      return `These sessions were not all priced in the same money — ${potNames(run.pots)}. One settlement is one payment in one currency, and paying them together would file a total that is not an amount of anything. Settle each currency's sessions on its own.`;
+      return `These sessions were not all priced in the same money: ${potNames(run.pots)}. One settlement is one payment in one currency, and paying them together would file a total that is not an amount of anything. Settle each currency's sessions on its own.`;
     case 'unrecorded':
       return gym
         ? null
@@ -162,7 +162,7 @@ export function settleCurrencyBlocker(
       }
       return gym === run.currency
         ? null
-        : `These sessions were priced in ${run.currency} and this gym now charges in ${gym}. Recording the payment would stamp ${gym} on ${run.count} session${run.count === 1 ? '' : 's'} of ${run.currency} work, permanently, on the row an accountant reconciles. Repple does not convert money — settle this period in ${run.currency}, or correct the sessions first.`;
+        : `These sessions were priced in ${run.currency} and this gym now charges in ${gym}. Recording the payment would stamp ${gym} on ${run.count} session${run.count === 1 ? '' : 's'} of ${run.currency} work, permanently, on the row an accountant reconciles. Repple does not convert money. Settle this period in ${run.currency}, or correct the sessions first.`;
   }
 }
 
@@ -190,8 +190,8 @@ export function totalNote(sessions: readonly RatedSession[]): string | null {
     case 'none': return null;
     case 'one': return null;
     case 'unrecorded':
-      return `These ${run.count} session${run.count === 1 ? ' was' : 's were'} filed before Repple recorded what money a session rate is in, so the figure is real and the currency is genuinely not on the record. It is deliberately not labelled with what this gym charges in today — that would be a guess about the past.`;
+      return `These ${run.count} session${run.count === 1 ? ' was' : 's were'} filed before Repple recorded what money a session rate is in, so the figure is real and the currency is genuinely not on the record. It is deliberately not labelled with what this gym charges in today. That would be a guess about the past.`;
     case 'mixed':
-      return `This period covers more than one currency — ${potNames(run.pots)} — so there is no single total. Money is never added across currencies here.`;
+      return `This period covers more than one currency (${potNames(run.pots)}), so there is no single total. Money is never added across currencies here.`;
   }
 }

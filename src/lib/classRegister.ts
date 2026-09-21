@@ -234,7 +234,7 @@ export function registerCaveat(taken: RegisterTaken, missing: number): string | 
   if (taken === false) {
     return 'Nobody has taken this register yet, so the members not ticked are unmarked rather than absent.';
   }
-  return 'This build cannot tell whether the register was taken, so the members not ticked are unmarked — that is not a record of anyone missing the class.';
+  return 'This build cannot tell whether the register was taken, so the members not ticked are unmarked. That is not a record of anyone missing the class.';
 }
 
 /**
@@ -272,7 +272,7 @@ export function registerArc(c: RegisterCount): number | null {
 export function registerLine(
   c: RegisterCount, known: boolean, taken: RegisterTaken = null,
 ): string {
-  if (!known) return 'The roster could not be read — this is not a count of zero.';
+  if (!known) return 'The roster could not be read. This is not a count of zero.';
   const walk = c.walkIns > 0
     ? ` ${c.walkIns} ${c.walkIns === 1 ? 'person' : 'people'} came off the waitlist and ${c.walkIns === 1 ? 'is' : 'are'} counted separately.`
     : '';

@@ -378,7 +378,7 @@ export function outcomeMessage(outcome: ExtractOutcome): { title: string; note: 
     case 'unreadable':
       return {
         title: 'We could not read that',
-        note: 'No text came back from that image, so this is not the document saying nothing — it is us failing to read it. Try a straighter, brighter photo, or add the injury yourself.',
+        note: 'No text came back from that image, so this is not the document saying nothing. It is us failing to read it. Try a straighter, brighter photo, or add the injury yourself.',
       };
     case 'unsupported-script':
       return {
@@ -388,7 +388,7 @@ export function outcomeMessage(outcome: ExtractOutcome): { title: string; note: 
     case 'nothing-recognised':
       return {
         title: 'Nothing we could turn into an injury',
-        note: 'We read the document but found no body area with a problem described against it. This app only understands English clinical wording, so a report in another language will land here even when it describes an injury plainly. That does not mean it says nothing — it means we could not tell. Add what it says yourself.',
+        note: 'We read the document but found no body area with a problem described against it. This app only understands English clinical wording, so a report in another language will land here even when it describes an injury plainly. That does not mean it says nothing. It means we could not tell. Add what it says yourself.',
       };
     default:
       return {

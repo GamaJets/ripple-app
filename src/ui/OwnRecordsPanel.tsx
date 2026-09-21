@@ -177,7 +177,7 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
           to keep it. */}
       {status === 'error' ? (
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>
-          Your records are safe — this could not read your training log just now, so there is no
+          Your records are safe. This could not read your training log just now, so there is no
           board below. Nothing has been reset.
         </Text>
       ) : status === 'loading' ? (
@@ -185,7 +185,7 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
       ) : status === 'partial' ? (
         <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
           You have logged more than this can read in one go, so these are the best sets among the
-          ones it read. A record set outside that may not be here — this is not a statement about
+          ones it read. A record set outside that may not be here. This is not a statement about
           your whole history.
         </Text>
       ) : null}
@@ -197,7 +197,7 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
       {!weightsKnown ? (
         <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
           Your weigh-ins could not be read, so pull-ups, dips and press-ups are not on the
-          estimated-max board — they are priced against what you weighed on the day. They are not
+          estimated-max board, because they are priced against what you weighed on the day. They are not
           gone, and your barbell records are unaffected.
         </Text>
       ) : null}
@@ -206,7 +206,7 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
         <Section>
           <Text style={{ ...ty.body, color: t.ink2 }}>
             No records of your own yet. Log a set above and the first one lands here. Pull-ups, dips
-            and press-ups count, and so do planks and hangs — a hold gets a board of its own.
+            and press-ups count, and so do planks and hangs. A hold gets a board of its own.
           </Text>
         </Section>
       ) : (<>

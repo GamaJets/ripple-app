@@ -132,7 +132,7 @@ export default function Reminders() {
   const addSupp = () => {
     const nm = name.trim(); const h = parseInt(sh, 10); const m = parseInt(sm, 10);
     if (!nm) { Alert.alert('Name It', 'Give the supplement or reminder a name.'); return; }
-    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the Time', 'Use 24-hour time — 08:00 is eight in the morning, 20:00 is eight in the evening.'); return; }
+    if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) { Alert.alert('Check the Time', 'Use 24-hour time: 08:00 is eight in the morning, 20:00 is eight in the evening.'); return; }
     // Every day unless they say otherwise, because that is what this control
     // did before day pickers existed and changing the default silently would
     // change what "Add Reminder" means for everybody who already knows it.
@@ -203,7 +203,7 @@ export default function Reminders() {
       Alert.alert(
         read === 'loading' ? 'Still Reading Your Reminders' : 'Your Reminders Could Not Be Read',
         read === 'loading'
-          ? 'Your saved reminders have not come off this phone yet, so what is on screen is not them. Nothing has been changed — try again in a moment.'
+          ? 'Your saved reminders have not come off this phone yet, so what is on screen is not them. Nothing has been changed. Try again in a moment.'
           : 'Your saved reminders could not be read off this phone, so what is on screen is the starting settings rather than yours. Nothing has been changed: saving now would replace the reminders you have set with these. Close this screen and open it again.',
       );
       return;
@@ -243,7 +243,7 @@ export default function Reminders() {
     // contradict each other over nothing being scheduled at all.
     if (!pushAvailable()) {
       Alert.alert('Settings Saved, Nothing Scheduled Yet',
-        'This build cannot schedule notifications, so no reminder has been set. Your settings are kept and will be scheduled on their own once notifications are working — you do not have to come back to this screen.');
+        'This build cannot schedule notifications, so no reminder has been set. Your settings are kept and will be scheduled on their own once notifications are working. You do not have to come back to this screen.');
       return;
     }
     if (scheduled === 0) {
@@ -251,7 +251,7 @@ export default function Reminders() {
         wanted === 0 ? 'Saved' : 'Saved, but Nothing Will Be Sent',
         wanted === 0
           ? 'No reminders are set. Turn one on, or add your own, and it will be scheduled.'
-          : 'Your settings are saved, but this phone is not allowing notifications from us, so nothing was scheduled. Turn them on for this app in your phone’s Settings — they will be scheduled the next time you open the app, without coming back here.',
+          : 'Your settings are saved, but this phone is not allowing notifications from us, so nothing was scheduled. Turn them on for this app in your phone’s Settings. They will be scheduled the next time you open the app, without coming back here.',
       );
       return;
     }
@@ -289,7 +289,7 @@ export default function Reminders() {
   const suppOk = !isNaN(suppH) && suppH >= 0 && suppH <= 23 && !isNaN(suppM) && suppM >= 0 && suppM <= 59;
   const suppEcho = suppOk
     ? `Reminds you every day at ${fmt(suppH, suppM)}.`
-    : 'Use a 24-hour time — 20:30 is half past eight in the evening.';
+    : 'Use a 24-hour time: 20:30 is half past eight in the evening.';
   // ── the other half of the echo ─────────────────────────────────────────
   //
   // The echo above says what was typed. It said nothing about what will
@@ -310,7 +310,7 @@ export default function Reminders() {
 
         {!pushAvailable() ? (
           <Notice kicker="Not Sending Yet" title="Nothing Can Be Scheduled on This Build"
-            note="You can set your reminders up here and they are kept. They will be scheduled on their own once notifications are working — you do not have to come back to this screen." />
+            note="You can set your reminders up here and they are kept. They will be scheduled on their own once notifications are working. You do not have to come back to this screen." />
         ) : null}
 
         {/* Before any control, because every control below it is showing a
@@ -322,7 +322,7 @@ export default function Reminders() {
         ) : read === 'error' ? (
           <Notice tone={t.warn} kicker="Not Read"
             title="Your Saved Reminders Could Not Be Read on This Phone"
-            note="What is set below is this screen's starting point rather than yours, so saving is switched off — it would replace the reminders you have set, and leave the ones already scheduled with no way to stop them. Anything you have already set is still saved and still arriving. Close this screen and open it again." />
+            note="What is set below is this screen's starting point rather than yours, so saving is switched off: it would replace the reminders you have set, and leave the ones already scheduled with no way to stop them. Anything you have already set is still saved and still arriving. Close this screen and open it again." />
         ) : null}
 
 
@@ -375,7 +375,7 @@ export default function Reminders() {
               {startH > endH ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
-                  <Text style={{ ...ty.caption, color: t.ink2 }}>No nudges yet — the last hour is earlier in the day than the first.</Text>
+                  <Text style={{ ...ty.caption, color: t.ink2 }}>No nudges yet. The last hour is earlier in the day than the first.</Text>
                 </View>
               ) : null}
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>On These Days · {daysLabel(hydrationDays)}</Text>

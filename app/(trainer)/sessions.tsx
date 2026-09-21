@@ -750,7 +750,7 @@ export default function TrainerSessions() {
       });
       if (out === 'refused') {
         Alert.alert('Not Recorded',
-          'That outcome was not saved and is not waiting to send — the session may no longer exist, or it is not yours to mark.');
+          'That outcome was not saved and is not waiting to send. The session may no longer exist, or it is not yours to mark.');
         return;
       }
       // Nothing was kept. The session stays on the Mark Sessions queue, because
@@ -832,7 +832,7 @@ export default function TrainerSessions() {
         // The server read it and declined, so the outcome stands. Named as what
         // is true of the RECORD, because that is what the coach has to act on.
         Alert.alert('Not Undone',
-          `${who} is still recorded as “${stands}” — the session may no longer exist, or it is not yours to change.`);
+          `${who} is still recorded as “${stands}”. The session may no longer exist, or it is not yours to change.`);
         return;
       }
       /* ── the fourth answer, which this handler did not have ──────────────
@@ -895,7 +895,7 @@ export default function TrainerSessions() {
       ? `\n\nYou have narrowed this list, so this is the ${day.rows.length} shown and not necessarily every unmarked session on that day. Clear the filters first if you meant all of them.`
       : '';
     Alert.alert(
-      `${label} — All ${day.rows.length}?`,
+      `${label} · All ${day.rows.length}?`,
       `Every unmarked session on ${day.label} that is shown below will be recorded as "${label}". You can undo each one afterwards.${narrowNote}`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -957,11 +957,11 @@ export default function TrainerSessions() {
           comparison={!loaded ? undefined : rows.length === 0 ? 'All marked' : (hasGym ? 'Holding payroll up' : 'Holding your record up')}
           tone={!loaded ? undefined : rows.length === 0 ? t.brand : t.data.amber}
           detail={failed
-            ? 'Could not be read — this is not a count of zero.'
+            ? 'Could not be read. This is not a count of zero.'
             : !loaded
               ? 'Reading your sessions…'
               : rows.length === 0
-                ? (hasGym ? 'Nothing outstanding — payroll can be settled.' : 'Nothing outstanding — every session you have delivered is on the record.')
+                ? (hasGym ? 'Nothing outstanding. Payroll can be settled.' : 'Nothing outstanding. Every session you have delivered is on the record.')
                 : (hasGym ? 'Payroll cannot be worked out until every one of these is marked.' : 'Your delivered-sessions count is incomplete until every one of these is marked.')}
         />
 
@@ -990,7 +990,7 @@ export default function TrainerSessions() {
             {reqStatus === 'error' ? (
               <Flag tone={t.warn}>
                 Requests could not be read, so this is not a list of what your clients have asked for.
-                Anyone waiting on you is still waiting — check again when you have signal.
+                Anyone waiting on you is still waiting. Check again when you have signal.
               </Flag>
             ) : reqStatus === 'loading' ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>Reading what your clients have asked for.</Text>
@@ -1094,7 +1094,7 @@ export default function TrainerSessions() {
         {!floor.queueRead ? (
           <View style={{ paddingTop: sp.sm }}>
             <Flag tone={t.warn}>
-              What this phone is still carrying could not be read, so whether any outcomes are waiting to go up is not known. Nothing has been lost — it is not being written over either.
+              What this phone is still carrying could not be read, so whether any outcomes are waiting to go up is not known. Nothing has been lost, and it is not being written over either.
             </Flag>
           </View>
         ) : floorPendingNote(floor.unsent) ? (
@@ -1231,7 +1231,7 @@ export default function TrainerSessions() {
           <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
             <Flag tone={t.crit}>Could not read your sessions</Flag>
             <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.xs }}>
-              There may or may not be sessions waiting on an outcome — the app could not find out.
+              There may or may not be sessions waiting on an outcome; the app could not find out.
               {hasGym ? ' Do not settle payroll on this screen until it loads.' : ' Do not treat this as a clear queue until it loads.'}
             </Text>
             <Pressable onPress={() => void load(loadedDays)} hitSlop={8}

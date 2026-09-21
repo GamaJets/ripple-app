@@ -178,7 +178,7 @@ function TriSwitchRow({ t, label, note, state, onPress, first }: {
       <View style={{ flex: 1 }}>
         <Text style={{ ...ty.body, color: t.ink }}>{label}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-          {unknown ? `${CHANNEL_UNKNOWN_LABEL} — ${note}` : note}
+          {unknown ? `${CHANNEL_UNKNOWN_LABEL}. ${note}` : note}
         </Text>
       </View>
       <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: unknown ? t.surface2 : on ? t.brand : t.surface3, borderWidth: hairline, borderColor: unknown ? t.ring : on ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
@@ -233,7 +233,7 @@ export default function TrainerSettings() {
     const next = state === 'off';
     const ok = await setChannel(key, next);
     if (!ok) {
-      Alert.alert('Not Saved', 'The server did not take that change, so nothing has moved. Your notifications carry on exactly as they were — try again once you have signal.');
+      Alert.alert('Not Saved', 'The server did not take that change, so nothing has moved. Your notifications carry on exactly as they were. Try again once you have signal.');
     }
     // Re-read rather than assume: what the switch shows next comes from the
     // row, which is the same discipline `loadPending` above keeps.
@@ -400,7 +400,7 @@ export default function TrainerSettings() {
     if (res === 'on' || res === 'off') return;
     if (res === 'no-build') {
       Alert.alert('Not on This Build Yet',
-        'This version of the app cannot receive push notifications at all — that needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
+        'This version of the app cannot receive push notifications at all. That needs a new build from the App Store, not a setting. Your choice has been saved and will apply as soon as you have one.');
       return;
     }
     if (res === 'os-refused') {
@@ -414,7 +414,7 @@ export default function TrainerSettings() {
     // turned notifications off and then gets one needs to have been told it
     // might happen. The reconciler in src/ui/settings.tsx retries every launch.
     Alert.alert('Saved, but Not Confirmed',
-      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
+      "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list, so you may still get one until the next time you open the app. Nothing else has changed.");
   };
 
   const { tenant, role, status: tenantStatus, loading: tenantLoading, refresh: refreshTenant, updateTenant, setOwnCurrency } = useTenant();
@@ -583,7 +583,7 @@ export default function TrainerSettings() {
             const ok = await withdrawAccountDeletion();
             if (!ok) {
               reportError('trainerSettings.withdraw', new Error('withdraw_account_deletion did not clear the request'));
-              Alert.alert('Not Withdrawn', `Your deletion request is still in place — nothing has changed. Check your connection and try again, or email ${BRAND.supportEmail} from the address on your account.`);
+              Alert.alert('Not Withdrawn', `Your deletion request is still in place. Nothing has changed. Check your connection and try again, or email ${BRAND.supportEmail} from the address on your account.`);
               return;
             }
             // Re-read rather than assume: what shows next comes from the row.
@@ -709,7 +709,7 @@ export default function TrainerSettings() {
       if (!ok) {
         // `requestAccountDeletion` returns false only when the write was
         // refused. Saying "noted" here would be inventing a promise.
-        Alert.alert('Not Requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again, or contact your gym.');
+        Alert.alert('Not Requested', 'Your deletion request was not recorded. Nothing has changed. Check your connection and try again, or contact your gym.');
         return;
       }
       await loadPending();
@@ -720,14 +720,14 @@ export default function TrainerSettings() {
       );
     } catch (e) {
       reportError('trainerSettings.delete', e);
-      Alert.alert('Not Requested', 'Your deletion request was not recorded — nothing has changed. Check your connection and try again.');
+      Alert.alert('Not Requested', 'Your deletion request was not recorded. Nothing has changed. Check your connection and try again.');
     } finally { setDeleting(false); }
   };
 
   const deleteAccount = () => {
     Alert.alert(
       'Delete Your Coaching Account?',
-      'This asks for your Repple Coach account and everything of yours to be permanently erased — your coach profile, your programs and templates, your videos, your messages and your session history.\n\n' +
+      'This asks for your Repple Coach account and everything of yours to be permanently erased: your coach profile, your programs and templates, your videos, your messages and your session history.\n\n' +
       'Your clients are not deleted. They stay with the gym, but they lose you as their coach, and anything you wrote only to them goes with your account.\n\n' +
       `${tenant ? `The owner of ${tenant.name}` : "Your gym's owner"} has 30 days to action this. It cannot be undone once they do.\n\n` +
       // The sentence above promises "your videos, your messages and your session
@@ -753,7 +753,7 @@ export default function TrainerSettings() {
     : pending === null
       ? 'Checking whether you already have a deletion request open…'
       : pending.requestedAt
-        ? `You asked to be deleted on ${day(pending.requestedAt)}. Your gym's owner carries it out. Only you can take the request back — nobody can withdraw it on your behalf.`
+        ? `You asked to be deleted on ${day(pending.requestedAt)}. Your gym's owner carries it out. Only you can take the request back; nobody can withdraw it on your behalf.`
         : 'You have no deletion request open.';
 
   return (
@@ -886,7 +886,7 @@ export default function TrainerSettings() {
             note="Session bookings and cancellations, client messages, and requests to coach"
             on={st.notifPush} onPress={() => { void togglePush(); }} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            Turning this off takes this phone off the list entirely. Your clients can still message you and book with you — you will see it next time you open the app rather than as it happens, and your other devices are unaffected.
+            Turning this off takes this phone off the list entirely. Your clients can still message you and book with you. You will see it next time you open the app rather than as it happens, and your other devices are unaffected.
           </Text>
 
           {/* ── the categories ────────────────────────────────────────────
@@ -1158,7 +1158,7 @@ export default function TrainerSettings() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>
             </>) : own.canSetOwn ? (<>
               <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
-                You are attached to no gym, so what you charge in is yours to say — and until you say it every amount in this app is withheld rather than guessed at: your analytics, your invoices, the price of anything you sell and the rate every session is filed at. Repple is white-labelled and there is no default that would be right for both a London coach and a Tokyo one. Choose once. It is not editable afterwards, because every price you go on to store is denominated in it.
+                You are attached to no gym, so what you charge in is yours to say, and until you say it every amount in this app is withheld rather than guessed at: your analytics, your invoices, the price of anything you sell and the rate every session is filed at. Repple is white-labelled and there is no default that would be right for both a London coach and a Tokyo one. Choose once. It is not editable afterwards, because every price you go on to store is denominated in it.
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                 {CURRENCY_CHOICES.map((c) => (
@@ -1183,7 +1183,7 @@ export default function TrainerSettings() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{WHY_NOT_A_REPRICE}</Text>
           </>) : (<>
             <Text style={{ ...ty.caption, color: t.ink3, paddingVertical: sp.md }}>
-              Nobody has said what you charge in, so every amount in this app is withheld rather than guessed at — your analytics, your invoices and the price of anything you sell. Repple is white-labelled and there is no default that would be right for both a London gym and a Dubai one. Choose once and every screen follows.
+              Nobody has said what you charge in, so every amount in this app is withheld rather than guessed at: your analytics, your invoices and the price of anything you sell. Repple is white-labelled and there is no default that would be right for both a London gym and a Dubai one. Choose once and every screen follows.
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {CURRENCY_CHOICES.map((c) => (
@@ -1225,7 +1225,7 @@ export default function TrainerSettings() {
         <Section>
           <SectionHead title="Your Data" />
           <ListRow icon="share" tone="blue" title={exporting ? 'Preparing Export…' : 'Export My Data'}
-            note="Your account and your coaching business — your price list, invoices, receipts, payouts, costs and enquiries — as a JSON file you can keep, plus a list of every file you hold"
+            note="Your account and your coaching business (your price list, invoices, receipts, payouts, costs and enquiries) as a JSON file you can keep, plus a list of every file you hold"
             onPress={exportData} />
           {/* Only after an export, because the manifest is what the export
               produced and this row must list exactly what that file says the

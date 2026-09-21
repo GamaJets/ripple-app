@@ -193,7 +193,7 @@ export function emailCodeError(e: unknown): string {
     return 'Too many tries. Wait a moment, then enter the code again.';
   }
   if (f.code === 'invalid_credentials' || f.code === 'validation_failed' || /invalid|incorrect|token/i.test(f.message)) {
-    return `That code was not right. Check the newest email — the code is ${spellDigits(EMAIL_OTP_LENGTH)} digits, and a new one replaces the old.`;
+    return `That code was not right. Check the newest email. The code is ${spellDigits(EMAIL_OTP_LENGTH)} digits, and a new one replaces the old.`;
   }
   if (f.code === 'user_not_found') {
     return 'There is no account waiting on that address. Check the address, or create the account again.';
@@ -224,7 +224,7 @@ export function emailResendError(e: unknown): string {
 
   if (f.code === 'over_email_send_rate_limit' || f.code === 'over_request_rate_limit' || f.status === 429
     || /rate limit|too many|security purposes|after \d+ seconds/i.test(f.message)) {
-    return 'No code was sent — too many have been requested. Wait a moment, then ask again.';
+    return 'No code was sent. Too many have been requested. Wait a moment, then ask again.';
   }
   // GoTrue answers a resend for an already-confirmed address with a 422 whose
   // code is the catch-all `validation_failed`, so this one is matched on prose.
@@ -232,19 +232,19 @@ export function emailResendError(e: unknown): string {
     return 'That address is already confirmed, so there is no code to send. Go back and sign in with your password.';
   }
   if (f.code === 'user_not_found') {
-    return 'No code was sent — there is no account waiting on that address. Go back and create it.';
+    return 'No code was sent. There is no account waiting on that address. Go back and create it.';
   }
   if (f.code === 'email_address_invalid' || f.code === 'validation_failed') {
-    return 'No code was sent — that address was not accepted. Go back and check it.';
+    return 'No code was sent. That address was not accepted. Go back and check it.';
   }
   if (f.code === 'email_address_not_authorized') {
-    return 'No code was sent — that address is not allowed to receive mail from us yet.';
+    return 'No code was sent. That address is not allowed to receive mail from us yet.';
   }
   if (f.code === 'email_provider_disabled' || f.code === 'signup_disabled') {
-    return 'No code was sent — email sign-up is switched off right now.';
+    return 'No code was sent. Email sign-up is switched off right now.';
   }
   if (f.code === 'user_banned') {
-    return 'No code was sent — that account has been suspended. Contact your gym.';
+    return 'No code was sent. That account has been suspended. Contact your gym.';
   }
   // As above: no code, no message, so the only honest second half is the one
   // that says whether the request left the phone.

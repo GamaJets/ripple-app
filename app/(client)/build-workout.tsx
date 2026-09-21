@@ -212,7 +212,7 @@ export default function BuildWorkout() {
         />
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
           {kit === 'none'
-            ? 'Only movements the catalogue records as needing nothing at all — no bar, no bands, no bench. Some muscles have none, and you will be told which.'
+            ? 'Only movements the catalogue records as needing nothing at all: no bar, no bands, no bench. Some muscles have none, and you will be told which.'
             : 'Every movement in the catalogue, whatever it is performed on.'}
         </Text>
       </Section>
@@ -280,7 +280,7 @@ export default function BuildWorkout() {
           ) : null}
           {built?.noKit ? (
             <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
-              Every movement here needs no equipment at all — no bar, no bands, no bench.
+              Every movement here needs no equipment at all: no bar, no bands, no bench.
             </Text>
           ) : null}
 
@@ -295,12 +295,12 @@ export default function BuildWorkout() {
               lets a missing caution below mean anything at all. */}
           {injLoading ? (
             <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
-              Reading what you have disclosed — nothing below has been checked against your injuries yet.
+              Reading what you have disclosed. Nothing below has been checked against your injuries yet.
             </Flag>
           ) : !injRead ? (
             <View style={{ marginTop: sp.md }}>
               <Notice tone={t.crit} kicker="Injury" title="Your Injuries Could Not Be Read"
-                note="So no movement below has been checked against them, and none carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or leave it out, and pull down to try again." />
+                note="So no movement below has been checked against them, and none carries a caution. This is a connection problem, not a clean sheet. If something is hurt, take it easy on it or leave it out, and pull down to try again." />
             </View>
           ) : null}
 
@@ -458,7 +458,7 @@ export default function BuildWorkout() {
           </View>
         ) : cat.status === 'error' ? (
           <Notice tone={t.warn} kicker="Exercise Catalogue" title="The exercise catalogue could not be read"
-            note="This is our end, not yours — the movements are still there. Nothing can be built until it is read, so nothing has been. Pull down to try again once you have signal." />
+            note="This is our end, not yours. The movements are still there. Nothing can be built until it is read, so nothing has been. Pull down to try again once you have signal." />
         ) : cat.signedOut ? (
           <Notice tone={t.warn} kicker="Exercise Catalogue" title="Sign in to build a workout"
             note="The movement catalogue is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed." />

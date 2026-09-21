@@ -159,7 +159,7 @@ export default function Account() {
       // signing a member out of their own tablet uninvited is its own small
       // harm. `endOtherSessions` keeps THIS session — see the note on it.
       Alert.alert('Password Changed',
-        'Your new password is in place. Anywhere else you are signed in stays signed in until that session expires — including any phone or tablet you no longer have.',
+        'Your new password is in place. Anywhere else you are signed in stays signed in until that session expires, including any phone or tablet you no longer have.',
         [
           { text: 'Leave Them', style: 'cancel' },
           {
@@ -174,7 +174,7 @@ export default function Account() {
                 out.ok ? 'Signed Out Everywhere Else' : 'Still Signed In Elsewhere',
                 out.ok
                   ? 'Every other phone, tablet and browser signed in to this account has been signed out. This phone stays signed in, and your new password is what gets any of them back.'
-                  : `${out.note} Your password HAS been changed, so nothing new can sign in — but a device already signed in may still be. Try again in a moment.`,
+                  : `${out.note} Your password HAS been changed, so nothing new can sign in, but a device already signed in may still be. Try again in a moment.`,
               );
             },
           },
@@ -208,7 +208,7 @@ export default function Account() {
         return;
       }
       if (res.outcome === 'pending') {
-        Alert.alert('Check your inbox — nothing has changed yet',
+        Alert.alert('Check your inbox. Nothing has changed yet',
           `We have sent a confirmation to ${res.requested}. Your account still uses ${signInAddress(email)} and will keep using it until you open that link.\n\n`
           + 'If the link is never opened, nothing happens and your old address goes on working.');
         return;
@@ -289,7 +289,7 @@ export default function Account() {
           <View style={{ marginTop: sp.md }}>
             <Expandable title="Who Sees This Address">
               <Text style={{ ...ty.caption, color: t.ink3 }}>
-                Your gym sees the name on your profile, not this. This is the address you sign in with and the only place a password reset can be sent — so keep it one you can open.
+                Your gym sees the name on your profile, not this. This is the address you sign in with and the only place a password reset can be sent, so keep it one you can open.
               </Text>
             </Expandable>
           </View>
@@ -335,7 +335,7 @@ export default function Account() {
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Forgotten the current one? Sign out and use “Forgot password” on the sign-in screen — that sends a link to {signInAddress(email)}.
+            Forgotten the current one? Sign out and use “Forgot password” on the sign-in screen. That sends a link to {signInAddress(email)}.
           </Text>
         </Section>
       </ScrollView>

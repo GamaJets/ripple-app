@@ -437,7 +437,7 @@ export default function History() {
       <><Section>
         <SectionHead title="Could Not Read Your History" />
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
-          {load.reason} Nothing has been lost — this screen only failed to read what is there, so it
+          {load.reason} Nothing has been lost. This screen only failed to read what is there, so it
           cannot tell you what is in it either way.
         </Text>
         <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try Again" onPress={read} /></View>
@@ -464,7 +464,7 @@ export default function History() {
       {/* The kit's ActionBlock: on a page with nothing on it the next action
           IS the page, so it gets the title, the reason and the one button. */}
       <ActionBlock title="Nothing Logged Yet"
-        reason={`${historyNote(log)} Log one session and this page starts keeping the score for you — month by month, for as long as you train.`}
+        reason={`${historyNote(log)} Log one session and this page starts keeping the score for you, month by month, for as long as you train.`}
         cta={{ label: 'Log a Workout', onPress: () => router.push(trainIntent('/(client)/workouts') as any) }} />
       {/* The import belonged here first and I put it only at the bottom of the
           loaded screen, where somebody who has never logged in Repple never
@@ -539,7 +539,7 @@ export default function History() {
           tone={t.warn}
           kicker="Not Your Whole History"
           title={`Read back as far as ${monthLabel(partialBefore)}`}
-          note={`You have trained for longer than this page can read in one go. Everything charted below is real and current, and anything before ${monthLabel(partialBefore)} is on record and not counted here — so the lifetime totals are left blank rather than added up short.`}
+          note={`You have trained for longer than this page can read in one go. Everything charted below is real and current, and anything before ${monthLabel(partialBefore)} is on record and not counted here, so the lifetime totals are left blank rather than added up short.`}
         />
       </View>
     ) : null}
@@ -560,7 +560,7 @@ export default function History() {
       title={whole ? `Lifted Since ${monthLabel(sinceKey)}` : `Lifted Since ${monthLabel(sinceKey)}, at Least`}
       figure={whole ? headline?.figure.toLocaleString() : null}
       unit={whole && headline ? (headline.unit === 't' ? 'tonnes' : headline.unit) : undefined}
-      detail={whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}>
+      detail={whole ? historyNote(log) : 'More than this page can add up in one read. See above.'}>
     {unitNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{unitNote}</Text> : null}
     {/* The note blames the member's record when the fault is this read: it
         says "your own weight is not recorded for the day you did them". Only
@@ -570,7 +570,7 @@ export default function History() {
         {bodyKnown
           ? lifeNote
           : cd.scansStatus === 'loading'
-          ? 'Some bodyweight sets are not in this total yet — your weight history is still being read.'
+          ? 'Some bodyweight sets are not in this total yet. Your weight history is still being read.'
           : 'Some bodyweight sets are not in this total because your weight history could not be read just now. That is this screen rather than a gap in your record, and nothing has been lost.'}
       </Text>
     ) : null}
@@ -618,7 +618,7 @@ export default function History() {
             an em dash into the middle of a sentence for nobody. */}
         <Text style={{ ...ty.body, color: t.ink2 }}>
           You started on {dstr(span.firstAt)} and have trained on {fig(life.days)} day
-          {life.days === 1 ? '' : 's'} since. There is not a year to look at yet — there will be,
+          {life.days === 1 ? '' : 's'} since. There is not a year to look at yet. There will be,
           and this page is where it goes.
         </Text>
       </>) : (<>
@@ -665,7 +665,7 @@ export default function History() {
           <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(cells[cells.length - 1].key)}</Text>
         </View>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-          A month with nothing logged carries a mark on the line and no bar — the app knows you
+          A month with nothing logged carries a mark on the line and no bar. The app knows you
           logged nothing, not that you lifted nothing.
         </Text>
       </>) : (
@@ -735,7 +735,7 @@ export default function History() {
             such set in the month across every movement — so the lift behind it
             is whichever one is loaded heaviest, and it is not necessarily the
             top lift named above, which is picked by volume. */}
-        Worked out from your best single set of that month, across every lift — an estimate from the reps
+        Worked out from your best single set of that month, across every lift: an estimate from the reps
         you logged and never a max you tested. It is not always the movement named above: that one carried
         the most volume, this one was the heaviest single effort.
       </Text>
@@ -750,7 +750,7 @@ export default function History() {
             measurement — and the strength runner writes none at all, because
             the expression that used to invent one had no bodyweight, no heart
             rate and no measurement of any kind in it. */}
-        Energy adds up only the sessions that carried a calorie figure — from a watch, from a machine, one
+        Energy adds up only the sessions that carried a calorie figure: from a watch, from a machine, one
         you typed in, or one worked out from your weight and how long the activity ran. A session without
         one adds nothing rather than a zero, and lifting records reps and weight rather than a burn, so
         this is less than you have burned and not a measurement of it.
@@ -831,7 +831,7 @@ export default function History() {
         {breaks.map((g) => (
           <View key={g.afterKey} style={{ paddingVertical: sp.sm }}>
             <Text style={{ ...ty.body, color: t.ink2 }}>
-              Nothing logged for {g.months} month{g.months === 1 ? '' : 's'} after {monthLabel(g.afterKey)} —
+              Nothing logged for {g.months} month{g.months === 1 ? '' : 's'} after {monthLabel(g.afterKey)},
               and you came back in {monthLabel(g.returnKey)}.
             </Text>
           </View>
@@ -840,7 +840,7 @@ export default function History() {
           <View style={{ paddingVertical: sp.sm }}>
             <Text style={{ ...ty.body, color: t.ink2 }}>
               Nothing logged since {monthLabel(cells[cells.length - 1 - quiet].key)}, {quiet} month
-              {quiet === 1 ? '' : 's'} ago. That one is still open — everything above is still yours.
+              {quiet === 1 ? '' : 's'} ago. That one is still open, and everything above is still yours.
             </Text>
           </View>
         ) : quiet == null ? (
@@ -850,7 +850,7 @@ export default function History() {
                 replaces. The month is named, which is the fact, and the reader
                 can see for themselves how far back it is. */}
             <Text style={{ ...ty.body, color: t.ink2 }}>
-              Nothing logged since {monthLabel(monthKey(life.lastAt) ?? cells[cells.length - 1].key)} —
+              Nothing logged since {monthLabel(monthKey(life.lastAt) ?? cells[cells.length - 1].key)},
               longer ago than this chart reaches back. That one is still open, and everything above is
               still yours.
             </Text>
@@ -869,7 +869,7 @@ export default function History() {
       <SectionHead title="Personal Bests over Time" note={records.length ? 'Newest first' : undefined} />
       {records.length === 0 ? (
         <Text style={{ ...ty.label, color: t.ink3 }}>
-          No records set yet — the first weighted set you log becomes one.
+          No records set yet. The first weighted set you log becomes one.
         </Text>
       ) : records.map((m, i) => (
         <View key={`${m.exercise}-${m.at}`}
@@ -994,7 +994,7 @@ function ImportFromAnotherApp({ onImported, open }: {
     // file this reader then refuses by its header.
     const got = await pickDocument({ type: ['text/csv', 'text/comma-separated-values', 'text/plain', '*/*'] });
     if (got.outcome === 'unavailable') {
-      setDone('This build cannot open a file picker yet — that needs a new version of the app rather than anything you can change here.');
+      setDone('This build cannot open a file picker yet. That needs a new version of the app rather than anything you can change here.');
       return;
     }
     if (got.outcome !== 'picked') return;
@@ -1025,8 +1025,8 @@ function ImportFromAnotherApp({ onImported, open }: {
     setDone(outcome === 'stored'
       ? `${sessions} added to your history.`
       : outcome === 'unsent'
-        ? `${sessions} saved on this phone and waiting for signal — they go up on their own. Do not import the file again.`
-        : 'The server declined that, so nothing was added. Waiting will not change it — check the file came from Strong or Hevy and try once more.');
+        ? `${sessions} saved on this phone and waiting for signal. They go up on their own. Do not import the file again.`
+        : 'The server declined that, so nothing was added. Waiting will not change it. Check the file came from Strong or Hevy and try once more.');
     if (outcome === 'stored') onImported();
   };
 
@@ -1169,7 +1169,7 @@ function MuscleSection({ log, unit, weightSeries }: {
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           {trained} set{trained === 1 ? '' : 's'} across {board.groups.length} muscle group
           {board.groups.length === 1 ? '' : 's'} in the last {days} days. Bars compare the groups
-          with each other, not with a target — there is no right number of sets and this screen
+          with each other, not with a target. There is no right number of sets and this screen
           does not pretend to know one.
         </Text>
 

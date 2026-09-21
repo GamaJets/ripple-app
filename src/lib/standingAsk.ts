@@ -68,7 +68,7 @@ export const NO_COACH_FOR_STANDING =
 /** The short form, used when the composed sentence would not fit the column the
  *  database enforces, or when the day or the time could not be written. */
 const SHORT_NOTE =
-  'Could we make this a standing appointment — the same time every week? I have asked for the first one here.';
+  'Could we make this a standing appointment, at the same time every week? I have asked for the first one here.';
 
 /** A label that says nothing. `fmtClock` answers '—' for an hour it cannot
  *  write, and an em dash as the SUBJECT of a sentence reads as the app having
@@ -96,7 +96,7 @@ const unwritten = (s: string | null | undefined): boolean => {
  */
 export function standingAskNote(weekday: string, time: string): string {
   if (unwritten(weekday) || unwritten(time)) return SHORT_NOTE;
-  const full = `Could we make this a standing appointment — every ${weekday.trim()} at ${time.trim()}? `
+  const full = `Could we make this a standing appointment, every ${weekday.trim()} at ${time.trim()}? `
     + 'I have asked for the first one here; setting up the weekly slot is yours to do.';
   return full.length <= REQUEST_NOTE_MAX ? full : SHORT_NOTE;
 }

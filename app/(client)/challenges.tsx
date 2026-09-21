@@ -208,7 +208,7 @@ export default function Challenges() {
   const doJoin = async (c: ChallengeRow) => {
     setNotice(null);
     const okJoin = await ch.join(c.id);
-    if (!okJoin) { setNotice(`You are not on ${c.title} — that did not save, so nothing has changed. ${retryLine(reach)}`); return; }
+    if (!okJoin) { setNotice(`You are not on ${c.title}. That did not save, so nothing has changed. ${retryLine(reach)}`); return; }
     notifySuccess();
     if (open && open.id === c.id) loadBoard(c.id);
   };
@@ -216,7 +216,7 @@ export default function Challenges() {
   const doLeave = async (c: ChallengeRow) => {
     setNotice(null);
     const okLeave = await ch.leave(c.id);
-    if (!okLeave) { setNotice(`You are still on ${c.title} — that did not save, so nothing has changed. ${retryLine(reach)}`); return; }
+    if (!okLeave) { setNotice(`You are still on ${c.title}. That did not save, so nothing has changed. ${retryLine(reach)}`); return; }
     if (open && open.id === c.id) setOpen(null);
   };
 
@@ -421,8 +421,8 @@ export default function Challenges() {
                       than as a missing figure. Where there is no score the
                       clause is dropped instead of being filled with a dash. */}
                   {sheet.myScore == null
-                    ? `Join to see the other athletes. Until you do, this challenge is just you against the goal of ${sheet.goal} ${sheet.unit} — we do not have a score for you yet.`
-                    : `Join to see the other athletes. Until you do, this challenge is just you against the goal — your score so far is ${scoreText(sheet.metric, sheet.myScore)} ${sheet.unit} of ${sheet.goal}.`}
+                    ? `Join to see the other athletes. Until you do, this challenge is just you against the goal of ${sheet.goal} ${sheet.unit}. We do not have a score for you yet.`
+                    : `Join to see the other athletes. Until you do, this challenge is just you against the goal. Your score so far is ${scoreText(sheet.metric, sheet.myScore)} ${sheet.unit} of ${sheet.goal}.`}
                 </Text>
               ) : null}
 
@@ -448,7 +448,7 @@ export default function Challenges() {
                   <Text style={{ ...ty.label, color: t.ink2 }}>{board.message || 'The board could not be read.'}</Text>
                   {board.message ? null : (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                      Nobody has been removed from it — we just could not reach it.
+                      Nobody has been removed from it. We just could not reach it.
                     </Text>
                   )}
                   <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>

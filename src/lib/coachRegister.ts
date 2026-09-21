@@ -187,7 +187,7 @@ export function classLine(row: ClassSummaryRow): string {
       : '';
   if (row.attended === 0 && walk === 0) {
     if (row.booked === 0) return `Nobody booked this one.${walkPart}`;
-    return `${row.booked} booked and nothing was marked against anybody — this is a register that was not taken, not a class nobody came to.${walkPart}`;
+    return `${row.booked} booked and nothing was marked against anybody. This is a register that was not taken, not a class nobody came to.${walkPart}`;
   }
   if (row.booked === 0) return `Nobody booked this one.${walkPart}`;
   return `${row.attended} of the ${row.booked} booked were marked here.${walkPart}`;
@@ -210,7 +210,7 @@ export function gapNote(split: TaughtSplit, walkInsKnown: boolean): string | nul
     );
   }
   if (!walkInsKnown) {
-    parts.push('This gym does not record walk-ins separately, so no headcount is shown — an unknown number of people is not nought of them.');
+    parts.push('This gym does not record walk-ins separately, so no headcount is shown. An unknown number of people is not nought of them.');
   }
   return parts.length ? parts.join(' ') : null;
 }
@@ -235,5 +235,5 @@ export function walkInsKnown(rows: readonly ClassSummaryRow[]): boolean {
  */
 export const TAUGHT_SCOPE_NOTE =
   'Only classes recorded against your name are here. A class you covered for somebody, or one the '
-  + 'front desk set up without naming you, is not on this list — and that is not evidence you did '
+  + 'front desk set up without naming you, is not on this list, and that is not evidence you did '
   + 'not teach it.';

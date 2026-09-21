@@ -774,7 +774,7 @@ export interface StatementInput {
  * every artefact this module builds — the readable statement and the CSV both.
  */
 export const STATEMENT_NOT =
-  'THIS IS NOT A TAX DOCUMENT AND IT IS NOT A STATEMENT OF EARNINGS. No tax of any kind has been calculated, added, withheld or deducted anywhere on it — those concepts are absent from it, not set to zero. Nothing has been taken off any figure here: no processing fee, no platform fee, no cost of any kind. Every amount is the gross a client was charged. It is not proof that money moved and it is not a statement of what reached a bank account. Give it to your accountant alongside your records from Stripe and your bank; it is something for them to work from, not a return.';
+  'THIS IS NOT A TAX DOCUMENT AND IT IS NOT A STATEMENT OF EARNINGS. No tax of any kind has been calculated, added, withheld or deducted anywhere on it. Those concepts are absent from it, not set to zero. Nothing has been taken off any figure here: no processing fee, no platform fee, no cost of any kind. Every amount is the gross a client was charged. It is not proof that money moved and it is not a statement of what reached a bank account. Give it to your accountant alongside your records from Stripe and your bank; it is something for them to work from, not a return.';
 
 /** What it IS, said in the same breath so the two are never separated. */
 export const STATEMENT_IS =
@@ -788,7 +788,7 @@ export const STATEMENT_IS =
  * and a statement that did not say so would read as a complete year.
  */
 export const STATEMENT_NOT_THE_WHOLE_BOOK =
-  'Money taken outside this app — cash, a bank transfer, a card taken at a gym — reaches this statement only where you wrote it down yourself, in the section that says so. Anything you were paid and did not record is not here, so this is short by that amount and only you know by how much.';
+  'Money taken outside this app (cash, a bank transfer, a card taken at a gym) reaches this statement only where you wrote it down yourself, in the section that says so. Anything you were paid and did not record is not here, so this is short by that amount and only you know by how much.';
 
 /**
  * That a recorded payment is the coach's own word and nothing more.
@@ -799,7 +799,7 @@ export const STATEMENT_NOT_THE_WHOLE_BOOK =
  * something to be reconciled against and which have only the coach's memory.
  */
 export const RECEIPTS_ARE_YOUR_WORD =
-  'These are payments you told this app about after the fact. Nothing behind them has been checked against a bank or a card processor, this app was not involved in any of them, and there is no second record anywhere to reconcile them against. They may also describe the same money as a sale above, if a payment was recorded twice — nothing here can tell.';
+  'These are payments you told this app about after the fact. Nothing behind them has been checked against a bank or a card processor, this app was not involved in any of them, and there is no second record anywhere to reconcile them against. They may also describe the same money as a sale above, if a payment was recorded twice. Nothing here can tell.';
 
 /**
  * That a payout is a balance and not the proceeds of a sale.
@@ -818,7 +818,7 @@ export const RECEIPTS_ARE_YOUR_WORD =
  * Money screen carries. This is the same rule stated for a document.
  */
 export const PAYOUTS_ARE_NOT_NETTED =
-  'A payout is your Stripe balance reaching your bank, not the proceeds of any sale listed above. It is many charges at once, less what Stripe and the platform took and anything refunded, on Stripe’s own schedule — so a payout counted in this period may be settling charges made before it, and the two figures are deliberately never subtracted from each other. Do not read the gap between them as fees.';
+  'A payout is your Stripe balance reaching your bank, not the proceeds of any sale listed above. It is many charges at once, less what Stripe and the platform took and anything refunded, on Stripe’s own schedule, so a payout counted in this period may be settling charges made before it, and the two figures are deliberately never subtracted from each other. Do not read the gap between them as fees.';
 
 /**
  * That only arrived payouts are counted, and that an empty section is not a
@@ -831,7 +831,7 @@ export const PAYOUTS_ARE_NOT_NETTED =
  * evidence of no bank receipts at all.
  */
 export const PAYOUTS_ONLY_ARRIVED =
-  'Only payouts Stripe reported as PAID are counted, on the day Stripe said they would reach the bank. One still in transit is not money in an account and is not in the figures. Nothing appears here at all unless Stripe has told this app about a payout, so an empty section is not a statement that you were paid nothing — your Stripe dashboard and your bank statement are the record.';
+  'Only payouts Stripe reported as PAID are counted, on the day Stripe said they would reach the bank. One still in transit is not money in an account and is not in the figures. Nothing appears here at all unless Stripe has told this app about a payout, so an empty section is not a statement that you were paid nothing. Your Stripe dashboard and your bank statement are the record.';
 
 /** That Stripe, not this app, is the authority on money that moved. */
 export const STATEMENT_STRIPE_IS_THE_RECORD =
@@ -854,7 +854,7 @@ export const STATEMENT_STRIPE_IS_THE_RECORD =
  * was read in full, which is true and completely misleading.
  */
 export const PERIOD_UNREADABLE =
-  'The two dates this statement covers could not be read as days, so nothing on it has been placed inside or outside a period and NO figure is stated anywhere on it. Every read behind it may have succeeded — that is not the problem. Pick the period again and take the statement afresh; do not treat any nought on this one as a nought in your record.';
+  'The two dates this statement covers could not be read as days, so nothing on it has been placed inside or outside a period and NO figure is stated anywhere on it. Every read behind it may have succeeded; that is not the problem. Pick the period again and take the statement afresh; do not treat any nought on this one as a nought in your record.';
 
 /** That the period was the coach's choice and not this app's. */
 export const PERIOD_IS_YOURS =
@@ -875,7 +875,7 @@ export const SESSIONS_NOT_MONEY =
 
 /** Why invoices are listed apart and never added to the sales. */
 export const INVOICES_NOT_ADDED =
-  'These are documents you issued. They may describe the same money as the sales above — an invoice you wrote for a pack Stripe had already taken — so they are listed separately and are deliberately not added to anything else on this statement.';
+  'These are documents you issued. They may describe the same money as the sales above (an invoice you wrote for a pack Stripe had already taken), so they are listed separately and are deliberately not added to anything else on this statement.';
 
 /**
  * That a refund is listed and never subtracted.
@@ -1034,7 +1034,7 @@ export function withheldReason(status: LoadStatus, what: string): string | null 
   if (status === 'loading') {
     return `Your ${what} had not finished loading when this was built, so no figure is stated. Nothing here says there were none.`;
   }
-  return `Your ${what} could not be read, so no figure is stated. An empty section here does NOT mean there were none — it means this app could not tell you.`;
+  return `Your ${what} could not be read, so no figure is stated. An empty section here does NOT mean there were none. It means this app could not tell you.`;
 }
 
 /** Money lines from a `Taken`, or an empty list when nothing was recorded. */
@@ -1172,8 +1172,8 @@ export function payoutFacts(k: PayoutKnowledge): { title: string; lines: string[
   // nothing about when the fifth will, and a rendered schedule would be a
   // promise about when somebody's rent money lands.
   lines.push('The payouts themselves are listed above, under what reached your bank, mirrored from Stripe as each one was made. What is NOT here is a schedule: this app is not told when the next payout will be sent, what fee came off any of them, or what your Stripe balance is, so there is no timetable on this statement because there is no data behind one.');
-  lines.push('A payout is a balance reaching your bank rather than the proceeds of a sale — many charges at once, less what Stripe and Repple took and anything refunded — so it does not correspond to any sales figure above and nothing here subtracts one from the other.');
-  lines.push('Your payouts live with Stripe. Stripe emails the address you signed up with each time one is sent, and the dashboard set up for you when you onboarded is where the schedule and the arrival dates are. This app cannot open it for you — it holds no link to your account, and inventing one would send you somewhere that is not it.');
+  lines.push('A payout is a balance reaching your bank rather than the proceeds of a sale (many charges at once, less what Stripe and Repple took and anything refunded), so it does not correspond to any sales figure above and nothing here subtracts one from the other.');
+  lines.push('Your payouts live with Stripe. Stripe emails the address you signed up with each time one is sent, and the dashboard set up for you when you onboarded is where the schedule and the arrival dates are. This app cannot open it for you. It holds no link to your account, and inventing one would send you somewhere that is not it.');
   return { title: 'Payouts', lines };
 }
 
@@ -1212,7 +1212,7 @@ export function coachStatement(input: StatementInput): Statement {
   const sessionsSection: StatementSection = {
     key: 'sessions',
     title: 'Sessions in This Period',
-    source: 'This app’s own record — sessions booked here and marked here, by you or by your client.',
+    source: 'This app’s own record: sessions booked here and marked here, by you or by your client.',
     status: input.sessions.status,
     count: sessionsReady ? sess.inside.length : null,
     countLabel: sess.inside.length === 1 ? 'session' : 'sessions',
@@ -1310,7 +1310,7 @@ export function coachStatement(input: StatementInput): Statement {
   const receiptsSection: StatementSection = {
     key: 'receipts',
     title: 'Payments You Recorded Yourself',
-    source: 'Written down by you, in this app, for money taken outside it — cash, a bank transfer, or a card taken somewhere this app was not involved.',
+    source: 'Written down by you, in this app, for money taken outside it: cash, a bank transfer, or a card taken somewhere this app was not involved.',
     status: input.receipts.status,
     count: recReady ? recSplit.inside.length : null,
     countLabel: recSplit.inside.length === 1 ? 'payment' : 'payments',
@@ -1409,7 +1409,7 @@ export function coachStatement(input: StatementInput): Statement {
   if (payReady) {
     for (const n of takenNotes(payTaken, 'payout')) payNotes.push(n);
     if (notArrived > 0) {
-      payNotes.push(`${notArrived} payout${notArrived === 1 ? '' : 's'} dated in this period ${notArrived === 1 ? 'has' : 'have'} a status other than paid — still on the way, failed, or a word Stripe uses that this app does not recognise — so ${notArrived === 1 ? 'it is' : 'they are'} counted here and in no figure above. A failed payout is money that stayed in your Stripe balance; the Money screen carries Stripe's own reason for each one.`);
+      payNotes.push(`${notArrived} payout${notArrived === 1 ? '' : 's'} dated in this period ${notArrived === 1 ? 'has' : 'have'} a status other than paid (still on the way, failed, or a word Stripe uses that this app does not recognise), so ${notArrived === 1 ? 'it is' : 'they are'} counted here and in no figure above. A failed payout is money that stayed in your Stripe balance; the Money screen carries Stripe's own reason for each one.`);
     }
     if (payoutSplit.undated > 0) {
       payNotes.push(`${payoutSplit.undated} payout${payoutSplit.undated === 1 ? '' : 's'} carry no arrival date and ${payoutSplit.undated === 1 ? 'is' : 'are'} in no period at all, including this one.`);
@@ -1459,7 +1459,7 @@ export function coachStatement(input: StatementInput): Statement {
   const refundsSection: StatementSection = {
     key: 'refunds',
     title: 'Money You Gave Back',
-    source: 'Written onto the sale by Stripe — through a refund made in this app, and through one you made in your own Stripe dashboard. Stripe’s own record is the authority.',
+    source: 'Written onto the sale by Stripe, through a refund made in this app, and through one you made in your own Stripe dashboard. Stripe’s own record is the authority.',
     status: input.refunds.status,
     count: refReady ? refundSplit.inside.length : null,
     countLabel: refundSplit.inside.length === 1 ? 'charge refunded' : 'charges refunded',
@@ -1684,7 +1684,7 @@ export function statementDoc(s: Statement): StatementDoc {
   T.push('', 'WHOSE RECORD THIS IS');
   if (!readIssuer) {
     H.push('<p class="none"><b>Not read.</b> The name on this account could not be read when this statement was made, so nothing is printed here. This is not a statement that the record has no name in it.</p>');
-    T.push('Name: NOT READ — the name on this account could not be read. This is not a statement that the record has no name in it.');
+    T.push('Name: NOT READ. The name on this account could not be read. This is not a statement that the record has no name in it.');
   } else if (!s.issuerName) {
     H.push('<p class="none">No name has been recorded on this account.</p>');
     T.push('Name: no name has been recorded on this account.');
@@ -1755,7 +1755,7 @@ export function statementDoc(s: Statement): StatementDoc {
 
   const foot = s.complete
     ? `Statement of record for ${periodSentence(s.period)}${s.brand ? ', from ' + s.brand : ''}. Not a tax document.`
-    : `Statement of record for ${periodSentence(s.period)} — PARTS OF THIS COULD NOT BE READ, see above${s.brand ? '. From ' + s.brand : ''}. Not a tax document.`;
+    : `Statement of record for ${periodSentence(s.period)}. PARTS OF THIS COULD NOT BE READ, see above${s.brand ? '. From ' + s.brand : ''}. Not a tax document.`;
   H.push(`<p class="foot">${escapeHtml(foot)}</p>`);
   T.push('', foot);
 
@@ -1817,7 +1817,7 @@ export function statementCsv(s: Statement): string {
   rows.push(['about', '', '', 'Whose record', '', '', '',
     s.issuerStatus === 'ready' || s.issuerStatus === 'partial'
       ? (s.issuerName ?? 'No name has been recorded on this account.')
-      : 'NOT READ — the name on this account could not be read when this file was made.']);
+      : 'NOT READ. The name on this account could not be read when this file was made.']);
   rows.push(['about', '', '', 'Built', '', '', '', String(s.generatedAt)]);
 
   if (s.caveats.length) {
@@ -1826,7 +1826,7 @@ export function statementCsv(s: Statement): string {
     // Deliberately not "everything was read successfully". Every read this file
     // is built from returned whole and none of them hit its row cap — which is a
     // narrower claim than completeness, and it is the one that is true.
-    rows.push(['about', '', '', 'Reads', '', '', '', 'Every read behind this file returned in full and none of them stopped at a row limit. That is a statement about the reads, not about your whole book — see the row above about what is missing from it.']);
+    rows.push(['about', '', '', 'Reads', '', '', '', 'Every read behind this file returned in full and none of them stopped at a row limit. That is a statement about the reads, not about your whole book. See the row above about what is missing from it.']);
   }
 
   for (const sec of s.sections) {
@@ -1984,7 +1984,7 @@ export function statementItemsCsv(s: Statement, items: StatementItems): string {
       'chargeback',
       itemDay(d.openedAt),
       '',
-      d.reason ? `Chargeback — reason given: ${d.reason}` : 'Chargeback — no reason was given',
+      d.reason ? `Chargeback, reason given: ${d.reason}` : 'Chargeback, no reason was given',
       d.currency ?? '',
       minorToPlain(d.amountCents, d.currency) ?? '',
       // Stripe's own status word, verbatim. Nothing here rewrites it into an

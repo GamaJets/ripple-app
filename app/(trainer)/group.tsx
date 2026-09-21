@@ -331,7 +331,7 @@ export default function Groups() {
   const lastSeenLineFor = (id: string): string | null => {
     if (rosterStatus === 'loading') return null;
     if (rosterStatus === 'error') {
-      return 'whether they have been training could not be read — this is not a statement that they have not';
+      return 'whether they have been training could not be read, and this is not a statement that they have not';
     }
     const c = roster.find((x) => x.id === id);
     if (!c) {
@@ -430,11 +430,11 @@ export default function Groups() {
       const askedNote = neverAskedBrief(neverAskedNames(plan.send));
       if (loaded.length || askedNote) {
         const lines = loaded.slice(0, 6).map((x) =>
-          `· ${x.m.name} — ${x.movements.slice(0, 2).map((v) => `${v.exercise} (${areaLabel(v.area).toLowerCase()}, ${v.severity})`).join('; ')}`);
+          `· ${x.m.name}: ${x.movements.slice(0, 2).map((v) => `${v.exercise} (${areaLabel(v.area).toLowerCase()}, ${v.severity})`).join('; ')}`);
         const more = loaded.length - lines.length;
         const loadedBody = loaded.length
           ? `${lines.join('\n')}${more > 0 ? `\n· and ${more} more` : ''}\n\n`
-            + 'You can absolutely program these on purpose. Confirming records that you chose to, with the date, for each of them — and they can see that record too.'
+            + 'You can absolutely program these on purpose. Confirming records that you chose to, with the date, for each of them, and they can see that record too.'
           : null;
         // Two different confirmations, because they are two different
         // decisions. Loading a disclosed injury on purpose is destructive and
@@ -447,7 +447,7 @@ export default function Groups() {
             [loadedBody, askedNote].filter(Boolean).join('\n\n'),
             [
               { text: loaded.length ? 'Change the Program' : 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: loaded.length ? 'I Know — Assign' : 'Assign', style: loaded.length ? 'destructive' : 'default', onPress: () => resolve(true) },
+              { text: loaded.length ? 'I Know, Assign' : 'Assign', style: loaded.length ? 'destructive' : 'default', onPress: () => resolve(true) },
             ],
             { cancelable: true, onDismiss: () => resolve(false) },
           );
@@ -489,11 +489,11 @@ export default function Groups() {
             // Said in the confirmation as well as beside the field, because
             // this is the sentence a coach reads at the moment they would
             // otherwise assume the block is being held back until the date.
-            ? ` The block is dated ${startsOn}, which is what counts their week number from then on — it is on their plan now.`
+            ? ` The block is dated ${startsOn}, which is what counts their week number from then on. It is on their plan now.`
             : ' No start date was set, so week one is what they are on until you date the block.')
         : 'Nobody was assigned.');
       if (plan.blocked.length) {
-        parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} NOT assigned — read what they have disclosed first.`);
+        parts.push(`${listNames(plan.blocked.map((b) => b.name))} ${plan.blocked.length === 1 ? 'was' : 'were'} NOT assigned. Read what they have disclosed first.`);
       }
       if (norecord.length) {
         parts.push(`${listNames(norecord)} ${norecord.length === 1 ? 'was' : 'were'} NOT assigned: the record of your decision to load a disclosed injury could not be saved, and sending it without that record would leave no sign you knew.`);
@@ -527,7 +527,7 @@ export default function Groups() {
       const names = res.failed.map((id) => roster.find((c) => c.id === id)?.name ?? 'One client');
       Alert.alert(
         res.added.length ? 'Some Were Not Added' : 'Nobody Was Added',
-        `${listNames(names)} ${res.failed.length === 1 ? 'is' : 'are'} not in the group — the server did not accept ${res.failed.length === 1 ? 'them' : 'them'}. Clients you added by hand have no account yet, so there is nothing to assign a program to until they join.`,
+        `${listNames(names)} ${res.failed.length === 1 ? 'is' : 'are'} not in the group. The server did not accept ${res.failed.length === 1 ? 'them' : 'them'}. Clients you added by hand have no account yet, so there is nothing to assign a program to until they join.`,
       );
     }
   };
@@ -571,7 +571,7 @@ export default function Groups() {
             have not lost. */}
         {groupStatus === 'error' ? (
           <Notice tone={t.warn} kicker="Groups" title="Your Groups Could Not Be Read"
-            note="Nothing is listed below because the read did not come back — it does not mean you have no groups. Nothing here can be assigned until it loads." />
+            note="Nothing is listed below because the read did not come back. It does not mean you have no groups. Nothing here can be assigned until it loads." />
         ) : groupStatus === 'partial' ? (
           <PartialRead what="groups and the people in them" shown={groups.length} />
         ) : null}
@@ -580,7 +580,7 @@ export default function Groups() {
           <SectionHead title="Groups" note={groupStatus === 'ready' && groups.length ? String(groups.length) : undefined} />
 
           {groups.length === 0 && groupStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>No groups yet — name one below and add the clients who train it together.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>No groups yet. Name one below and add the clients who train it together.</Text>
           ) : null}
 
           {groups.map((g, i) => {
@@ -636,7 +636,7 @@ export default function Groups() {
               <Text style={{ ...ty.body, color: open.program ? t.ink : t.ink3, marginTop: 4 }}>
                 {open.program
                   ? `${open.program.title} · ${open.program.days.length} days · ${open.program.days.reduce((a, d) => a + d.exercises.length, 0)} exercises`
-                  : 'None chosen yet — pick one from your library.'}
+                  : 'None chosen yet. Pick one from your library.'}
               </Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                 <Ghost label={open.program ? 'Change Program' : 'Choose from Library'} onPress={() => setPickTpl(true)} />
@@ -644,7 +644,7 @@ export default function Groups() {
               </View>
               {open.program ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                  Changing the program here does not change what anybody is already training. It changes what the next assign sends — the people below will then read as being on something different, which is the truth about their week until you send it.
+                  Changing the program here does not change what anybody is already training. It changes what the next assign sends. The people below will then read as being on something different, which is the truth about their week until you send it.
                 </Text>
               ) : null}
 
@@ -702,7 +702,7 @@ export default function Groups() {
               </View>
 
               {groupStatus === 'ready' && open.memberIds.length === 0 ? (
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Nobody in this group yet — add the clients who train it together.</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Nobody in this group yet. Add the clients who train it together.</Text>
               ) : null}
 
               {open.memberIds.map((id, i) => {
@@ -772,11 +772,11 @@ export default function Groups() {
                         ) : null}
                         {mv?.behind && mv.version != null ? (
                           <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
-                            on version {num(mv.version)} of this program — send it again to move them onto the current one
+                            on version {num(mv.version)} of this program. Send it again to move them onto the current one
                           </Text>
                         ) : st === 'diverged' && mv && mv.version == null ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                            not any version of this program — somebody edited their copy
+                            not any version of this program; somebody edited their copy
                           </Text>
                         ) : null}
                       </View>
@@ -788,7 +788,7 @@ export default function Groups() {
                         { text: 'Keep', style: 'cancel' },
                         { text: 'Remove', style: 'destructive', onPress: async () => {
                           const gone = await removeMember(open.id, id);
-                          if (!gone) Alert.alert('Not Removed', `${m.name} is still in “${open.name}” — the removal did not reach the server.`);
+                          if (!gone) Alert.alert('Not Removed', `${m.name} is still in “${open.name}”. The removal did not reach the server.`);
                         } },
                       ])} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + m.name} style={{ padding: 8 }}>
                         <Icon name="minus" size={17} color={t.ink3} />
@@ -841,7 +841,7 @@ export default function Groups() {
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 4, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 }}>
                     <Icon name="calendar" size={16} color={t.ink3} />
                     <Text style={{ ...ty.body, color: startsOn ? t.ink : t.ink3, flex: 1 }}>
-                      {startsOn || 'Not set — begins now'}
+                      {startsOn || 'Not set · begins now'}
                     </Text>
                   </Pressable>
                   {startsOn ? (
@@ -859,7 +859,7 @@ export default function Groups() {
                     </Flag>
                   ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                    One date for everybody in this group — it is what counts the week number on each
+                    One date for everybody in this group. It is what counts the week number on each
                     of their Train tabs, which is what makes a twelve-week block advance rather than
                     sitting on week one. {CLIENT_STARTS_NOW}
                   </Text>
@@ -873,11 +873,11 @@ export default function Groups() {
               </View>
 
               <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}>
-                <Ghost label="Delete Group" onPress={() => Alert.alert('Delete Group?', `Remove “${open.name}”? The clients keep the programs they are on — this only deletes the list.`, [
+                <Ghost label="Delete Group" onPress={() => Alert.alert('Delete Group?', `Remove “${open.name}”? The clients keep the programs they are on. This only deletes the list.`, [
                   { text: 'Keep', style: 'cancel' },
                   { text: 'Delete', style: 'destructive', onPress: async () => {
                     const gone = await deleteGroup(open.id);
-                    if (!gone) { Alert.alert('Not Deleted', `“${open.name}” is still in your groups — the delete did not reach the server.`); return; }
+                    if (!gone) { Alert.alert('Not Deleted', `“${open.name}” is still in your groups. The delete did not reach the server.`); return; }
                     setOpenId(null);
                   } },
                 ])} />
@@ -952,7 +952,7 @@ export default function Groups() {
                 whole book. */}
             {rosterStatus === 'error' ? (
               <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-                note="Nobody is listed below because the roster did not come back — it does not mean you have no clients." />
+                note="Nobody is listed below because the roster did not come back. It does not mean you have no clients." />
             ) : rosterStatus === 'partial' ? (
               <PartialRead what="clients on your book" shown={roster.length} />
             ) : null}

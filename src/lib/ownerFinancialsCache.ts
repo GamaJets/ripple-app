@@ -283,6 +283,6 @@ export function reviewBlocker(entered: EnteredFields): string | null {
   const names = missing.map((k) => FIELD_NAME[k] ?? k).join(' and ');
   return `No score or grade is shown, because ${names} ${missing.length === 1 ? 'is' : 'are'} blank. `
     + 'Net profit, margin and the health score are all worked out from those, so a blank read as '
-    + 'zero would report a 100% margin and an A. Nothing here is a judgement about your gym — '
-    + 'it is a figure this screen has not been given. Everything you did enter is shown above.';
+    + 'zero would report a 100% margin and an A. Nothing here is a judgement about your gym. '
+    + 'It is a figure this screen has not been given. Everything you did enter is shown above.';
 }

@@ -161,7 +161,7 @@ export function CoachLogReviewStrip({ t, entry, movement, review, query, onQuery
                 before objecting is what objecting DOES — and the two things it
                 does not do are the ones they are most likely to fear. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-              Your coach will see that you have queried this, and what you write. The entry stays exactly as they logged it — querying it changes no figure and deletes nothing.
+              Your coach will see that you have queried this, and what you write. The entry stays exactly as they logged it. Querying it changes no figure and deletes nothing.
             </Text>
             <TextInput
               value={text}

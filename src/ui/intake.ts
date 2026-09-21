@@ -348,7 +348,7 @@ export async function askToCompleteIntake(
       return { sent: false, pushed: false, error: error.message };
     }
     if (!data || !data.length) {
-      return { sent: false, pushed: false, error: 'The message was not accepted — check they are still on your roster.' };
+      return { sent: false, pushed: false, error: 'The message was not accepted. Check they are still on your roster.' };
     }
   } catch (e: any) {
     reportError('intakeAsk.send', e, { clientId });

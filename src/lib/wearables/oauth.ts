@@ -26,7 +26,7 @@ export async function connectVendor(id: ProviderId): Promise<void> {
   if (!isConfigured(id)) throw new Error(`${id} isn't set up yet. ${v.note}`);
 
   const AuthSession = authSession();
-  if (!AuthSession) throw new Error('This build cannot open a sign-in browser yet — a native rebuild adds it. Apple Health works today.');
+  if (!AuthSession) throw new Error('This build cannot open a sign-in browser yet. A native rebuild adds it. Apple Health works today.');
   const WB = webBrowser();
   if (WB?.maybeCompleteAuthSession) { try { WB.maybeCompleteAuthSession(); } catch { /* ignore */ } }
 
@@ -88,7 +88,7 @@ export async function connectVendor(id: ProviderId): Promise<void> {
       // pasted there, and a remedy that does not say the exact string is a
       // remedy somebody has to guess at.
       const hint = /invalid.?scope/i.test(err) || /scope/i.test(desc)
-        ? ` Repple asked ${v.id} for a permission its developer app is not registered for — the scope has to be enabled in the ${v.id} developer dashboard before this can work.`
+        ? ` Repple asked ${v.id} for a permission its developer app is not registered for. The scope has to be enabled in the ${v.id} developer dashboard before this can work.`
         : /invalid.?request/i.test(err) || /invalid request/i.test(desc)
         ? ` This is Repple's setup rather than your ${v.id} account or your device: the address Repple sends people back to (${redirectUri}) has to be registered on Repple's ${v.id} developer application, and until it is, ${v.id} refuses the sign-in before you ever see a consent screen.`
         : '';
@@ -449,7 +449,7 @@ export async function disconnectVendor(id: ProviderId): Promise<void> {
     // screen downstream reads that note as the disconnection having happened.
     throw new Error(
       'Repple could not remove this device’s connection from your account, so it is still connected. '
-      + 'This is a connection problem rather than a refusal — try again in a moment.',
+      + 'This is a connection problem rather than a refusal. Try again in a moment.',
     );
   }
   // Whatever we knew about that token was about a row that is now gone. Left in

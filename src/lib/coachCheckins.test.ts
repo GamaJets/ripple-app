@@ -136,7 +136,7 @@ for (const [s, line] of gaps) {
   eq(/not known|not established|Reading/.test(line), s !== 'ready',
     `${s} names the read rather than the person`);
 }
-ok(gaps.find(([s]) => s === 'error')![1].includes('try again'),
+ok(gaps.find(([s]) => s === 'error')![1].toLowerCase().includes('try again'),
   'a failed read tells the coach the thing that would actually help');
 ok(gaps.find(([s]) => s === 'ready')![1].includes('Sam'),
   'the client is named rather than described as a dash');

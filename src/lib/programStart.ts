@@ -178,20 +178,20 @@ export function blockPositionNow(
 export function blockPositionLine(pos: BlockPosition, startsOn: string | null | undefined, who: string): string {
   switch (pos.phase) {
     case 'no-date':
-      return `No start date on this assignment, so it began the moment it was sent — which is how every assignment in this app has always worked.`;
+      return `No start date on this assignment, so it began the moment it was sent, which is how every assignment in this app has always worked.`;
     case 'unreadable':
       return `A start date is stored against this assignment and this build cannot read it, so there is no week number to give. What ${who} is training is unaffected.`;
     case 'before': {
       const days = pos.dayOffset == null ? null : Math.abs(pos.dayOffset);
       const when = days === 1 ? 'tomorrow' : days == null ? `on ${startsOn}` : `in ${days} days`;
-      return `You wrote this block to start ${when}. ${who} is training week one of it already — the date is your record of the plan, and their Train tab does not wait for it.`;
+      return `You wrote this block to start ${when}. ${who} is training week one of it already. The date is your record of the plan, and their Train tab does not wait for it.`;
     }
     case 'during':
       return pos.weeks > 1
         ? `Week ${pos.week} of ${pos.weeks}, counted from the ${startsOn} you set.`
         : `Started ${startsOn}. This program is one week long, so there is no week to count.`;
     case 'after':
-      return `This block ran ${pos.weeks} week${pos.weeks === 1 ? '' : 's'} from ${startsOn} and its last week has passed. The last week is still what ${who} is being shown, because a plan that has run out is not the same as no plan. Nothing here says whether ${who} did it — that is what their logged training answers.`;
+      return `This block ran ${pos.weeks} week${pos.weeks === 1 ? '' : 's'} from ${startsOn} and its last week has passed. The last week is still what ${who} is being shown, because a plan that has run out is not the same as no plan. Nothing here says whether ${who} did it. That is what their logged training answers.`;
   }
 }
 

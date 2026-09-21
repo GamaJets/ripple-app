@@ -38,7 +38,7 @@ const MINUS = /[-−]/;
  * spreadsheet.
  */
 const NO_CURRENCY =
-  'the currency is not known, so this figure cannot be read into minor units — '
+  'the currency is not known, so this figure cannot be read into minor units; '
   + 'set the gym’s currency, or give the file a currency column';
 
 /**
@@ -63,7 +63,7 @@ const NO_CURRENCY =
  */
 const NOT_A_CURRENCY = (stated: string): string =>
   `“${stated.length > 24 ? stated.slice(0, 24) + '…' : stated}” is not a currency code, so this figure `
-  + 'cannot be read into minor units — a three-letter code (GBP, JPY, KWD) says '
+  + 'cannot be read into minor units: a three-letter code (GBP, JPY, KWD) says '
   + 'how many decimal places the money has, and nothing else does';
 
 /**
@@ -187,7 +187,7 @@ export function parseMoneyCents(raw: string, currency?: string | null): Parsed<n
         // own spreadsheet was shown a refusal about a number that is not in
         // their file — which reads as a bug in the importer rather than as a
         // question about their cell.
-        reason: `"${raw}" could be ${cur} ${raw.replace(/[.,]/g, '')} or ${cur} ${raw.replace(/[.,]/g, (m, i) => (i === raw.lastIndexOf(m) ? '.' : ''))} — write the amount with all ${dp} decimal places`,
+        reason: `"${raw}" could be ${cur} ${raw.replace(/[.,]/g, '')} or ${cur} ${raw.replace(/[.,]/g, (m, i) => (i === raw.lastIndexOf(m) ? '.' : ''))}; write the amount with all ${dp} decimal places`,
       };
     }
   }
@@ -295,7 +295,7 @@ export function parseDate(raw: string, order?: DateOrder): Parsed<string> {
   if (!order) {
     return {
       ok: false,
-      reason: `"${raw}" could be day-first or month-first — say which the file uses`,
+      reason: `"${raw}" could be day-first or month-first; say which the file uses`,
     };
   }
   // `'ymd'` is not an answer to this question, and it used to fall into the
@@ -315,7 +315,7 @@ export function parseDate(raw: string, order?: DateOrder): Parsed<string> {
   if (order !== 'dmy' && order !== 'mdy') {
     return {
       ok: false,
-      reason: `"${raw}" could be day-first or month-first — say which the file uses`,
+      reason: `"${raw}" could be day-first or month-first; say which the file uses`,
     };
   }
   return order === 'mdy' ? ymdToIso(c, a, b) : ymdToIso(c, b, a);
@@ -753,7 +753,7 @@ export function previewPayments(
     if (!amt.ok) errors.push(`amount: ${amt.reason}`);
     // A zero payment is a real thing (a comped month, a correction). A negative
     // one is a refund, which is not what this importer is for.
-    else if (amt.value < 0) errors.push('amount is negative — refunds are not imported here');
+    else if (amt.value < 0) errors.push('amount is negative; refunds are not imported here');
 
     const d = parseDate(at(r, 'date'), effective);
     if (!d.ok) errors.push(`date: ${d.reason}`);
@@ -767,7 +767,7 @@ export function previewPayments(
 
     const memberName = at(r, 'member').trim() || null;
     if (!memberName && !email) {
-      errors.push('no member name or email — this payment cannot be attributed');
+      errors.push('no member name or email, so this payment cannot be attributed');
     }
 
     // A stated currency that is not the one this import writes. Refused per row
@@ -776,7 +776,7 @@ export function previewPayments(
     const stated = at(r, 'currency').trim().toUpperCase();
     if (stated && importIn && stated !== importIn) {
       errors.push(
-        `this row is in ${stated} and the import is writing ${importIn} — `
+        `this row is in ${stated} and the import is writing ${importIn}; `
         + 'the figures are not the same money and are not converted here',
       );
     }
@@ -960,7 +960,7 @@ export function previewPlans(text: string, currency?: string | null): ImportPrev
     let priceCents = 0;
     const rawPrice = at(r, 'price').trim();
     if (!rawPrice) {
-      errors.push('no price — a blank price is an unfinished row, not a free plan');
+      errors.push('no price; a blank price is an unfinished row, not a free plan');
     } else {
       const m = parseMoneyCents(rawPrice, priceIn);
       if (m.ok) {
@@ -1023,7 +1023,7 @@ export function describePreview<T>(p: ImportPreview<T>): string {
   if (p.rows.length === 0) return 'That file has a header but no rows.';
   const parts = [`${p.ready.length} of ${p.rows.length} rows ready`];
   if (p.rejected.length) parts.push(`${p.rejected.length} need attention`);
-  if (p.dateOrder === 'ambiguous') parts.push('date order unclear — say which the file uses');
+  if (p.dateOrder === 'ambiguous') parts.push('date order unclear; say which the file uses');
   if (p.unmatchedColumns.length) parts.push(`ignoring ${p.unmatchedColumns.length} unrecognised column(s)`);
   return parts.join(' · ');
 }

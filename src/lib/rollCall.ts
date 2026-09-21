@@ -109,7 +109,7 @@ export function emergencyLine(r: RollCallRecord | null | undefined): string | nu
   if (!r) return null;
   const bits = [r.emergencyName?.trim(), r.emergencyPhone?.trim()]
     .filter((b): b is string => !!b);
-  return bits.length ? bits.join(' — ') : null;
+  return bits.length ? bits.join(' · ') : null;
 }
 
 /**
@@ -167,7 +167,7 @@ export function buildRollCall(input: {
   if (clock) caveats.push(clock);
   if (input.records === null) {
     caveats.push(
-      'The gym’s own notes did not load, so no next-of-kin number and no medical note could be printed. Those columns are UNKNOWN on this sheet, not empty — do not read a blank as “nobody to ring”.',
+      'The gym’s own notes did not load, so no next-of-kin number and no medical note could be printed. Those columns are UNKNOWN on this sheet, not empty. Do not read a blank as “nobody to ring”.',
     );
   }
   if (unnamed > 0) {
@@ -177,7 +177,7 @@ export function buildRollCall(input: {
   }
   if (input.openFromEarlierDays > 0) {
     caveats.push(
-      `${input.openFromEarlierDays} check-${input.openFromEarlierDays === 1 ? 'in is' : 'ins are'} still open from an earlier day and ${input.openFromEarlierDays === 1 ? 'is' : 'are'} deliberately NOT on this list — ${input.openFromEarlierDays === 1 ? 'it is a row' : 'they are rows'} nobody closed rather than ${input.openFromEarlierDays === 1 ? 'a person' : 'people'} standing in the gym.`,
+      `${input.openFromEarlierDays} check-${input.openFromEarlierDays === 1 ? 'in is' : 'ins are'} still open from an earlier day and ${input.openFromEarlierDays === 1 ? 'is' : 'are'} deliberately NOT on this list: ${input.openFromEarlierDays === 1 ? 'it is a row' : 'they are rows'} nobody closed rather than ${input.openFromEarlierDays === 1 ? 'a person' : 'people'} standing in the gym.`,
     );
   }
   caveats.push(
@@ -225,13 +225,13 @@ export function rollCallHtml(r: RollCall): string {
       <td>${escapeHtml(p.name ?? 'not identified')}</td>
       <td class="mono">${escapeHtml(hhmm(p.inSinceIso, r.zone))}</td>
       <td>${p.emergency ? escapeHtml(p.emergency) : '<span class="none">none recorded</span>'}</td>
-      <td>${p.medical ? escapeHtml(p.medical) : '<span class="none">—</span>'}</td>
+      <td>${p.medical ? escapeHtml(p.medical) : /* dash-ok: no medical note recorded; a lone dash is the app's unknown sign, not punctuation */ '<span class="none">—</span>'}</td>
       <td class="tick"></td>
     </tr>`).join('\n');
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Roll call — ${head}</title>
+<title>Roll call · ${head}</title>
 <style>
   body { font: 12pt/1.4 system-ui, sans-serif; color: #000; background: #fff; margin: 18mm; }
   h1 { font-size: 18pt; margin: 0 0 2mm; }
@@ -247,7 +247,7 @@ export function rollCallHtml(r: RollCall): string {
   @page { margin: 12mm; }
 </style></head>
 <body>
-  <h1>Roll call — ${head}</h1>
+  <h1>Roll call · ${head}</h1>
   <p class="when">${escapeHtml(String(r.people.length))} in the building. Printed ${escapeHtml(when)}.</p>
   <table>
     <thead><tr>

@@ -101,4 +101,4 @@ export function signOutOutcome(error: unknown): SignOutOutcome {
  */
 export const SIGN_OUT_UNCONFIRMED =
   'Sign out was not confirmed. The sign-in service could not be reached, so this '
-  + 'browser may still be signed in — do not leave this machine until a sign out goes through.';
+  + 'browser may still be signed in. Do not leave this machine until a sign out goes through.';

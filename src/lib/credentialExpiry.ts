@@ -151,7 +151,7 @@ export function expirySummaryLine(s: ExpirySummary): string | null {
       const bits: string[] = [];
       if (s.expired > 0) bits.push(`at least ${items(s.expired)} of yours ${s.expired === 1 ? 'has' : 'have'} expired`);
       if (s.expiring > 0) bits.push(`at least ${s.expiring} ${s.expiring === 1 ? 'is' : 'are'} due within ${EXPIRING_SOON_DAYS} days`);
-      return `${bits.join(', and ')}. This is not all of your credentials, so there may be more — open the list to see.`;
+      return `${bits.join(', and ')}. This is not all of your credentials, so there may be more. Open the list to see.`;
     }
 
     case 'all-in-date':

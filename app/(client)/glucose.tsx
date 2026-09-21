@@ -213,7 +213,7 @@ export default function Glucose() {
             through, so the range and the figures it judges cannot come out in
             two different units again. */}
         <Notice tone={t.s3} kicker="Not Medical Advice" title="Readings, not recommendations"
-          note={`The range shown (${formatGlucose(TYPICAL_LOW_MMOL, unit)}–${formatGlucose(TYPICAL_HIGH_MMOL, unit)} ${unit}) is the one commonly quoted for adults, not a target set for you — your targets come from your clinician.`} />
+          note={`The range shown (${formatGlucose(TYPICAL_LOW_MMOL, unit)}–${formatGlucose(TYPICAL_HIGH_MMOL, unit)} ${unit}) is the one commonly quoted for adults, not a target set for you. Your targets come from your clinician.`} />
 
         {/* ── The window's headline figures ─────────────────────────────── */}
         <Section style={{ marginTop: sp.lg }}>
@@ -222,7 +222,7 @@ export default function Glucose() {
           {unreadable ? (
             <>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-                Your readings could not be read just now — not the same as having none.
+                Your readings could not be read just now. That is not the same as having none.
               </Text>
               <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
                 <Ghost label="Try Again" onPress={() => { void g.refresh(); }} />

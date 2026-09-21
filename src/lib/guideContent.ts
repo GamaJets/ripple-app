@@ -48,7 +48,7 @@ export interface GuideSection {
 const CLIENT_TABS: GuideSection[] = [
   {
     title: 'Home',
-    summary: 'Where your day starts — how recovered you are and what is next.',
+    summary: 'Where your day starts: how recovered you are and what is next.',
     points: [
       'Readiness needs a night of sleep behind it, either logged here or brought in from a watch. Until there is one it stays blank rather than guessing.',
       'Body shows body fat and muscle from your most recent scan, with the change since the one before it, beside your latest weight.',
@@ -60,7 +60,7 @@ const CLIENT_TABS: GuideSection[] = [
     summary: 'Your program, session by session.',
     points: [
       'Tap a day to see that session. Start Workout walks you through it exercise by exercise.',
-      'Log each set as you go — reps and weight. What you log is what feeds your history and progress.',
+      'Log each set as you go: reps and weight. What you log is what feeds your history and progress.',
       'Book Session opens the times your coach has offered. The month grid shows what is already booked.',
       'A movement that loads an injury you have disclosed is marked with which injury it loads, and offers you the alternatives in your plan that clear it.',
       'Where that injury is severe the swap is already made, if your plan has a safe alternative to swap to. Where it has none the movement is hidden and the row says so rather than quietly dropping it.',
@@ -71,18 +71,18 @@ const CLIENT_TABS: GuideSection[] = [
     title: 'Meals',
     summary: 'Your calorie and macro targets, and what you actually ate.',
     points: [
-      'Targets are scaled from your body — they need a weight and a body fat to work from, so add a scan or a check-in first.',
+      'Targets are scaled from your body. They need a weight and a body fat to work from, so add a scan or a check-in first.',
       'Log food four ways: photograph it, type in the number under a barcode, search for it, or describe it in words.',
       'Mark the day as training, standard or rest and the targets move with it.',
     ],
   },
   {
     title: 'Progress',
-    summary: 'The long view — scans, measurements and photos.',
+    summary: 'The long view: scans, measurements and photos.',
     points: [
       'Add Scan records an InBody result, typed in or read off a photo of the printout. Body fat and muscle on Home come from here.',
       'Measurements tracks the tape numbers between scans.',
-      'Progress photos are saved to your account, so they are still there next time — add two and you can compare before and after.',
+      'Progress photos are saved to your account, so they are still there next time. Add two and you can compare before and after.',
       'Your coach can open a progress photo only when you press and hold that one and send it. Sending one does not send the next, and you can take it back.',
       'The screen always says which photos your coach can see. If it could not check, it says that instead of telling you they are private.',
     ],
@@ -105,13 +105,13 @@ const CLIENT_TOPICS: GuideSection[] = [
     title: 'Blood sugar',
     summary: 'Readings from a continuous glucose monitor, beside what you ate.',
     points: [
-      'Meals › Blood Sugar. Repple does not talk to Dexcom or Abbott — a monitor writes into Apple Health and Repple reads it from there, so any monitor that reaches Health reaches Repple.',
-      'Import from Health is on iPhone only. Apple Health asks about blood glucose on its own, the first time you import — nothing else in the app asks for it, and declining it changes nothing else.',
+      'Meals › Blood Sugar. Repple does not talk to Dexcom or Abbott. A monitor writes into Apple Health and Repple reads it from there, so any monitor that reaches Health reaches Repple.',
+      'Import from Health is on iPhone only. Apple Health asks about blood glucose on its own, the first time you import. Nothing else in the app asks for it, and declining it changes nothing else.',
       'You can type a meter reading in by hand as well. It is stored in mmol/L whichever unit you read in, and a number that is only sensible in the other unit is refused rather than saved wrong.',
-      'Each meal is shown with the reading before it and the highest one after — up to two hours, or until the next thing you ate. A dash where there was no reading, never a zero.',
+      'Each meal is shown with the reading before it and the highest one after (up to two hours, or until the next thing you ate). A dash where there was no reading, never a zero.',
       'Your coach sees none of this until you turn on Let my coach see these. Turning it off again hides the history as well as the next reading.',
       'The screen covers the last fourteen days. A share in range is withheld until there are enough readings for one to mean anything.',
-      'Repple shows what your monitor recorded and stops there. It does not tell you what to eat, and the range it names is the one commonly quoted for adults, not a target set for you — those come from your clinician.',
+      'Repple shows what your monitor recorded and stops there. It does not tell you what to eat, and the range it names is the one commonly quoted for adults, not a target set for you. Those come from your clinician.',
     ],
   },
   {
@@ -119,7 +119,7 @@ const CLIENT_TOPICS: GuideSection[] = [
     summary: 'Membership › Offers, where a code from your gym is redeemed.',
     points: [
       'Type the code in and Redeem. It works once per person, and only at the gym that issued it.',
-      'Repple records that you used it and tells your gym. It does not take anything off a payment — the discount comes off through your gym’s own billing, so a price in the app does not change when you redeem.',
+      'Repple records that you used it and tells your gym. It does not take anything off a payment. The discount comes off through your gym’s own billing, so a price in the app does not change when you redeem.',
       'Codes you have already used are listed underneath, with the discount and the day. A list that could not be read says so rather than telling you that you have used none.',
     ],
   },
@@ -129,9 +129,9 @@ const CLIENT_TOPICS: GuideSection[] = [
     points: [
       'Disclose an Injury asks for an area, how bad it is, and a note in your own words.',
       'Read it off a document is the other way in, for a physio report, a scan result or a doctor’s note. Photograph it, or choose a PDF or an image already on your phone.',
-      'A document only ever proposes. You read each suggestion, change what is wrong with it, and add the ones you mean — nothing is written on its own, because a disclosure you did not make is the app putting words in your mouth about your own body.',
-      'Your coach never sees the file — what they see is the injury you confirmed: the area, the severity and your note, exactly as if you had typed it.',
-      'Reading a document means sending a copy of it to a company outside this app. We ask you about that every time, before anything leaves, and we tell you afterwards what was sent and what was not. Say no and the document is saved to your account and sent nowhere — you can still add the injury by typing it.',
+      'A document only ever proposes. You read each suggestion, change what is wrong with it, and add the ones you mean. Nothing is written on its own, because a disclosure you did not make is the app putting words in your mouth about your own body.',
+      'Your coach never sees the file. What they see is the injury you confirmed: the area, the severity and your note, exactly as if you had typed it.',
+      'Reading a document means sending a copy of it to a company outside this app. We ask you about that every time, before anything leaves, and we tell you afterwards what was sent and what was not. Say no and the document is saved to your account and sent nowhere. You can still add the injury by typing it.',
       'Your plan flags movements that load it, and swaps or hides them while it is severe.',
       'Your coach cannot add, change or remove an injury. If they hear about one standing next to you, all they can do is ask you to record it, and that request arrives in your messages.',
       'Mark Recovered when you heal. It stays on the list, because what you have had is worth knowing when somebody plans what you do next.',
@@ -146,7 +146,7 @@ const CLIENT_TOPICS: GuideSection[] = [
       'Cancelling more than 24 hours ahead costs nothing.',
       'Inside 24 hours the session is still drawn from your package, and your coach’s late-cancellation fee may apply. Repple does not charge it and does not know what it is, so ask them.',
       'Either way the slot goes back on offer to your coach’s other clients.',
-      'Plan This Day marks a day with what you intend to do. A planned day is never counted as a session you did — it keeps its own mark even after it has passed.',
+      'Plan This Day marks a day with what you intend to do. A planned day is never counted as a session you did. It keeps its own mark even after it has passed.',
       'Add to Calendar sends your booked sessions to the calendar app on your phone.',
     ],
   },
@@ -154,7 +154,7 @@ const CLIENT_TOPICS: GuideSection[] = [
     title: 'Paying your coach',
     summary: 'Memberships & Packs, under Me.',
     points: [
-      'A coach can sell one-off packages — a membership, or a pack of a set number of sessions — and packages that charge every month or every year until you cancel.',
+      'A coach can sell one-off packages (a membership, or a pack of a set number of sessions) and packages that charge every month or every year until you cancel.',
       'Paying opens Stripe in your browser. Repple never sees or stores your card. What you bought appears here once Stripe confirms it, which can take a moment.',
       'A subscription can be cancelled here and keeps running to the end of the period you have already paid for. Keep Subscription puts it back before then.',
       'Payment & Invoices opens Stripe’s own portal, where your card and your receipts live.',
@@ -167,7 +167,7 @@ const CLIENT_TOPICS: GuideSection[] = [
     points: [
       'Confirming your email address is a six-digit code you type into the app, not a link. Mail scanners were opening the links before anybody read them, and a code has no link for them to open.',
       'Before you can use the app you agree to a release of liability: that you should speak to a doctor before starting, and that you take part at your own risk. Both boxes have to be ticked.',
-      'The agreement is recorded against your account rather than on this phone, so reinstalling does not ask you twice. If the wording ever changes you are asked again — agreeing to wording nobody has read is not agreeing.',
+      'The agreement is recorded against your account rather than on this phone, so reinstalling does not ask you twice. If the wording ever changes you are asked again, because agreeing to wording nobody has read is not agreeing.',
     ],
   },
 ];
@@ -181,7 +181,7 @@ const TRAINER_TABS: GuideSection[] = [
     points: [
       'Add Client enters somebody by hand. Invite a Client opens your coaching code, and can also record an invite against an email address.',
       'Repple sends no email. An invite waits for that address to sign in, so tell them yourself that it is there.',
-      'Filters split the roster by how somebody is going — drifting, or nothing recorded — by online, in-person or hybrid, and by any tag you have put on somebody.',
+      'Filters split the roster by how somebody is going (drifting, or nothing recorded), by online, in-person or hybrid, and by any tag you have put on somebody.',
       'Tap a client for their page: what they have disclosed, how long since anything was recorded, what is outstanding, and the program you assigned.',
       'Coaching Tools is also where your own training, nutrition and progress live.',
     ],
@@ -192,7 +192,7 @@ const TRAINER_TABS: GuideSection[] = [
     points: [
       'Start from a template, or add training days and build from scratch.',
       'Assign to Client pushes the program into that client’s Train tab.',
-      'Templates, the Exercise Library and your Videos are all one tap from the top of this tab — everything you build with is here.',
+      'Templates, the Exercise Library and your Videos are all one tap from the top of this tab. Everything you build with is here.',
       'Save any program you like as a template to reuse.',
       'Where a client has disclosed an injury, Assign is withheld until you have read the list and confirmed it. The confirmation covers what you were shown, so recovering does not ask you again but a new disclosure does.',
       'Exercises that load what they disclosed are marked while you build, and named again before the program goes out.',
@@ -204,9 +204,9 @@ const TRAINER_TABS: GuideSection[] = [
     summary: 'Your coaching week.',
     points: [
       'Add a Session books a client, or opens a slot they can take themselves. Starts are on the quarter hour, at any hour of the day.',
-      'Weekly Availability sets the times you offer every week — on the quarter hour, at any hour of the day — and generates open slots from them for the next four weeks.',
+      'Weekly Availability sets the times you offer every week (on the quarter hour, at any hour of the day) and generates open slots from them for the next four weeks.',
       'Block Out Time marks a period you are not available and withdraws the open slots inside it, so nothing stays advertised that the server will refuse.',
-      'A session already booked inside a block is never removed for you. Cancel it yourself — that is what tells the client.',
+      'A session already booked inside a block is never removed for you. Cancel it yourself. That is what tells the client.',
       'Cancelling a booked session frees the slot. Re-offer pushes your other clients that the time is open.',
       'Group Classes schedules classes and checks members in. Export Schedule sends your booked sessions to your own calendar app.',
     ],
@@ -225,7 +225,7 @@ const TRAINER_TABS: GuideSection[] = [
     summary: 'What you are owed, what came in, and what went out.',
     points: [
       'It opens on what is outstanding: the invoices you have issued that are past their due date, counted and totalled per currency.',
-      'Total Taken is gross — what clients were charged, before Stripe’s fee and ours, plus anything you recorded by hand.',
+      'Total Taken is gross: what clients were charged, before Stripe’s fee and ours, plus anything you recorded by hand.',
       'Two currencies are always two figures. Repple never adds them together and never converts one into the other.',
       'Cash and transfers never reach Repple on their own, so every figure here is a floor until you record them.',
       'Payments, Invoices, Cash and Transfers, What It Costs You, Ad Spend, Billing, the Statement of Record and Who Brings You Clients are all on this tab.',
@@ -236,7 +236,7 @@ const TRAINER_TABS: GuideSection[] = [
     title: 'Analytics',
     summary: 'How the coaching business is actually going.',
     points: [
-      'Sessions Delivered counts this month’s sessions whose time has already gone by. It is not attendance — somebody who did not turn up is still in it.',
+      'Sessions Delivered counts this month’s sessions whose time has already gone by. It is not attendance. Somebody who did not turn up is still in it.',
       'Roster health splits your clients into on track, watch and at risk.',
       'What those sessions are worth is your own session rate multiplied out. Repple does not process that money and is not told it, so it is arithmetic rather than a payout.',
       'Figures stay empty until there is real activity behind them, and a read that failed says so rather than showing you a zero.',
@@ -259,7 +259,7 @@ const TRAINER_TOPICS: GuideSection[] = [
     title: 'A client’s blood sugar',
     summary: 'What you see when somebody wearing a monitor chooses to show you.',
     points: [
-      'It appears on their page, and only if they have turned sharing on in their own app. You cannot turn it on for them — the database refuses it, not just the screen.',
+      'It appears on their page, and only if they have turned sharing on in their own app. You cannot turn it on for them. The database refuses it, not just the screen.',
       'When they have not shared, the page says so and says nothing about whether they have readings. Whether a monitor exists is theirs to tell you.',
       'When the read fails, the page says it failed. An empty stretch is only reported as empty when it was actually read.',
       'You see the last fortnight: latest, average, highest, the share inside the commonly quoted range, and the meals that had a reading either side.',
@@ -272,10 +272,10 @@ const TRAINER_TOPICS: GuideSection[] = [
     points: [
       'Your main code is six characters. Tap it to send it to the person in front of you; Copy Link for Your Bio gives the bare address instead, for a caption, a bio, or the destination of an ad.',
       'They enter the code in the client app under Find a Trainer, above the list of coaches. You still approve them before they join your roster.',
-      'Named codes run alongside the main one — one for the gym flyer, one for the Instagram bio, both live at once — so you can see which of the things you did brought somebody in.',
+      'Named codes run alongside the main one (one for the gym flyer, one for the Instagram bio, both live at once), so you can see which of the things you did brought somebody in.',
       'Turning a named code off stops it taking anybody new and keeps its count, so a campaign that is over still tells you what it did.',
       'New Code replaces your main code and stops the old one working straight away. It is the remedy for a code that has got somewhere you did not put it, not a way to run a second campaign.',
-      'What Each Code Returned shows clients in and what they went on to pay. What you spent is not in Repple, so you type it in per code — an empty box means unknown, not free.',
+      'What Each Code Returned shows clients in and what they went on to pay. What you spent is not in Repple, so you type it in per code. An empty box means unknown, not free.',
       'Every figure there is last touch: somebody who saw a post and later joined off a friend’s code counts for the friend.',
       'Where two codes are too close to call, no comparison is drawn at all and the screen says why.',
     ],
@@ -287,7 +287,7 @@ const TRAINER_TOPICS: GuideSection[] = [
       'Disclosures appear on that client’s page, above everything about how they are going.',
       'You cannot add, change or remove one. That is enforced in the database rather than merely left off the screen: a gate the coach can edit their way out of is not a gate.',
       'Ask Them to Record One puts the request in your thread with them, and notifies them where it can. It lands in their injuries once they add it.',
-      'Their program cannot be assigned until you have read the list and confirmed it — see Programs.',
+      'Their program cannot be assigned until you have read the list and confirmed it. See Programs.',
       'Recovered injuries are kept and shown. They light no flag and close no gate; they are there because what somebody has had changes how you plan the next twelve weeks.',
       'A read that failed says so. It never says the client has disclosed nothing.',
     ],
@@ -308,7 +308,7 @@ const TRAINER_TOPICS: GuideSection[] = [
     title: 'Your own training',
     summary: 'The three things you could track for everybody except yourself.',
     points: [
-      'My Training logs and reviews your own sessions, by text or one lift at a time. It does not program — Programs is for that.',
+      'My Training logs and reviews your own sessions, by text or one lift at a time. It does not program; Programs is for that.',
       'My Nutrition logs your own meals against your own target. Where there is nothing behind the account to store one, the screen says so up front rather than taking a meal it is going to lose.',
       'My Progress holds your own weigh-ins and tape measurements. Its weight trend is built from your check-ins, which are the weekly grain a trend wants.',
       'All three read and write your own rows and cannot show a client’s. Whose they are is stated on the tab, the heading and every empty state.',
@@ -371,7 +371,7 @@ const OWNER_TABS: GuideSection[] = [
       'Set what one delivered session pays. Payroll and value-per-client are both worked out from it, and nothing shows a figure until it is set.',
       'Announce writes a note to your trainers.',
       'Activity is your gym’s own feed: members joining, coaches joining, sessions marked delivered or missed, and codes being redeemed, as they happen.',
-      'Triage the support inbox — the feedback people send from inside the app, in one list.',
+      'Triage the support inbox: the feedback people send from inside the app, in one list.',
       'Trainer Rota: who is on the floor when, against what is booked.',
       'Equipment Register: what the gym owns, and what is due a service.',
       'Deletion Requests: members who asked to be erased, and the 30-day clock on each.',

@@ -275,10 +275,10 @@ export function unsentNote(them: string, stage: 'upload' | 'send' | 'queued', ki
   // An attachment is never queued (the file lives in a cache directory the OS
   // may empty before the queue runs), so this stage never carries a kind — and
   // if a later change makes it, the sentence still says the true half.
-  if (stage === 'queued') return `Waiting to send — ${them} cannot see this yet`;
+  if (stage === 'queued') return `Waiting to send, so ${them} cannot see this yet`;
   if (stage === 'upload' && kind) {
-    return `Not sent — the ${attachmentNoun(kind)} did not upload, so ${them} cannot see it`;
+    return `Not sent: the ${attachmentNoun(kind)} did not upload, so ${them} cannot see it`;
   }
-  if (kind) return `Not sent — ${them} cannot see this ${attachmentNoun(kind)}`;
-  return `Not sent — ${them} cannot see this`;
+  if (kind) return `Not sent, so ${them} cannot see this ${attachmentNoun(kind)}`;
+  return `Not sent, so ${them} cannot see this`;
 }

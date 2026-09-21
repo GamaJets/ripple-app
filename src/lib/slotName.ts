@@ -124,9 +124,9 @@ export function unnamedSlotNote(
   const who = slotWho(clientId, roster);
   if (who === 'open' || who === 'named') return null;
   if (who === 'unnamed') {
-    return 'This hour is booked. The client record behind it carries no name, so there is nobody to print here — it is not an open slot.';
+    return 'This hour is booked. The client record behind it carries no name, so there is nobody to print here. It is not an open slot.';
   }
   return whole(status)
-    ? 'This hour is booked by somebody who is not on your book any more, so their name cannot be shown. It is not an open slot — cancelling it frees a session somebody arranged.'
-    : 'This hour is booked. Your roster did not come back, so their name is unknown — this is not an open slot, and it must not be given to anybody else until the list loads.';
+    ? 'This hour is booked by somebody who is not on your book any more, so their name cannot be shown. It is not an open slot, and cancelling it frees a session somebody arranged.'
+    : 'This hour is booked. Your roster did not come back, so their name is unknown. This is not an open slot, and it must not be given to anybody else until the list loads.';
 }

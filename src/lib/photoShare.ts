@@ -176,7 +176,7 @@ export function sendBlocker(
   // The unknown-grants case is tested FIRST. Until that read lands there is no
   // honest thing to say about a coach either, and "you have no coach linked"
   // is a definite claim that a failed read has not earned.
-  if (grants === null) return 'Still checking what your coach can already see — try again in a moment.';
+  if (grants === null) return 'Still checking what your coach can already see. Try again in a moment.';
   if (!coach) return 'You do not have a coach linked, so there is nobody to send this to.';
   if (grants.some((g) => g.photoId === photo.id)) return 'Your coach can already see this one.';
   if (photo.url === null) return 'This photo has no picture behind it any more, so there is nothing to send.';
@@ -333,7 +333,7 @@ export async function sharePhoto(photoId: string, coachId: string): Promise<Shar
     .select('photo_id, client_id, coach_id, shared_at')
     .single();
   if (error) throw error;
-  if (!data) throw new Error('That photo was not sent — nothing has changed.');
+  if (!data) throw new Error('That photo was not sent. Nothing has changed.');
 
   const r = data as any;
   return {
@@ -364,7 +364,7 @@ export async function unsharePhoto(photoId: string, coachId: string): Promise<vo
     .select('photo_id');
   if (error) throw error;
   if (!data || data.length === 0) {
-    throw new Error('That photo was not withdrawn — nothing has changed. Pull to refresh and try again.');
+    throw new Error('That photo was not withdrawn. Nothing has changed. Pull to refresh and try again.');
   }
 }
 

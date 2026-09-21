@@ -584,7 +584,7 @@ export function readLift(text: string | number | null | undefined, unit: WeightU
   if (n == null) return { ok: false, reason: 'That load is not a number. Leave it empty for a bodyweight set.' };
   if (n < 0) return { ok: false, reason: 'A load cannot be negative.' };
   if (n > LIFT_MAX[unit]) {
-    return { ok: false, reason: `${plain(n)} ${unit} is heavier than anyone has lifted — check that figure.` };
+    return { ok: false, reason: `${plain(n)} ${unit} is heavier than anyone has lifted. Check that figure.` };
   }
   return { ok: true, kg: roundTo(unit === 'lb' ? lbToKg(n) : n, LIFT_STORED_DP) };
 }
@@ -628,7 +628,7 @@ export function readBodyWeight(text: string | number | null | undefined, unit: W
   if (n < BODY_MIN[unit] || n > BODY_MAX[unit]) {
     return {
       ok: false,
-      reason: `Weight should be between ${plain(BODY_MIN[unit])} and ${plain(BODY_MAX[unit])} ${unit}. Check that figure — it is what your calorie targets and your whole weight history are built from.`,
+      reason: `Weight should be between ${plain(BODY_MIN[unit])} and ${plain(BODY_MAX[unit])} ${unit}. Check that figure. It is what your calorie targets and your whole weight history are built from.`,
     };
   }
   return { ok: true, kg: roundTo(unit === 'lb' ? lbToKg(n) : n, STORED_DP) };
@@ -693,6 +693,6 @@ export const lengthUnitLabel = (unit: LengthUnit) => unit;
 export function convertedNote(unit: WeightUnit | LengthUnit): string | null {
   if (unit === 'kg' || unit === 'cm') return null;
   return unit === 'lb'
-    ? 'Converted from the kilograms on your record — shown to the nearest pound.'
+    ? 'Converted from the kilograms on your record, shown to the nearest pound.'
     : 'Converted from the centimetres on your record.';
 }

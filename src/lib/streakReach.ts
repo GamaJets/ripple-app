@@ -174,4 +174,4 @@ export const boundedStreakUnit = (days: number): string =>
  */
 export const BOUNDED_STREAK_NOTE =
   'Your current run reaches as far back as this screen could read, so it may be longer than '
-  + 'this. Nothing has been lost — there is more of your log than fits in one go.';
+  + 'this. Nothing has been lost. There is more of your log than fits in one go.';

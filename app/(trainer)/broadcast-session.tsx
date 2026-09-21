@@ -96,7 +96,7 @@ export default function ShareSessionClip() {
         {/* ── caption ────────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Caption" />
-          <TextInput value={caption} onChangeText={setCaption} placeholder="Today's session — 20 min full-body burner 🔥 #Warehouse"
+          <TextInput value={caption} onChangeText={setCaption} placeholder="Today's session: 20 min full-body burner 🔥 #Warehouse"
             placeholderTextColor={t.ink3} multiline
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 88, textAlignVertical: 'top' }} />
           {/* Said once, plainly, and not as an apology: the coach is choosing

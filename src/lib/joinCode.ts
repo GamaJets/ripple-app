@@ -65,7 +65,7 @@ export const JOIN_LINK_BASE = `${BRAND.joinOrigin}/join`;
  *  dashboard cannot drift into saying different things. */
 export function inviteMessage(code: string): string {
   const c = normaliseCode(code);
-  return `Join me on Repple — get the app here: ${JOIN_LINK_BASE}?c=${encodeURIComponent(c)}\n\n`
+  return `Join me on Repple. Get the app here: ${JOIN_LINK_BASE}?c=${encodeURIComponent(c)}\n\n`
     + `Then tap Find a trainer and enter my code: ${c}`;
 }
 
@@ -106,7 +106,7 @@ export function codeProgress(input: string): number {
 export function joinErrorMessage(raw: string | null | undefined): string {
   const m = (raw || '').toLowerCase();
   if (m.includes('no coach uses that code')) {
-    return 'No coach is using that code. Check it with them — codes never contain the letter O or the digits 0 and 1.';
+    return 'No coach is using that code. Check it with them. Codes never contain the letter O or the digits 0 and 1.';
   }
   if (m.includes('that is your own code')) {
     return 'That is your own coaching code, so there is nobody to send it to.';

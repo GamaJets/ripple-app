@@ -336,7 +336,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
   { id: 'setup', title: 'Finish Setting Up', note: 'four questions that decide your plan and your targets', route: '/(client)/onboarding' },
   { id: 'guide', title: 'Read the User Guide', note: 'what each tab is for, in one screen', route: '/guide' },
   { id: 'coach', title: 'Connect With Your Coach', note: 'enter their code, or accept the invitation they sent', route: '/(client)/trainers' },
-  { id: 'workout', title: 'Log Your First Session', note: 'anything you did — it can be typed in plain words', route: '/(client)/workouts' },
+  { id: 'workout', title: 'Log Your First Session', note: 'anything you did, typed in plain words', route: '/(client)/workouts' },
   { id: 'meal', title: 'Log Something You Ate', note: 'search, scan a barcode, or photograph the plate', route: '/(client)/foodlog' },
   { id: 'device', title: 'Connect a Watch', note: 'where your sleep, steps and readiness come from', route: '/(client)/devices' },
 ];

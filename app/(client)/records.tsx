@@ -266,7 +266,7 @@ export default function Records() {
     <Notice tone={t.warn} kicker="Records" title="We Couldn’t Read Your Weight History"
      note={cd.scansStatus === 'partial'
       ? 'You have more scans on record than this screen can read at once, so a bodyweight set may be priced against an older weigh-in than the one that applied. Your barbell records are unaffected.'
-      : 'Pull-ups, dips and press-ups are priced against what you weighed on the day, and that history did not load — so they are not on the estimated-max board below. They are not gone, and nothing has been reset.'}>
+      : 'Pull-ups, dips and press-ups are priced against what you weighed on the day, and that history did not load, so they are not on the estimated-max board below. They are not gone, and nothing has been reset.'}>
      <View style={{ marginTop: sp.lg }}>
       <Cta label="Try Again" wide onPress={() => cd.reload()} />
      </View>
@@ -278,8 +278,8 @@ export default function Records() {
    <Section>
     <Notice tone={t.warn} kicker="Records" title="We Couldn’t Read Your Training Log"
      note={prs.length === 0
-      ? "Your records are safe — this screen can't see them right now. Nothing has been reset."
-      : "The board below is what this phone had before the read failed. It is real, but it may not be current — a record set since is not on it. Nothing has been reset."}>
+      ? "Your records are safe. This screen can't see them right now. Nothing has been reset."
+      : "The board below is what this phone had before the read failed. It is real, but it may not be current: a record set since is not on it. Nothing has been reset."}>
      <View style={{ marginTop: sp.lg }}>
       <Cta label="Try Again" wide onPress={reload} />
      </View>
@@ -307,7 +307,7 @@ export default function Records() {
     <Text style={{ ...ty.body, color: t.ink2 }}>
      {logStatus === 'partial'
       ? 'You have logged more sessions than this screen can read in one go, and there were no sets among the ones it read that could set a record. This is not a statement that you have no records.'
-      : 'No records yet — log a strength workout to set your first PR. Pull-ups, dips and press-ups count: tick Bodyweight when you log the set. So do planks and hangs: log them as a hold and your longest one gets a board of its own.'}
+      : 'No records yet. Log a strength workout to set your first PR. Pull-ups, dips and press-ups count: tick Bodyweight when you log the set. So do planks and hangs: log them as a hold and your longest one gets a board of its own.'}
     </Text>
     {/* The sentence above names the one thing that fills this screen and, until
         now, left the member to find it. The three `Cta`s elsewhere in this file
@@ -333,7 +333,7 @@ export default function Records() {
    {logStatus === 'partial' ? (<>
     <Section>
      <Notice tone={t.warn} kicker="Records" title="Read from Your Recent Sessions Only"
-      note="You have logged more sessions than this screen can read in one go, so this board is your best from the most recent ones. A record set before that is still on your log and is not on this list — nothing has been reset." >
+      note="You have logged more sessions than this screen can read in one go, so this board is your best from the most recent ones. A record set before that is still on your log and is not on this list. Nothing has been reset." >
       <View style={{ marginTop: sp.lg }}>
        <Cta label="Try Again" wide onPress={reload} />
       </View>
@@ -414,7 +414,7 @@ export default function Records() {
     <Text style={{ ...ty.caption, color: t.ink3 }}>
      Ranked by estimated one-rep max, which is worked out from the reps you logged and is not a max you
      tested. Where the heaviest load you have put on a lift came off a different set, that set is named
-     underneath it — the two are different records and this board is about the first.
+     underneath it. The two are different records, and this board is about the first.
     </Text>
     </Expandable>
     </View>
@@ -453,8 +453,8 @@ export default function Records() {
       {bodyKnown
        ? 'Ranked by reps in a single set. Record your weight on Body and these join the board above with an estimated max too.'
        : cd.scansStatus === 'loading'
-        ? 'Ranked by reps in a single set. Still reading your weight history — these join the board above with an estimated max once it lands.'
-        : 'Ranked by reps in a single set. Your weight history could not be read, so these cannot be priced against your own bodyweight just now — that is this screen, not a gap in your record. Pull down to try again.'}
+        ? 'Ranked by reps in a single set. Still reading your weight history. These join the board above with an estimated max once it lands.'
+        : 'Ranked by reps in a single set. Your weight history could not be read, so these cannot be priced against your own bodyweight just now. That is this screen, not a gap in your record. Pull down to try again.'}
      </Text>
     </Section>
    </>) : null}

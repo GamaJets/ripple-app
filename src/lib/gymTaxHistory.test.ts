@@ -199,7 +199,7 @@ ok(standingBlockers(draft({ registration: 'x'.repeat(61) }), []).length > 0, 'an
 {
   const clash = standingBlockers(draft({ fromOn: '2026-05-01' }), [s({ fromOn: '2026-01-01' })]);
   ok(clash.some((b) => /overlaps/.test(b)), 'an overlap is refused while somebody is still typing, not by a 23P01 afterwards');
-  ok(clash.some((b) => /close the existing period/.test(b)), 'and the answer says what to do instead');
+  ok(clash.some((b) => /close the existing period/i.test(b)), 'and the answer says what to do instead');
 }
 eq(standingBlockers(draft({ fromOn: '2026-04-01' }), [s({ fromOn: '2026-01-01', toOn: '2026-03-31' })]).length, 0,
   'adjacent is not overlapping — 31 March and 1 April, again');

@@ -253,7 +253,7 @@ export function statementLines(input: StatementInput): StatementLines {
       withheld: withheldReason(input.disputes.status, 'chargebacks'),
       lines: disputes.map((d, n) => line(
         'chargeback', n, itemDay(d.openedAt), '',
-        d.reason ? `Chargeback — reason given: ${d.reason}` : 'Chargeback — no reason was given',
+        d.reason ? `Chargeback, reason given: ${d.reason}` : 'Chargeback, no reason was given',
         d.currency, minorToPlain(d.amountCents, d.currency), minorMoney(d.amountCents, d.currency),
         // Stripe's own status word, verbatim. Nothing here rewrites it into an
         // outcome, and an open one says it is open rather than reading as
@@ -296,7 +296,7 @@ export function statementLines(input: StatementInput): StatementLines {
  * short quarter.
  */
 export const LINES_ARE_NOT_EVERYTHING =
-  'Packs, memberships and subscription renewals are not listed here and are not in the line-item file either — those are Stripe’s own rows and Stripe’s record is the one that proves them. The totals above cover them; this list covers everything else, which is every row this app holds itself.';
+  'Packs, memberships and subscription renewals are not listed here and are not in the line-item file either. Those are Stripe’s own rows and Stripe’s record is the one that proves them. The totals above cover them; this list covers everything else, which is every row this app holds itself.';
 
 /** What the list is, said where the coach is about to send it. Nothing below
  *  is netted and nothing is signed, so no column of it adds up to anything. */

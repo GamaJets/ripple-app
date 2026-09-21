@@ -164,5 +164,5 @@ export function rankingLine(e: MuscleEffort): string {
     return `${sets(e.primarySets)} as the main muscle, ${sets(e.secondarySets)} assisting.`;
   }
   if (e.primarySets > 0) return `${sets(e.primarySets)} as the main muscle.`;
-  return `${sets(e.secondarySets)} assisting — nothing that trained it directly.`;
+  return `${sets(e.secondarySets)} assisting. Nothing trained it directly.`;
 }

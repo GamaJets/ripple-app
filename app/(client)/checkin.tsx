@@ -326,7 +326,7 @@ export default function CheckIn() {
     // be the figure `weightToKg` stores two lines below. One reader, one number.
     const w = readNumber(weight);
     if (w == null || !(w > minShown && w < maxShown)) { Alert.alert('Add Your Weight', `Enter this week's weight in ${wu} so your coach sees the real number.`); return; }
-    if (!energy || !sleep || !mood || !adherence) { Alert.alert('Rate Your Week', 'Pick a face, and slide energy, sleep and adherence to a score — we won\'t guess them for you.'); return; }
+    if (!energy || !sleep || !mood || !adherence) { Alert.alert('Rate Your Week', 'Pick a face, and slide energy, sleep and adherence to a score. We won\'t guess them for you.'); return; }
     // Storage is metric everywhere, so the pounds a client typed become the
     // kilograms the coach's console, the macro calculator and the goal tracker
     // all read. `weightToKg` returns null for an unreadable field, but the
@@ -355,8 +355,8 @@ export default function CheckIn() {
     if (out === 'unsent') {
       Alert.alert(
         'Saved on This Phone',
-        'No connection, so your coach has not seen this yet — nothing is lost. The whole check-in, including your note, is saved here and goes up on its own the next time the app has signal.'
-        + (weightStored ? '' : ' Your profile weight, which your targets are worked out from, is not in that queue — record it on Body once you have signal.'),
+        'No connection, so your coach has not seen this yet. Nothing is lost. The whole check-in, including your note, is saved here and goes up on its own the next time the app has signal.'
+        + (weightStored ? '' : ' Your profile weight, which your targets are worked out from, is not in that queue. Record it on Body once you have signal.'),
         [{ text: 'Done', onPress: () => router.back() }],
       );
       return;
@@ -364,7 +364,7 @@ export default function CheckIn() {
     if (out === 'refused') {
       Alert.alert(
         'Not Saved',
-        'Your check-in was rejected, so it is not stored and your coach has not seen it. Sending it again as it is will be rejected again — check for an update, or tell your coach directly.',
+        'Your check-in was rejected, so it is not stored and your coach has not seen it. Sending it again as it is will be rejected again. Check for an update, or tell your coach directly.',
         [{ text: 'OK' }],
       );
       return;
@@ -373,7 +373,7 @@ export default function CheckIn() {
       'Check-in Sent',
       weightStored
         ? 'Your coach can see this week\'s check-in and your weight has been updated.'
-        : 'Your coach can see this week\'s check-in, including the weight on it. Your profile weight — the one your targets and your goal are worked out from — could not be updated just now, so record it again on Body when you have signal.',
+        : 'Your coach can see this week\'s check-in, including the weight on it. Your profile weight, the one your targets and your goal are worked out from, could not be updated just now, so record it again on Body when you have signal.',
       [{ text: 'Done', onPress: () => router.back() }],
     );
   };

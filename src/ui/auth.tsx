@@ -594,7 +594,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // refreshFromSession(); if (refused) throw new Error(refused);`. The guard
     // itself needs nothing added — every session already funnels through
     // refreshFromSession, including the one onAuthStateChange picks up.
-    throw new Error('Social sign-in is not set up yet — please use email for now.');
+    throw new Error('Social sign-in is not set up yet. Please use email for now.');
   };
 
   const signOut = async (): Promise<SignOutOutcome> => {

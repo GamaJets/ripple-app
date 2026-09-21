@@ -278,10 +278,10 @@ eq(supersedeKey(OUTCOME('s1', null)), 'session:s1',
   eq((back.acts[0]?.act as { outcome: string | null }).outcome, null, 'still as a retraction');
 }
 
-eq(actLine(OUTCOME('s1', null)), 'Sam’s session — outcome taken back',
+eq(actLine(OUTCOME('s1', null)), 'Sam’s session: outcome taken back',
   'and the pending list says it was taken back, never "marked null"');
 eq(actLine({ kind: 'session-outcome', sessionId: 's', clientName: null, outcome: null }),
-  'A session — outcome taken back', 'with the session named when the client cannot be');
+  'A session: outcome taken back', 'with the session named when the client cannot be');
 
 /* ── what a pressed send button reports ─────────────────────────────────── */
 

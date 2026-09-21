@@ -168,7 +168,7 @@ function withheldFor(status: LoadStatus, notesRead: boolean): string | null {
     case 'partial':
       return 'More enquiries exist than came back, so this is drawn from the ones that arrived. Somebody may have been waiting longer than anybody here.';
     case 'error':
-      return 'Your enquiries could not be read, so this is not a list of who has been waiting — it is what was on the screen before the read failed.';
+      return 'Your enquiries could not be read, so this is not a list of who has been waiting. It is what was on the screen before the read failed.';
     case 'ready':
       return notesRead
         ? null
@@ -230,7 +230,7 @@ export function longestWaitingLine(book: LeadWaitBook, status: LoadStatus): stri
   if (!top) return null;
   const ago = waitedLabel(top.waitedMs);
   return isWhole(status)
-    ? `${top.lead.name} has been waiting the longest — ${ago}.`
+    ? `${top.lead.name} has been waiting the longest: ${ago}.`
     : `${top.lead.name} has waited ${ago}, which is the longest of the enquiries that came back.`;
 }
 
@@ -255,7 +255,7 @@ export function leadWaitNote(book: LeadWaitBook): string | null {
       : `${book.undated} more enquiries have no readable date on them, so they cannot be placed in this order and are not counted here either way.`);
   }
   if (parts.length === 0 && book.rows.length > 0) {
-    parts.push(`Oldest first. These are the enquiries still marked New with no follow-up written against them — ${LEAD_WAIT_TITLE_NOTE}`);
+    parts.push(`Oldest first. These are the enquiries still marked New with no follow-up written against them. ${LEAD_WAIT_TITLE_NOTE}`);
   }
   return parts.length ? parts.join(' ') : null;
 }

@@ -260,7 +260,7 @@ export function tallyPast(rows: HistoryRow[], now: number = Date.now()): PastTal
  */
 export const CLIENT_CANCELLED_GAP_NOTE =
   'A session you cancelled yourself is not listed here. Cancelling hands the hour back to your coach, '
-  + 'so the booking stops being yours — it is under Sessions You Cancelled, below. Where a late fee was '
+  + 'so the booking stops being yours. It is under Sessions You Cancelled, below. Where a late fee was '
   + 'recorded it is on your receipts.';
 
 /* ── 2. how far back the read reached ──────────────────────────────────────── */
@@ -446,8 +446,8 @@ export function emptyHistoryLine(status: LoadStatus, what: string = 'sessions'):
     case 'loading':
       return `Still reading your ${what}.`;
     case 'error':
-      return `We could not read your ${what}, so this is not a record of nothing happening — `
-        + 'it is a read that failed. Pull down to try again.';
+      return `We could not read your ${what}, so this is not a record of nothing happening. `
+        + 'It is a read that failed. Pull down to try again.';
     case 'partial':
       return `Only part of your ${what} could be read, and none of that part is here. `
         + 'There may be more on the server that this screen has not seen.';

@@ -90,7 +90,7 @@ const MAX_CM = 260;
 
 const GOALS: { id: Goal; label: string; sub: string }[] = [
   { id: 'fatloss', label: 'Lose Fat', sub: 'Lean out, keep muscle' },
-  { id: 'tone', label: 'Tone Up', sub: 'Recomp — a bit of both' },
+  { id: 'tone', label: 'Tone Up', sub: 'Recomp: a bit of both' },
   { id: 'muscle', label: 'Build Muscle', sub: 'Add size and strength' },
 ];
 
@@ -466,7 +466,7 @@ export default function Onboarding() {
     body: (
       <View>
         <Text style={{ ...ty.title, color: t.ink }}>Your Stats</Text>
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: prefilled ? sp.md : sp.xl }}>Used to set your calorie and macro targets. Leave anything you don't know blank — you can add it later.</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: prefilled ? sp.md : sp.xl }}>Used to set your calorie and macro targets. Leave anything you don't know blank; you can add it later.</Text>
         {/* Said out loud when the boxes arrive with numbers already in them.
             A field that fills itself and does not say why reads as the app
             guessing, and the whole reason these were blank for a while is that
@@ -474,7 +474,7 @@ export default function Onboarding() {
             which figure to correct if their scan is out of date. */}
         {prefilled ? (
           <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.xl }}>
-            Filled in from your most recent measurement{lastScanLabel ? ` — ${lastScanLabel}` : ''}. Change anything that has moved on.
+            Filled in from your most recent measurement{lastScanLabel ? ` (${lastScanLabel})` : ''}. Change anything that has moved on.
           </Text>
         ) : null}
         {/* ── The question, asked where the answer changes the record ─────
@@ -492,7 +492,7 @@ export default function Onboarding() {
         </View>
         {unitsGuessed ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
-            We&#8217;ve gone by your phone&#8217;s region — tap to change it. Your weight is stored once, and
+            We&#8217;ve gone by your phone&#8217;s region. Tap to change it. Your weight is stored once, and
             in the wrong unit it is out by more than double.
           </Text>
         ) : null}
@@ -506,7 +506,7 @@ export default function Onboarding() {
             for. */}
         {weightOk === false ? (
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.lg }}>
-            That is not a weight this will record — it takes {minWeight} to {maxWeight} {wu}. Check the number, or the unit above it.
+            That is not a weight this will record. It takes {minWeight} to {maxWeight} {wu}. Check the number, or the unit above it.
           </Text>
         ) : null}
         {/* Two boxes in imperial, one in metric, as in the profile sheet. A
@@ -526,8 +526,8 @@ export default function Onboarding() {
         {heightOk === false ? (
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.lg }}>
             {lu === 'cm'
-              ? `That is not a height this will record — it takes ${minHeight} to ${maxHeight} cm.`
-              : 'That is not a height this will record. Feet go in the first box and inches in the second — five foot ten is 5 and 10, not 5.10.'}
+              ? `That is not a height this will record. It takes ${minHeight} to ${maxHeight} cm.`
+              : 'That is not a height this will record. Feet go in the first box and inches in the second: five foot ten is 5 and 10, not 5.10.'}
           </Text>
         ) : null}
         <Field label="Body Fat" hint="% · optional" a11y="Body fat percentage">
@@ -535,7 +535,7 @@ export default function Onboarding() {
         </Field>
         {bfOk === false ? (
           <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
-            That is not a body fat percentage this will record — it takes 3 to 70%. Leave it blank if you do not know it.
+            That is not a body fat percentage this will record. It takes 3 to 70%. Leave it blank if you do not know it.
           </Text>
         ) : null}
       </View>
@@ -544,7 +544,7 @@ export default function Onboarding() {
       <View>
         <Text style={{ ...ty.title, color: t.ink }}>Anything to Train Around?</Text>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.sm }}>Your plan and your coach will avoid loading these areas and offer safer swaps.</Text>
-        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Guidance only, not medical advice — see a professional for pain or a diagnosis.</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>Guidance only, not medical advice. See a professional for pain or a diagnosis.</Text>
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Tap any that apply</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
           {INJURY_AREAS.filter((a) => a.id !== 'other').map((a) => { const on = injAreas.includes(a.id); return (
@@ -556,7 +556,7 @@ export default function Onboarding() {
             put a mirrored chevron in the middle of an unmirrored English clause,
             which is worse than leaving it. When the catalogue is translated the
             whole sentence moves and the separator goes with it. */}
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{injAreas.length > 0 ? 'You can add severity, notes, and mark these recovered anytime in Me › Injuries & Limitations.' : 'Nothing to declare? Leave this blank — you can add them later in Me › Injuries.'}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{injAreas.length > 0 ? 'You can add severity, notes, and mark these recovered anytime in Me › Injuries & Limitations.' : 'Nothing to declare? Leave this blank; you can add them later in Me › Injuries.'}</Text>
       </View>
     ),
   };

@@ -238,7 +238,7 @@ export function phoneAuthError(
     return 'That code has expired. Ask for a new one.';
   }
   if (m.includes('invalid') && (m.includes('otp') || m.includes('token') || m.includes('credentials'))) {
-    return 'That code was not right. Check the last message — codes are six digits, and a new one replaces the old.';
+    return 'That code was not right. Check the last message. Codes are six digits, and a new one replaces the old.';
   }
   if (m.includes('rate') || m.includes('too many') || m.includes('over_sms_send_rate_limit')) {
     return 'Too many codes requested. Wait a minute before asking for another.';

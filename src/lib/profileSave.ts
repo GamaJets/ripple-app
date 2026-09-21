@@ -85,7 +85,7 @@ export function saveLine(s: SaveStatus, now: number): string | null {
     // a coach nothing about whether their bio is on their profile; "not saved"
     // tells them exactly what they need to know and what to do about it.
     const why = s.error ? ` (${s.error})` : '';
-    return `Your last change was NOT saved${why}. It is still on this screen but not on your profile — `
+    return `Your last change was NOT saved${why}. It is still on this screen but not on your profile. `
       + 'change something again to retry, or come back when you have a connection.';
   }
   const ago = Math.max(0, now - (s.savedAt ?? now));

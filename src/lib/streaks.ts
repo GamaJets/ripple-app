@@ -374,9 +374,9 @@ export function thisWeekStats(log: WorkoutEntry[], now: number = Date.now(), his
 
 /** A short, friendly milestone label for a streak count (for the confetti banner). */
 export function streakMilestone(streak: number): string | null {
-  if (streak >= 30) return `${streak}-day streak — unstoppable! 🔥`;
-  if (streak >= 14) return `${streak}-day streak — two weeks strong! 🔥`;
-  if (streak >= 7) return `${streak}-day streak — a full week! 🔥`;
-  if (streak >= 3) return `${streak}-day streak — keep it rolling! 🔥`;
+  if (streak >= 30) return `${streak}-day streak. Unstoppable! 🔥`;
+  if (streak >= 14) return `${streak}-day streak. Two weeks strong! 🔥`;
+  if (streak >= 7) return `${streak}-day streak. A full week! 🔥`;
+  if (streak >= 3) return `${streak}-day streak. Keep it rolling! 🔥`;
   return null;
 }

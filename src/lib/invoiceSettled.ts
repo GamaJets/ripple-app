@@ -117,8 +117,8 @@ export function invoiceSettledNotification(inv: CoachInvoice): Notification {
   // could not be put in a currency. Never a bare number, and never a dash that
   // could be read as "nothing charged".
   const line = amount
-    ? `Invoice ${n} for ${amount}${what ? ` — ${what}` : ''}.`
-    : `Invoice ${n}${what ? ` — ${what}` : ''}. The amount could not be stated in a currency, so none is shown here.`;
+    ? `Invoice ${n} for ${amount}${what ? ` (${what})` : ''}.`
+    : `Invoice ${n}${what ? ` (${what})` : ''}. The amount could not be stated in a currency, so none is shown here.`;
   // `invoiceDayLabel` answers '—' for anything that is not a bare YYYY-MM-DD,
   // and a sentence reading "paid on —" is worse than one that does not name a
   // day at all. So the day is only claimed where there is one to claim.
@@ -129,8 +129,8 @@ export function invoiceSettledNotification(inv: CoachInvoice): Notification {
   return {
     title: 'Your coach recorded this invoice as paid',
     body: clip(
-      `${line} ${when} That is their own record of it, written after the document was issued — `
-      + 'it has not been checked against a bank or a card processor and it is not a payment receipt from one. '
+      `${line} ${when} That is their own record of it, written after the document was issued. `
+      + 'It has not been checked against a bank or a card processor and it is not a payment receipt from one. '
       + 'Nothing on the document itself has changed. Ask them for a copy if you want one showing the settlement.',
       NOTICE_BODY_MAX,
     ),
@@ -170,7 +170,7 @@ export function settleNoticeLine(notified: boolean | null, billTo: string): stri
     return `${lead} has been told, in their inbox, that you have recorded this as paid. It says the amount, the day you gave, and that it is your own record rather than a receipt from a bank.`;
   }
   if (notified === false) {
-    return `The settlement is recorded, but nothing reached ${mid} — they may no longer be on your roster here. Send them the document again if you want them to have a copy saying it was paid.`;
+    return `The settlement is recorded, but nothing reached ${mid}. They may no longer be on your roster here. Send them the document again if you want them to have a copy saying it was paid.`;
   }
   return `This one is not tied to an account here, so nobody has been told. Send them the document again if you want them to have a copy saying it was paid.`;
 }

@@ -875,7 +875,7 @@ export default function TrainerClients() {
     const joined = await acceptTrainerInvite(id);
     if (!joined) {
       Alert.alert('Not Joined',
-        `You have NOT been added to ${ownerName || 'that gym'} — the server did not accept it, so nothing has changed and none of your clients have moved. `
+        `You have NOT been added to ${ownerName || 'that gym'}. The server did not accept it, so nothing has changed and none of your clients have moved. `
         + 'The invitation is back on this screen; try it again in a moment, or ask them to send a new one.');
       return;
     }
@@ -893,7 +893,7 @@ export default function TrainerClients() {
   const cancelInvite = async (id: string, email: string) => {
     if (await revokeInvite(id)) return;
     Alert.alert('Not Cancelled',
-      `${email} can still use that invitation to join you — the server did not confirm the cancellation, so it is still live and the row is still here. `
+      `${email} can still use that invitation to join you. The server did not confirm the cancellation, so it is still live and the row is still here. `
       + 'Try again in a moment.');
   };
   const [pnote, setPnote] = useState('');
@@ -956,7 +956,7 @@ export default function TrainerClients() {
     // anywhere in Europe has accented names in its first column, and the naive
     // read puts "ZoÃ«" on somebody's roster permanently.
     const text = base64ToUtf8(b64);
-    if (text == null) { setImpErr('That file could not be read as text. Export it as CSV and try again — nothing has been imported.'); return; }
+    if (text == null) { setImpErr('That file could not be read as text. Export it as CSV and try again. Nothing has been imported.'); return; }
     const pv = previewCoachRoster(text);
     // A read that has not come back is not "nobody has been invited". Refused
     // here rather than run on the guess: the alternative is re-inviting
@@ -966,7 +966,7 @@ export default function TrainerClients() {
       setImpFile(picked.file.name || 'your file');
       setImpPreview(pv);
       setImpPlan(null);
-      setImpErr('Your existing invites could not be read, so this cannot tell who you have already invited. That is a read that failed rather than a coach who has invited nobody — reopen this screen and try again. Nothing has been imported.');
+      setImpErr('Your existing invites could not be read, so this cannot tell who you have already invited. That is a read that failed rather than a coach who has invited nobody. Reopen this screen and try again. Nothing has been imported.');
       return;
     }
     const screened = screenInvites<CoachClientRow>(pv.ready, openInviteEmails);
@@ -1017,7 +1017,7 @@ export default function TrainerClients() {
     // build (see JoinLinkFallback below), so this is the second lock on the same
     // door — and a coach told "copied" who then pastes nothing has lost the post.
     if (!(await copyToClipboard(joinLink(code)))) {
-      Alert.alert('Not Copied', `The link for ${label} could not be copied. It is ${joinLink(code)} — write it down, or use Share instead.`, [{ text: 'OK' }]);
+      Alert.alert('Not Copied', `The link for ${label} could not be copied. It is ${joinLink(code)}. Write it down, or use Share instead.`, [{ text: 'OK' }]);
       return;
     }
     // The destination sentence is not a nicety. If a coach points a paid ad at
@@ -1029,7 +1029,7 @@ export default function TrainerClients() {
     Alert.alert(
       'Link Copied',
       `Paste it into your bio, a caption or a description. Anybody who joins through it is attributed to ${label}, so you can see which post brought them.\n\n` +
-        'Running an ad? Use this as the ad’s destination — not your profile. It is what lets what you spent be matched to the clients it actually brought.',
+        'Running an ad? Use this as the ad’s destination, not your profile. It is what lets what you spent be matched to the clients it actually brought.',
       [{ text: 'Done' }],
     );
   };
@@ -1806,7 +1806,7 @@ export default function TrainerClients() {
     return { ok: true };
   };
   const sendNudge = async (client: RosterClient) => {
-    const body = 'Hey ' + client.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.';
+    const body = 'Hey ' + client.name.split(' ')[0] + ', checking in! How is your week going? Let me know if you need anything.';
     const r = await deliverMessage(client, body);
     Alert.alert(r.ok ? 'Nudge sent' : 'Not sent',
       r.ok ? 'Saved to your thread with ' + client.name.split(' ')[0] + '. They will see it next time they open Repple.'
@@ -1855,7 +1855,7 @@ export default function TrainerClients() {
     // absence of a record is not a reason to ring somebody; it is the reason
     // `idle` exists in src/lib/clientDrift.ts, and that band is raised here
     // only when the read behind it actually covered them.
-    if ((!d || !acting) && c.adherence != null && c.adherence < 80) return { kind: 'adherence', state: 'Below target', line: `${c.adherence}% adherence at their latest check-in.`, reason: 'Adherence ' + c.adherence + '% — below target', tone: t.warn };
+    if ((!d || !acting) && c.adherence != null && c.adherence < 80) return { kind: 'adherence', state: 'Below target', line: `${c.adherence}% adherence at their latest check-in.`, reason: 'Adherence ' + c.adherence + '%, below target', tone: t.warn };
     if (c.unread != null && c.unread > 0) { const said = c.unread + ' unread message' + (c.unread > 1 ? 's' : ''); return { kind: 'unread', state: 'Waiting on you', line: said + ' in your thread.', reason: said, tone: t.brand }; }
     return null;
   };
@@ -1907,11 +1907,11 @@ export default function TrainerClients() {
       // who was never asked — and the coach may forward the draft built on it.
       // `clientIsQueryable` is the one thing that knows which (src/lib/clientRecord.ts).
       adherence: !clientIsQueryable(client.id, client.handAdded)
-        ? 'unknown — they have no account in the app, so there is no check-in for them to have made and no '
+        ? 'unknown: they have no account in the app, so there is no check-in for them to have made and no '
           + 'adherence figure exists; do not suggest they have missed any'
         : client.adherence != null
           ? client.adherence + '%'
-          : 'unknown — no adherence figure has come back for them (they may have no check-in on record, or that '
+          : 'unknown: no adherence figure has come back for them (they may have no check-in on record, or that '
             + 'read was short), so state none and do not conclude they have been skipping',
       lastActive: client.lastActive,
       coachedMode: client.mode,
@@ -1930,18 +1930,18 @@ export default function TrainerClients() {
       // coach has recorded none", which is a fact about the RECORD: "none
       // disclosed" says something about the CLIENT that nobody established.
       injuryAreas: !clientIsQueryable(client.id, client.handAdded)
-        ? 'unknown — they have no account in the app and have never been asked to record an injury, so nothing '
-          + 'here says they have none: treat no area as cleared'
+        ? 'unknown: they have no account in the app and have never been asked to record an injury, so nothing '
+          + 'here says they have none. Treat no area as cleared'
         : sharedAreas(client.injuries ?? [])
-          || 'none recorded against their account — nobody has stated they are injury-free, so avoid loading a '
+          || 'none recorded against their account. Nobody has stated they are injury-free, so avoid loading a '
             + 'joint hard without checking first',
       reason,
     };
-    const answer = await askAboutClient([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Address them as {name} — write that literally, it is filled in afterwards. Write only the message, no preamble.' }], ctx);
+    const answer = await askAboutClient([{ role: 'user', content: 'Draft a short, warm, personalised check-in message (2-3 sentences) I can send to this client as their coach. Reason for reaching out: ' + reason + '. Encourage them, reference their goal, and invite a reply. Address them as {name}, written literally; it is filled in afterwards. Write only the message, no preamble.' }], ctx);
     setDraftBusy(false);
     setDraftText(answer.ok
       ? fillName(answer.reply, client.name)
-      : ('Hey ' + client.name.split(' ')[0] + ' — checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
+      : ('Hey ' + client.name.split(' ')[0] + ', checking in on how your week is going. You are working toward ' + client.goal.toLowerCase() + ', and I am here to help. What can I do to make this week easier?'));
   };
   const sendDraft = async () => {
     const client = draftClient; const body = draftText.trim();
@@ -2052,7 +2052,7 @@ export default function TrainerClients() {
       if (!report.retry.length) { setMsgBody(''); setMsgOpen(false); }
       Alert.alert(report.title, report.body);
     } catch {
-      Alert.alert('Not Sent', 'The message could not be written to your clients’ threads. Nothing was sent — check your connection and try again.');
+      Alert.alert('Not Sent', 'The message could not be written to your clients’ threads. Nothing was sent. Check your connection and try again.');
     } finally { setMsgBusy(false); }
   };
 
@@ -2154,7 +2154,7 @@ export default function TrainerClients() {
         // It cannot say which, so this does not pretend to: the sentence names
         // both and says the roster is unchanged for them, which is the part the
         // coach acts on.
-        why: ok ? null : 'nothing was removed — either the server refused it or there was no coaching relationship left to end. They are still on your roster.',
+        why: ok ? null : 'nothing was removed. Either the server refused it or there was no coaching relationship left to end. They are still on your roster.',
       });
     }
     setEndBusy(false);
@@ -2231,11 +2231,11 @@ export default function TrainerClients() {
       // The same three answers as `mealsLoggedCount` below and as the nudge
       // draft above: no account, an account with no figure, or the figure.
       adherence: !clientIsQueryable(client.id, client.handAdded)
-        ? 'unknown — they have no account in the app, so there is no check-in for them to have made and no '
+        ? 'unknown: they have no account in the app, so there is no check-in for them to have made and no '
           + 'adherence figure exists; do not suggest they have missed any'
         : client.adherence != null
           ? client.adherence + '%'
-          : 'unknown — no adherence figure has come back for them (they may have no check-in on record, or that '
+          : 'unknown: no adherence figure has come back for them (they may have no check-in on record, or that '
             + 'read was short), so state none and do not conclude they have been skipping',
       lastActive: client.lastActive,
       coachedMode: client.mode,
@@ -2244,10 +2244,10 @@ export default function TrainerClients() {
       // prompt below ends "do not suggest anything that loads a flagged injury
       // area", and an empty list is not a flag that nothing is wrong.
       injuryAreas: !clientIsQueryable(client.id, client.handAdded)
-        ? 'unknown — they have no account in the app and have never been asked to record an injury, so nothing '
+        ? 'unknown: they have no account in the app and have never been asked to record an injury, so nothing '
           + 'here says they have none: treat no area as cleared'
         : sharedAreas(client.injuries ?? [])
-          || 'none recorded against their account — nobody has stated they are injury-free, so avoid loading a '
+          || 'none recorded against their account. Nobody has stated they are injury-free, so avoid loading a '
             + 'joint hard without checking first',
       // A COUNT, not the names. "Logged 9 meals this week" is the adherence
       // fact a summary needs; "chicken shawarma, protein shake" is a diary.
@@ -2262,9 +2262,9 @@ export default function TrainerClients() {
       // client's `food_logs` read is refused by RLS with no error. See
       // `selAskable`.
       mealsLoggedCount: !clientIsQueryable(client.id, client.handAdded)
-        ? 'they have no account in the app, so there is no food log at all — do not comment on their food logging'
+        ? 'they have no account in the app, so there is no food log at all, so do not comment on their food logging'
         : mealsThisWeek == null
-          ? 'their food log could not be read — do not comment on their food logging'
+          ? 'their food log could not be read, so do not comment on their food logging'
           : `${mealsThisWeek} in the last 7 days`,
       // One literal used to serve two different states: this client is on
       // nothing, and the assigned programs did not come back. `noProgram`
@@ -2273,15 +2273,15 @@ export default function TrainerClients() {
       // this prompt asks is what to focus on next week, which a model told the
       // client is on nothing answers by writing them a program.
       programTitle: !isWhole(programStatus)
-        ? 'unknown — their assigned programs could not be read, so do not say they are on nothing and do not '
+        ? 'unknown: their assigned programs could not be read, so do not say they are on nothing and do not '
           + 'write them a new program on the strength of it'
         : getProgram(client.id)?.title ?? 'no coach-assigned program',
     };
-    const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only — you have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
+    const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only. You have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
     setAiBusy(false);
     setAiSummary(answer.ok
       ? fillName(answer.reply, client.name)
-      : 'Could not generate a summary right now — the AI backend may be unavailable.');
+      : 'Could not generate a summary right now. The AI backend may be unavailable.');
   };
 
   // Both of these read the *signed-in user's* own rows. They stay mounted (the
@@ -2532,7 +2532,7 @@ export default function TrainerClients() {
           {rosterStatus === 'error' || rosterStatus === 'partial' || rosterStatus === 'loading' ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {rosterStatus === 'error'
-                ? 'Your roster could not be read, so these are not zero — the clients below are the ones that did come back.'
+                ? 'Your roster could not be read, so these are not zero. The clients below are the ones that did come back.'
                 : rosterStatus === 'partial'
                   ? 'Only part of your roster came back, so it cannot be counted or averaged.'
                   : 'Reading your roster…'}
@@ -2541,7 +2541,7 @@ export default function TrainerClients() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {bookAdherence != null
                 ? `Adherence is the mean of the latest check-in from ${num(adherenceValues.length)} of your ${num(rosterCount)} ${rosterCount === 1 ? 'client' : 'clients'}.`
-                : 'No adherence yet — nobody on your book has submitted a check-in.'}
+                : 'No adherence yet. Nobody on your book has submitted a check-in.'}
             </Text>
           ) : null}
         </View>
@@ -2710,7 +2710,7 @@ export default function TrainerClients() {
             <Text style={{ ...ty.body, color: t.ink2 }}>Add or invite your first client to start a coaching queue.</Text>
           ) : rosterStatus === 'ready' && drift ? (
             <Text style={{ ...ty.body, color: t.ink2 }}>
-              {active === 0 ? 'No clients yet — add or invite your first below.' : driftNote()}
+              {active === 0 ? 'No clients yet. Add or invite your first below.' : driftNote()}
             </Text>
           ) : null}
         </Section>
@@ -2735,7 +2735,7 @@ export default function TrainerClients() {
               Schedule. */}
           <SectionHead title="Today" note="Add a Session" onPress={() => router.push('/(trainer)/calendar')} />
           {sessionsUnread ? (
-            <Text style={{ ...ty.caption, color: t.ink3, paddingBottom: layout.section }}>Today’s schedule could not be read — this is not an empty day. Open Schedule to try again.</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, paddingBottom: layout.section }}>Today’s schedule could not be read. This is not an empty day. Open Schedule to try again.</Text>
           ) : todaySessions === null ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm }}>
               <ActivityIndicator size="small" color={t.ink3} />
@@ -2927,7 +2927,7 @@ export default function TrainerClients() {
           {bands && bands.total > 0 && bands.unknown === bands.total ? (
             <Notice tone={t.s5} kicker="Nothing Recorded"
               title={`No record for ${bands.total === 1 ? 'this client' : 'any of your ' + bands.total + ' clients'}`}
-              note={`No check-ins, logged workouts, sessions or visits in the last ${DEFAULT_WINDOWS.historyDays} days. That is not the same as everyone being fine — it means there is nothing here to judge them on.`} />
+              note={`No check-ins, logged workouts, sessions or visits in the last ${DEFAULT_WINDOWS.historyDays} days. That is not the same as everyone being fine. It means there is nothing here to judge them on.`} />
           ) : null}
 
           {/* ── find one person ──────────────────────────────────────────────
@@ -3040,8 +3040,8 @@ export default function TrainerClients() {
           {shownRoster.length === 0 && !rosterQLine ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {rosterUnread && roster.length === 0
-                ? 'Your roster could not be read, so this is not "no clients" — pull down to try again.'
-                : roster.length === 0 ? 'No clients yet. Add or invite your first — they connect once they accept in the app.' : 'No clients in this segment.'}
+                ? 'Your roster could not be read, so this is not "no clients". Pull down to try again.'
+                : roster.length === 0 ? 'No clients yet. Add or invite your first; they connect once they accept in the app.' : 'No clients in this segment.'}
             </Text>
           ) : null}
 
@@ -3051,7 +3051,7 @@ export default function TrainerClients() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.md }}>
               <ActivityIndicator size="small" color={t.ink3} />
               <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-                Reading check-ins, logs, sessions and visits — the order below is not by drift yet.
+                Reading check-ins, logs, sessions and visits. The order below is not by drift yet.
               </Text>
             </View>
           ) : null}
@@ -3252,7 +3252,7 @@ export default function TrainerClients() {
             <SectionHead title="Pending Invites" />
             <Flag t={t} tone={t.warn}
               text={'Your open invitations could not be read, so none are listed. That is not a statement that '
-                + 'nobody is waiting on you — anyone you have already invited still has a live invitation, and '
+                + 'nobody is waiting on you. Anyone you have already invited still has a live invitation, and '
                 + 'inviting them again will be refused.'} />
           </Section>
         </>) : sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
@@ -3589,13 +3589,13 @@ export default function TrainerClients() {
                 <SheetHead t={t} title={`Progress Photos · Sent by ${sel.name.split(' ')[0]}`} />
                 {sharedErr ? (
                   <KitFlag tone={t.warn}>
-                    {sharedErr} That is not the same as them having sent none — the list could not be read, so this sheet cannot say either way.
+                    {sharedErr} That is not the same as them having sent none. The list could not be read, so this sheet cannot say either way.
                   </KitFlag>
                 ) : shared === null ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>Loading what they have sent you…</Text>
                 ) : shared.length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>
-                    {sel.name.split(' ')[0]} has not sent you any progress photos. You see one only when they send that photo — there is nothing to turn on here, and being their coach does not show you the rest.
+                    {sel.name.split(' ')[0]} has not sent you any progress photos. You see one only when they send that photo. There is nothing to turn on here, and being their coach does not show you the rest.
                   </Text>
                 ) : (
                   <View>
@@ -3616,7 +3616,7 @@ export default function TrainerClients() {
                       ))}
                     </ScrollView>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                      {shared.length === 1 ? 'One photo' : shared.length + ' photos'}, sent by {sel.name.split(' ')[0]} — and only these. They can take any of them back whenever they like; once they do, it stops opening here within {Math.round(SHARED_URL_TTL_S / 60)} minutes.
+                      {shared.length === 1 ? 'One photo' : shared.length + ' photos'}, sent by {sel.name.split(' ')[0]}, and only these. They can take any of them back whenever they like; once they do, it stops opening here within {Math.round(SHARED_URL_TTL_S / 60)} minutes.
                     </Text>
                     {(missingSharedFiles(shared) ?? 0) > 0 ? (
                       <KitFlag tone={t.warn} style={{ marginTop: 4 }}>
@@ -3639,7 +3639,7 @@ export default function TrainerClients() {
                   ))}
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  <TextInput value={tagDraft} onChangeText={setTagDraft} placeholder="Add a tag — e.g. comp prep" placeholderTextColor={t.ink3} accessibilityLabel="Add a tag" autoCapitalize="none" returnKeyType="done" onSubmitEditing={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} style={{ ...field(t), flex: 1 }} />
+                  <TextInput value={tagDraft} onChangeText={setTagDraft} placeholder="Add a tag, e.g. comp prep" placeholderTextColor={t.ink3} accessibilityLabel="Add a tag" autoCapitalize="none" returnKeyType="done" onSubmitEditing={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} style={{ ...field(t), flex: 1 }} />
                   <Cta label="Add" onPress={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} />
                 </View>
                 {allTags.filter((tg) => !tagsFor(sel.id).includes(tg)).length > 0 ? (
@@ -3710,7 +3710,7 @@ export default function TrainerClients() {
                   {nextBooked === null
                     ? 'Your diary could not be read, so this cannot say when you next see them. That is the read, not an empty book.'
                     : nextBookedLine(sel.id)
-                      ?? `Nothing booked with you in the next ${BOOKED_AHEAD_DAYS} days — which is not the same as nothing booked with anybody.`}
+                      ?? `Nothing booked with you in the next ${BOOKED_AHEAD_DAYS} days, which is not the same as nothing booked with anybody.`}
                 </Text>
               </View>
 
@@ -3769,7 +3769,7 @@ export default function TrainerClients() {
                 {timelineStatus === 'partial' ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                     You have more notes and feedback on record than one request returns, so this is
-                    not the whole of their history — anything older than the newest thousand is not
+                    not the whole of their history. Anything older than the newest thousand is not
                     in it, and an empty stretch below is that limit rather than a quiet period.
                   </Text>
                 ) : null}
@@ -3783,7 +3783,7 @@ export default function TrainerClients() {
                   // Only a whole read may say there is none. Under 'partial'
                   // the line above has already said what the emptiness is.
                   isWhole(timelineStatus)
-                    ? <Text style={{ ...ty.label, color: t.ink3 }}>No history yet — notes, feedback and check-ins appear here.</Text>
+                    ? <Text style={{ ...ty.label, color: t.ink3 }}>No history yet. Notes, feedback and check-ins appear here.</Text>
                     : null
                 ) : timeline.slice(0, 8).map((ev) => (
                   <View key={ev.id} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
@@ -3804,7 +3804,7 @@ export default function TrainerClients() {
 
               <View style={{ marginBottom: sp.xl }}>
                 <SheetHead t={t} title="Meal Plan Targets" />
-                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Shape {sel.name.split(' ')[0]}'s daily calories, protein, carbs & fat — applies to their Meals tab live.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>Shape {sel.name.split(' ')[0]}'s daily calories, protein, carbs & fat. Applies to their Meals tab live.</Text>
 
                 {/* The deltas below are safe to set from here: they are numbers
                     against the client's own computed targets and depend on
@@ -3839,7 +3839,7 @@ export default function TrainerClients() {
                 {nutriStatus === 'error' ? (
                   <KitFlag tone={t.warn}>
                     {sel.name.split(' ')[0]}&rsquo;s current adjustment could not be read, so it is not shown
-                    and cannot be changed here — anything set now would overwrite figures we
+                    and cannot be changed here: anything set now would overwrite figures we
                     cannot see. Their Meals tab is unaffected. Try again once you are connected.
                   </KitFlag>
                 ) : nutriStatus === 'loading' ? (
@@ -3884,7 +3884,7 @@ export default function TrainerClients() {
                 <View style={{ marginBottom: sp.xl }}>
                   <SheetHead t={t} title="Recent Meals Logged" />
                   <Text style={{ ...ty.label, color: t.ink3 }}>
-                    You added {sel.name.split(' ')[0]} to your book by hand, so there is no food log — meals are logged in the app and they do not have it. Invite them and this fills in from the day they accept.
+                    You added {sel.name.split(' ')[0]} to your book by hand, so there is no food log. Meals are logged in the app and they do not have it. Invite them and this fills in from the day they accept.
                   </Text>
                 </View>
               ) : clientMeals === null ? (
@@ -3916,7 +3916,7 @@ export default function TrainerClients() {
                     would either write it again or conclude they never did. */}
                 {fbStatus === 'error' ? (
                   <KitFlag tone={t.crit} style={{ marginBottom: sp.sm }}>
-                    Your feedback for {sel.name.split(' ')[0]} could not be read — this is not "no feedback".
+                    Your feedback for {sel.name.split(' ')[0]} could not be read. This is not "no feedback".
                     Anything you send now still goes to them.
                   </KitFlag>
                 ) : fbStatus === 'loading' ? (
@@ -3982,7 +3982,7 @@ export default function TrainerClients() {
                     it again, or worse, deciding it did not happen. */}
                 {notesStatus === 'error' ? (
                   <KitFlag tone={t.crit} style={{ marginBottom: sp.sm }}>
-                    Your notes could not be read — this is not "no notes". Anything you save now
+                    Your notes could not be read. This is not "no notes". Anything you save now
                     will still be stored, but check back once you have a connection.
                   </KitFlag>
                 ) : notesStatus === 'loading' ? (
@@ -4131,7 +4131,7 @@ export default function TrainerClients() {
               void (async () => {
                 const ok = await removeClient(e.id, reason, note);
                 if (!ok) {
-                  Alert.alert('Not Removed', `${e.name.split(' ')[0]} is still on your roster. Either the server refused the change or there was no coaching relationship left to end — nothing was written either way, and anything you recorded about why they left was not saved.`);
+                  Alert.alert('Not Removed', `${e.name.split(' ')[0]} is still on your roster. Either the server refused the change or there was no coaching relationship left to end. Nothing was written either way, and anything you recorded about why they left was not saved.`);
                 }
               })();
             }}
@@ -4236,7 +4236,7 @@ export default function TrainerClients() {
                     // spelled exactly the same way, and nothing tells either side
                     // when it does not.
                     const codeLine = myCode
-                      ? '\n\nYour coaching code is ' + myCode + '. That works whoever they are and whatever address they sign up with — send it to them.'
+                      ? '\n\nYour coaching code is ' + myCode + '. That works whoever they are and whatever address they sign up with. Send it to them.'
                       : '';
                     const buttons: any[] = [{ text: invited || !wanted ? 'Great' : 'OK' }];
                     if (myCode) {
@@ -4251,7 +4251,7 @@ export default function TrainerClients() {
                       (!wanted
                         ? nm + ' is now on your roster.'
                         : invited
-                          ? nm + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address.'
+                          ? nm + ' is on your roster. Repple does not send email; ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address.'
                           : nm + ' is on your roster, but the invite for ' + em + ' was NOT recorded, so they will not link to you when they sign in.') + codeLine,
                       buttons);
                   }} />
@@ -4297,7 +4297,7 @@ export default function TrainerClients() {
                     <Text style={{ ...ty.caption, color: t.ink3 }}>
                       {r.outcome === 'failed'
                         ? 'Not saved. They are not on your roster.'
-                        : 'On your roster, but no invite was recorded — send them your coaching code.'}
+                        : 'On your roster, but no invite was recorded. Send them your coaching code.'}
                     </Text>
                   </View>
                 ))}
@@ -4400,7 +4400,7 @@ export default function TrainerClients() {
 
                   The rule this file keeps relearning: the sentence describes what
                   the write does TODAY, and it moves when the write moves. */}
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard, in their notifications, and in their Notices — where it stays after today. It is not a message and does not land in anyone’s thread; for that, use Broadcast.</Text>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard, in their notifications, and in their Notices, where it stays after today. It is not a message and does not land in anyone’s thread; for that, use Broadcast.</Text>
               <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} accessibilityLabel="Your announcement" multiline style={{ ...field(t, 90), marginBottom: sp.md }} />
 
               {/* The push is its own decision and the label says what it does.
@@ -4441,12 +4441,12 @@ export default function TrainerClients() {
                   try { res = await addAnnouncement(bcText, { push: bcPush }); } finally { setBcBusy(false); }
                   if (!res.ok || !res.delivery) {
                     // The sheet stays open with the text in it: they wrote it once.
-                    Alert.alert('Not Posted', 'That could not be posted, so your clients have not seen it. Your words are still here — try again in a moment.');
+                    Alert.alert('Not Posted', 'That could not be posted, so your clients have not seen it. Your words are still here. Try again in a moment.');
                     return;
                   }
                   const summary = deliverySummary(res.delivery);
                   setBcText(''); setBcPush(false); setBcOpen(false);
-                  Alert.alert('Posted', `${summary}\n\nTo write into people’s threads instead — everyone, or one tag — use Broadcast.`,
+                  Alert.alert('Posted', `${summary}\n\nTo write into people’s threads instead (everyone, or one tag), use Broadcast.`,
                     [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
                 }} />
               </View>
@@ -4546,7 +4546,7 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     They enter this in the Repple app under Find a trainer, at the top. You still approve them before they join your roster.
                     Tapping the code sends a message with the link in it; {HAS_NATIVE_CLIPBOARD ? 'Copy Link gives you' : 'above it is'} the bare address, for a bio, a caption,
-                    or the destination of an ad — which is the one that lets what you spend be matched to who it brought.
+                    or the destination of an ad, which is the one that lets what you spend be matched to who it brought.
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: sp.md }}>
                     {/* "Is the code working?" is the first thing anybody asks
@@ -4558,7 +4558,7 @@ export default function TrainerClients() {
                     <Ghost label="New Code" onPress={() => {
                       Alert.alert(
                         'Issue a New Code?',
-                        'Your current code stops working straight away. Anyone you have already given it to will not be able to use it, and clients who already joined are unaffected.\n\nTo run a second code alongside this one — for a flyer or a bio link — make a named code below instead.',
+                        'Your current code stops working straight away. Anyone you have already given it to will not be able to use it, and clients who already joined are unaffected.\n\nTo run a second code alongside this one, for a flyer or a bio link, make a named code below instead.',
                         [
                           { text: 'Keep It' },
                           { text: 'New Code', style: 'destructive', onPress: async () => {
@@ -4602,7 +4602,7 @@ export default function TrainerClients() {
                 <Text style={{ ...ty.label, color: t.ink3 }}>Reading your codes…</Text>
               ) : namedCodes.length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  None yet. A named code tells you which of the things you did brought somebody in — one for the gym flyer, one for your Instagram bio, both live at once.
+                  None yet. A named code tells you which of the things you did brought somebody in: one for the gym flyer, one for your Instagram bio, both live at once.
                 </Text>
               ) : null}
 
@@ -4615,7 +4615,7 @@ export default function TrainerClients() {
                       // Kept on screen with its counts. A campaign that is over
                       // still tells the coach what it did, and deleting the row
                       // would make it look as though it never ran.
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>Turned off — it takes nobody new.</Text>
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>Turned off. It takes nobody new.</Text>
                     ) : null}
                     {/* No clipboard in this binary, so the address goes on
                         screen where the button would have put it. The sentence
@@ -4672,7 +4672,7 @@ export default function TrainerClients() {
                       <TextInput
                         value={newCodeLabel}
                         onChangeText={setNewCodeLabel}
-                        placeholder="Name it — “Gym flyer”, “Instagram bio”"
+                        placeholder="Name it, e.g. “Gym flyer”, “Instagram bio”"
                         accessibilityLabel="What to call this join code"
                         placeholderTextColor={t.ink3}
                         maxLength={MAX_LABEL}
@@ -4694,7 +4694,7 @@ export default function TrainerClients() {
                         await loadCodes();
                         Alert.alert(
                           'Code Made',
-                          `${r.label}: ${r.code}. Put this one wherever that campaign lives — anyone who joins with it is counted against it.`,
+                          `${r.label}: ${r.code}. Put this one wherever that campaign lives. Anyone who joins with it is counted against it.`,
                           [{ text: 'Share It', onPress: () => { Share.share({ message: inviteMessage(r.code) }).catch(() => {}); } }, { text: 'Done', style: 'cancel' }],
                         );
                       }} />
@@ -4897,7 +4897,7 @@ export default function TrainerClients() {
 
               {msgFailed.length > 0 ? (
                 <Notice tone={t.warn} kicker="Not Delivered" title={`${msgFailed.length} Did Not Get the Last One`}
-                  note={`${listNames(msgFailed.map(nameOf))} — nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
+                  note={`${listNames(msgFailed.map(nameOf))}: nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
               ) : null}
 
               <TextInput value={msgBody} onChangeText={setMsgBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline accessibilityLabel="Your message"
@@ -4948,7 +4948,7 @@ export default function TrainerClients() {
               const on = pickedRoster.filter((c) => !!getProgram(c.id));
               return on.length === 0
                 ? 'None of them are on a coach-assigned program, so nothing here is replaced.'
-                : `${on.length} of them are on a program now — ${listNames(on.slice(0, 4).map((c) => c.name.split(' ')[0]))}${on.length > 4 ? ` and ${on.length - 4} more` : ''}. Whichever template you pick replaces what they are training.`;
+                : `${on.length} of them are on a program now: ${listNames(on.slice(0, 4).map((c) => c.name.split(' ')[0]))}${on.length > 4 ? ` and ${on.length - 4} more` : ''}. Whichever template you pick replaces what they are training.`;
             })()}
           </Text>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -5024,7 +5024,7 @@ function CoachSetupRow() {
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
               {next
-                ? `Next: ${next.title.toLowerCase()} — until it is done, ${next.breaks}.`
+                ? `Next: ${next.title.toLowerCase()}. Until it is done, ${next.breaks}.`
                 : 'Some of this could not be checked just now, so it is worth a look before you rely on it.'}
             </Text>
           </View>

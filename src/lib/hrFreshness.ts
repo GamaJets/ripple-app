@@ -111,6 +111,6 @@ export function hrAgeLabel(ageMs: number | null): string | null {
  */
 export function staleHrNote(ageMs: number | null): string {
   const age = hrAgeLabel(ageMs);
-  const when = age ? ` — last reading ${age}` : '';
+  const when = age ? ` (last reading ${age})` : '';
   return `That bpm is the newest your watch has written${when}, not a live reading. An Apple Watch only streams heart rate while a workout is running ON THE WATCH, so start one there and this will track you.`;
 }

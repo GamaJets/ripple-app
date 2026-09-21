@@ -212,7 +212,7 @@ const silent = combineChannelSpend([
   run({ channel: 'google', currency: null, codes: [] }),
 ]);
 eq(refusal(silent), 'no-currency', 'every channel read, none with any ads, is not a figure of nought');
-ok(/no ad spend is unknown, not free/.test(combineRefusalNote(silent)),
+ok(/no ad spend is unknown, not free/i.test(combineRefusalNote(silent)),
   'and says the sentence the rest of this feature turns on');
 
 ok(/smaller number/.test(NO_TOTAL_NOTE), 'the note above the split figures says why there is no total');

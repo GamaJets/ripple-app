@@ -80,18 +80,18 @@ const MOBILITY = [
  * quietly dropped or split down the middle.
  */
 function attribution(n: MergedNight): string {
-  if (n.outcome === 'unknown') return 'We couldn’t read your devices for this night, so it is unknown — that is not the same as no sleep.';
+  if (n.outcome === 'unknown') return 'We couldn’t read your devices for this night, so it is unknown. That is not the same as no sleep.';
   if (n.outcome === 'no-record') return 'No device recorded this night.';
   const src = n.source;
   if (!src) return 'No device recorded this night.';
-  const head = `from your ${src.sourceName}${src.basis === 'in-bed' ? ' — time in bed, which runs longer than time asleep' : ''}`;
+  const head = `from your ${src.sourceName}${src.basis === 'in-bed' ? ' (time in bed, which runs longer than time asleep)' : ''}`;
   // A night Repple kept from an earlier read. The figure is real and the device
   // named it, but that device has not answered today — so this says so rather
   // than letting a stored reading pass for a live one. See part 153.
-  if (n.kept) return `${head}, kept from an earlier read — your devices didn’t answer for this night today.`;
+  if (n.kept) return `${head}, kept from an earlier read. Your devices didn’t answer for this night today.`;
   const other = n.others[0];
   if (n.agreement === 'conflicting' && other) {
-    return `${head}. Your ${other.sourceName} has the same night at ${formatSleepHours(other.minutesAsleep)} — ${n.spreadMin} min apart. Both are shown; neither has been averaged into a figure no device reported.`;
+    return `${head}. Your ${other.sourceName} has the same night at ${formatSleepHours(other.minutesAsleep)}, ${n.spreadMin} min apart. Both are shown; neither has been averaged into a figure no device reported.`;
   }
   if (n.agreement === 'corroborated' && other) {
     return `${head}, and your ${other.sourceName} agrees to within ${n.spreadMin} min.`;
@@ -552,8 +552,8 @@ export default function Recovery() {
       // the four reasons it is. Only the last one is a thing the client can act
       // on, and it used to be shown for all four.
       : hr.read === 'loading' ? 'Reading today’s heart rate…'
-      : hr.read === 'error' ? 'We couldn’t read today’s heart rate — this is our end, not your watch.'
-      : hr.read === 'ready' ? 'Your Apple Watch is connected — no heart rate recorded today yet.'
+      : hr.read === 'error' ? 'We couldn’t read today’s heart rate. This is our end, not your watch.'
+      : hr.read === 'ready' ? 'Your Apple Watch is connected. No heart rate recorded today yet.'
       : 'Connect a device in Watch & Devices to see your zones'
     } />
   </Section>
@@ -564,7 +564,7 @@ export default function Recovery() {
    <SectionHead
     title="Sleep"
     note={sleepWhole && sleep.length ? `avg ${avgSleep} h logged`
-      : sleepStatus === 'error' ? 'not confirmed — showing this device’s copy'
+      : sleepStatus === 'error' ? 'not confirmed, showing this device’s copy'
       : sleepStatus === 'partial' ? 'more nights than are shown here'
       : undefined} />
 
@@ -617,7 +617,7 @@ export default function Recovery() {
         with nothing on the screen to doubt it. */}
     {sleepReads.status === 'error' ? (
      <Flag tone={t.warn} style={{ marginTop: sp.md }}>
-      {BRAND.label} couldn’t reach your devices just now, so the nights above are unknown rather than empty — this is our end, not your watch. Pull down to try again.
+      {BRAND.label} couldn’t reach your devices just now, so the nights above are unknown rather than empty. This is our end, not your watch. Pull down to try again.
      </Flag>
     ) : null}
 
@@ -644,7 +644,7 @@ export default function Recovery() {
     {appleSilent ? (
      <View style={{ marginTop: sp.md }}>
       <Text style={{ ...ty.caption, color: t.ink3 }}>
-       Apple Health was readable and holds no sleep for these nights. If you have been wearing your watch, Sleep sharing is probably switched off for {BRAND.label} — Health ▸ Sharing ▸ Apps ▸ {BRAND.label}.
+       Apple Health was readable and holds no sleep for these nights. If you have been wearing your watch, Sleep sharing is probably switched off for {BRAND.label}: Health ▸ Sharing ▸ Apps ▸ {BRAND.label}.
       </Text>
       <View style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
        {/* Title Case, like every other button on this screen — "Fix in Watch &
@@ -691,7 +691,7 @@ export default function Recovery() {
      }
      setHrs(''); setQ(0);
      if (out === 'unsent') {
-      Alert.alert('Saved on This Phone', 'That night has not reached your account yet — there is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
+      Alert.alert('Saved on This Phone', 'That night has not reached your account yet. There is no connection right now. Nothing is lost: it is on this phone and goes up on its own the next time you have signal.');
      }
     })();
    }} />
@@ -704,10 +704,10 @@ export default function Recovery() {
    {sleep.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
      {sleepStatus === 'error'
-      ? 'We couldn’t read your sleep log just now, so this is blank rather than empty — any nights you have already logged are not shown here.'
+      ? 'We couldn’t read your sleep log just now, so this is blank rather than empty. Any nights you have already logged are not shown here.'
       : sleepStatus === 'loading'
       ? 'Reading your sleep log…'
-      : 'No nights logged yet — log one above and your average appears here.'}
+      : 'No nights logged yet. Log one above and your average appears here.'}
     </Text>
    ) : null}
    {/* A night logged with no signal. It is on screen, it is on this phone, and
@@ -715,7 +715,7 @@ export default function Recovery() {
        why it has not reached their coach's view of the week. */}
    {unsentNights > 0 ? (
     <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
-     {unsentNights === 1 ? 'One night is saved on this phone only' : `${unsentNights} nights are saved on this phone only`} — they’ll be sent the next time you’re online. Nothing to re-enter.
+     {unsentNights === 1 ? 'One night is saved on this phone only' : `${unsentNights} nights are saved on this phone only`}. They’ll be sent the next time you’re online. Nothing to re-enter.
     </Text>
    ) : null}
    {sleep.slice(0, 4).map((sx) => (
@@ -759,7 +759,7 @@ export default function Recovery() {
          here rather than in recoveryActs.ts, because the same names ARE
          buttons everywhere else and are correctly capitalised there. */}
      Nothing logged yet. Sauna, steam, cold plunge, contrast therapy, massage and breathwork all belong
-     here — duration and heart rate are kept; there is no calorie figure, because heating up is not work.
+     here. Duration and heart rate are kept; there is no calorie figure, because heating up is not work.
     </Text>
    ) : (
     recoverySessions.map((l, i) => (

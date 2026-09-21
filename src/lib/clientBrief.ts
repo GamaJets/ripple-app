@@ -84,20 +84,20 @@ export function goalsLine(status: LoadStatus, board: GoalBoard, who: string, now
     return `Their goals could not be read. That is not the same as ${who} having set none.`;
   }
   if (board.state === 'none') {
-    return `${who} hasn't set a goal yet — the read came back and it was empty, which makes it worth raising.`;
+    return `${who} hasn't set a goal yet. The read came back and it was empty, which makes it worth raising.`;
   }
   if (board.state === 'reached') {
     // A count is safe here even under 'partial': "at least this many reached"
     // is the same good news either way, and the sentence says so.
     const n = board.achieved.length;
     return status === 'partial'
-      ? `Everything that came back has been reached — and their goals came back at the row limit, so there may be more.`
+      ? `Everything that came back has been reached, but their goals came back at the row limit, so there may be more.`
       : `All ${n} goal${s(n)} reached. Nothing outstanding, which is usually the moment to set the next one.`;
   }
   const open = board.open.length;
   const nearest = board.open[0];
   const head = status === 'partial'
-    ? `At least ${open} open — their goals came back at the row limit, so this is not all of them.`
+    ? `At least ${open} open. Their goals came back at the row limit, so this is not all of them.`
     : `${open} open.`;
   return `${head} Nearest: ${goalLabel(nearest)}${nearestBy(nearest, nowMs)}.`;
 }
@@ -115,7 +115,7 @@ function nearestBy(g: GoalTarget, nowMs: number): string {
   // right for `sharedAt` below, which is a real instant. See src/lib/localDate.ts.
   const when = dayLabel(g.targetDateISO);
   if (when === '—') return '';
-  return isOverdue(g, nowMs) ? ` — target date passed (${when})` : ` by ${when}`;
+  return isOverdue(g, nowMs) ? `, target date passed (${when})` : ` by ${when}`;
 }
 
 /**
@@ -136,7 +136,7 @@ export function weekLine(status: LoadStatus, week: CoachWeek, who: string): stri
   }
   const n = week.ahead.length;
   const head = status === 'partial'
-    ? `At least ${n} day${s(n)} marked from today on — the read came back at the row limit.`
+    ? `At least ${n} day${s(n)} marked from today on. The read came back at the row limit.`
     : n === 0
       ? 'Nothing marked from today on; what they marked is already behind them.'
       : `${n} day${s(n)} marked from today on.`;
@@ -158,7 +158,7 @@ export function weekLine(status: LoadStatus, week: CoachWeek, who: string): stri
  */
 export function photosLine(inbox: Inbox | null, failed: boolean, who: string): string {
   if (failed) {
-    return `Could not read what they have sent you — which is not the same as ${who} having sent nothing.`;
+    return `Could not read what they have sent you, which is not the same as ${who} having sent nothing.`;
   }
   const why = emptyReason(inbox);
   if (why === 'unknown') return 'Reading what they have sent you…';
@@ -197,7 +197,7 @@ export function listLine(
   const ticks = seen == null
     ? 'Their ticks could not be read, so there is nothing here about how the month has gone.'
     : seen.seenDays === 0
-      ? `Nothing ticked at all in the last ${seen.windowDays} days — a miss and a phone in a drawer look the same from here.`
+      ? `Nothing ticked at all in the last ${seen.windowDays} days. A miss and a phone in a drawer look the same from here.`
       : `They ticked something on ${seen.seenDays} of the last ${seen.windowDays} days.`;
   return `${lines} ${ticks}`;
 }
@@ -347,7 +347,7 @@ export function attention(i: AttentionInput): Attention {
   if (i.driftFailed) missed.push('their training record');
 
   const blind = missed.length
-    ? `This list does not account for ${list(missed)} — ${missed.length === 1 ? 'it' : 'they'} could not be read, so it is not a clear one.`
+    ? `This list does not account for ${list(missed)}: ${missed.length === 1 ? 'it' : 'they'} could not be read, so it is not a clear one.`
     : null;
   return { items, blind };
 }
@@ -370,7 +370,7 @@ function list(parts: string[]): string {
  * a client with no account has no rows to refuse.
  */
 export function unaskedNote(usingServer: boolean, queryable: boolean, who: string): string | null {
-  if (!usingServer) return 'Not read — this build is not talking to a server.';
+  if (!usingServer) return 'Not read. This build is not talking to a server.';
   if (!queryable) return `Nothing of ${who}'s can be read until they join Repple.`;
   return null;
 }

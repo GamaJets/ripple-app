@@ -239,7 +239,7 @@ export default function Injuries() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
         <PageHead title="Injuries & Limitations" />
-        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg, textAlign: 'center' }}>Your coach and your plan train around these — flagging and swapping risky moves.</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg, textAlign: 'center' }}>Your coach and your plan train around these, flagging and swapping risky moves.</Text>
 
         <Notice tone={t.s3} kicker="Guidance Only" title="Not Medical Advice"
           note="For pain, a new injury, or a diagnosis, see a doctor or physio before training." />
@@ -255,7 +255,7 @@ export default function Injuries() {
             SUGGESTIONS they confirm one at a time — see app/(client)/injury-doc
             for why it is never allowed to write on its own. */}
         <ListRow icon="camera" title="Read It Off a Document"
-          note="Physio report, scan or doctor's note. You confirm what it finds — nothing is added on its own."
+          note="Physio report, scan or doctor's note. You confirm what it finds. Nothing is added on its own."
           onPress={() => router.push('/(client)/injury-doc')} />
 
         {/* An injury on this screen is in the list; whether it reached the
@@ -263,7 +263,7 @@ export default function Injuries() {
             coach ever sees it. Said here rather than left to be discovered. */}
         {c.saveFailed ? (
           <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-            Your last change has not reached the server yet, so your coach may still be seeing the old list. It keeps retrying — check back before you rely on it.
+            Your last change has not reached the server yet, so your coach may still be seeing the old list. It keeps retrying. Check back before you rely on it.
           </Flag>
         ) : null}
 
@@ -382,7 +382,7 @@ export default function Injuries() {
         ) : c.injuries.length === 0 ? (
           <View style={{ marginTop: sp.lg }}>
             <Flag tone={t.crit}>
-              Your injuries could not be read, so this is not your list — it is an empty screen standing in for one. Anything you add now will save, but check back before you rely on what is here.
+              Your injuries could not be read, so this is not your list. It is an empty screen standing in for one. Anything you add now will save, but check back before you rely on what is here.
             </Flag>
           </View>
         ) : null}

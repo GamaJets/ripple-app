@@ -77,7 +77,7 @@ export function hydrationNote(
       kind: 'countUnread',
       // The tally is this phone's and it is real; what failed is the check
       // against the account.
-      text: 'Counted on this phone only — we couldn’t check it against your account.',
+      text: 'Counted on this phone only. We couldn’t check it against your account.',
       showCount: true, showRing: false, offerGoal: false,
     };
   }
@@ -91,12 +91,12 @@ export function hydrationNote(
   if (goal == null) {
     return {
       kind: 'noGoal',
-      text: 'No daily goal set — set one on Daily habits and this fills against it.',
+      text: 'No daily goal set. Set one on Daily habits and this fills against it.',
       showCount: true, showRing: false, offerGoal: true,
     };
   }
   if (cups >= goal) {
-    return { kind: 'met', text: 'Goal met today — nice.', showCount: true, showRing: true, offerGoal: false };
+    return { kind: 'met', text: 'Goal met today. Nice.', showCount: true, showRing: true, offerGoal: false };
   }
   return {
     kind: 'toGo',

@@ -295,7 +295,7 @@ export default function Habits() {
           text: `${plain(lastNight.minutesAsleep / 60, 1)}/${goal}`,
           ratio: c.sleepGoalHours > 0 ? lastNight.minutesAsleep / 60 / c.sleepGoalHours : null,
           note: src
-            ? `Last night, from your ${src.sourceName}${src.basis === 'in-bed' ? ' — time in bed' : ''}${lastNight.kept ? ', as read earlier' : ''}`
+            ? `Last night, from your ${src.sourceName}${src.basis === 'in-bed' ? ' (time in bed)' : ''}${lastNight.kept ? ', as read earlier' : ''}`
             : 'Last night, from your device',
         };
       }
@@ -304,7 +304,7 @@ export default function Habits() {
         return { text: fig(null), note: 'Reading last night…' };
       }
       if (lastNight?.outcome === 'unknown') {
-        return { text: fig(null), note: 'Your devices could not be read for last night, so it is unknown — that is not the same as no sleep.' };
+        return { text: fig(null), note: 'Your devices could not be read for last night, so it is unknown. That is not the same as no sleep.' };
       }
       if (deviceProviderIds.length === 0) {
         return { text: fig(null), note: 'No device records your sleep. Log last night on Recovery and it shows here.' };
@@ -408,7 +408,7 @@ export default function Habits() {
           {unknown ? (
             <View style={{ marginTop: sp.md }}>
               <Notice tone={t.warn} kicker="Checklist" title="Some of today’s list is missing"
-                note="We couldn’t read your targets or your ticks just now, so anything below may be short a line — and an empty circle here doesn’t mean you skipped it." />
+                note="We couldn’t read your targets or your ticks just now, so anything below may be short a line, and an empty circle here doesn’t mean you skipped it." />
             </View>
           ) : h.status === 'partial' ? (
             <View style={{ marginTop: sp.md }}>
@@ -428,12 +428,12 @@ export default function Habits() {
           {historyUnread ? (
             <View style={{ marginTop: sp.md }}>
               <Notice tone={t.warn} kicker="Your Runs" title="We couldn’t read your history"
-                note="The runs beside each line need your record from the last few weeks, and we could not fetch it just now. Nothing has been lost — we simply cannot count them from here." />
+                note="The runs beside each line need your record from the last few weeks, and we could not fetch it just now. Nothing has been lost; we simply cannot count them from here." />
             </View>
           ) : historyPartial ? (
             <View style={{ marginTop: sp.md }}>
               <Notice tone={t.warn} kicker="Your Runs" title="Your record is longer than we can read at once"
-                note={`We read back ${h.historyDays} days and there is more on your record than fits in one go. A run that reaches the bottom of what we read is shown as "or more" — it has not been cut short, we just cannot see where it started.`} />
+                note={`We read back ${h.historyDays} days and there is more on your record than fits in one go. A run that reaches the bottom of what we read is shown as "or more". It has not been cut short; we just cannot see where it started.`} />
             </View>
           ) : null}
 
@@ -443,7 +443,7 @@ export default function Habits() {
               this stays silent there rather than contradicting it. */}
           {h.habits.length === 0 && h.status === 'ready' && h.gaps.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
-              Nothing on today’s list. Rest days and un-set targets both look like this — set a goal or ask your coach for one.
+              Nothing on today’s list. Rest days and un-set targets both look like this. Set a goal or ask your coach for one.
             </Text>
           ) : null}
 
@@ -633,10 +633,10 @@ export default function Habits() {
           {h.waterGoal == null ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
               {goalsRead
-                ? 'No daily goal yet — set one under Your daily targets below and these glasses count towards it.'
+                ? 'No daily goal yet. Set one under Your daily targets below and these glasses count towards it.'
                 : c.profileStatus === 'loading'
                   ? 'Reading your daily goal…'
-                  : 'Your daily goal could not be read, so there is nothing here to count these glasses towards. It has not been cleared — we just cannot see it right now.'}
+                  : 'Your daily goal could not be read, so there is nothing here to count these glasses towards. It has not been cleared; we just cannot see it right now.'}
             </Text>
           ) : null}
           <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
@@ -754,7 +754,7 @@ export default function Habits() {
               const typed = readNumber(sleepDraft);
               const n = typed == null ? NaN : Math.round(typed * 10) / 10;
               if (!Number.isFinite(n) || n < SLEEP_MIN || n > SLEEP_MAX) {
-                Alert.alert('Check That Number', `A sleep goal needs to be between ${SLEEP_MIN} and ${SLEEP_MAX} hours. If you meant minutes, use hours here — 450 minutes is 7.5.`);
+                Alert.alert('Check That Number', `A sleep goal needs to be between ${SLEEP_MIN} and ${SLEEP_MAX} hours. If you meant minutes, use hours here: 450 minutes is 7.5.`);
                 return;
               }
               c.setSleepGoalHours(n); setSleepDraft('');
@@ -782,7 +782,7 @@ export default function Habits() {
               const typed = readNumber(waterDraft);
               const n = typed == null ? NaN : Math.round(typed);
               if (!Number.isFinite(n) || n < WATER_MIN || n > WATER_MAX) {
-                Alert.alert('Check That Number', `A water goal needs to be between ${WATER_MIN} and ${WATER_MAX} glasses. If you meant millilitres, use glasses here — a glass is about 250 ml.`);
+                Alert.alert('Check That Number', `A water goal needs to be between ${WATER_MIN} and ${WATER_MAX} glasses. If you meant millilitres, use glasses here. A glass is about 250 ml.`);
                 return;
               }
               c.setWaterGoalGlasses(n); setWaterDraft('');

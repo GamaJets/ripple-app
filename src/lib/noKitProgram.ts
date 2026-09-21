@@ -198,7 +198,7 @@ export function noKitProgram(
 
   const coverage: NoKitCoverage = { poolSize: pool.length, missing, thin, unplaced };
   const note = [
-    'Every movement in this program needs no equipment at all — no bar, no bands, no bench.',
+    'Every movement in this program needs no equipment at all: no bar, no bands, no bench.',
     noKitCoverageNote(coverage),
   ].filter(Boolean).join(' ');
 

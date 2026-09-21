@@ -32,7 +32,7 @@ const receipt = (over: Partial<CostReceipt> = {}): CostReceipt => ({
   id: 'doc-1',
   costId: 'cost-1',
   kind: 'other',
-  title: 'Rent — 2026-09-01',
+  title: 'Rent · 2026-09-01',
   storagePath: 'tenant-1/2026-09-01-abc123-rent.pdf',
   mime: 'application/pdf',
   sizeBytes: 240_000,
@@ -78,7 +78,7 @@ ok(receiptBlocker('cost-1', 'other', pdf, '   ') != null, 'an untitled file make
 
 /* ── the default title ─────────────────────────────────────────────────────── */
 
-eq(receiptTitle({ description: 'Rent', paidOn: '2026-09-01' }), 'Rent — 2026-09-01',
+eq(receiptTitle({ description: 'Rent', paidOn: '2026-09-01' }), 'Rent · 2026-09-01',
   'the title is what somebody hunting a year later has in their head');
 eq(receiptTitle({ description: '  ', paidOn: '2026-09-01' }), 'Cost paid 2026-09-01',
   'a cost with no description still gets a title rather than an empty one');
@@ -147,7 +147,7 @@ const threw = async (p: Promise<unknown>): Promise<string | null> => {
 };
 
 const good = {
-  id: 'doc-7', cost_id: 'cost-1', kind: 'other', title: 'Rent — 2026-09-01',
+  id: 'doc-7', cost_id: 'cost-1', kind: 'other', title: 'Rent · 2026-09-01',
   storage_path: 'tenant-1/x.pdf', mime: 'application/pdf', size_bytes: 10,
   uploaded_by: 'owner-1', uploaded_at: '2026-09-02T09:00:00.000Z',
 };
@@ -157,12 +157,12 @@ void (async () => {
     const captured: any[] = [];
     const sb = fakeDb({ row: good, captured });
     const r = await recordCostReceipt(sb as any, 'tenant-1', {
-      costId: 'cost-1', kind: 'other', title: '  Rent — 2026-09-01  ',
+      costId: 'cost-1', kind: 'other', title: '  Rent · 2026-09-01  ',
       storagePath: 'tenant-1/x.pdf', mime: 'application/pdf', sizeBytes: 10, uploadedBy: 'owner-1',
     });
     eq(r.costId, 'cost-1', 'the ordinary case comes back pointing at the cost it was filed against');
     eq(captured[0].cost_id, 'cost-1', 'and the insert carried the cost id');
-    eq(captured[0].title, 'Rent — 2026-09-01', 'the title is trimmed, because the CHECK in part 185 refuses a blank one');
+    eq(captured[0].title, 'Rent · 2026-09-01', 'the title is trimmed, because the CHECK in part 185 refuses a blank one');
     eq(captured[0].tenant_id, 'tenant-1', 'and the gym, which is what the policy matches on');
   }
 

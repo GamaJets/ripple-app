@@ -62,13 +62,13 @@ export function zoneState(zoneless: number | null, total: number, status: LoadSt
  */
 export function zonelessNote(state: ZoneState, zoneless: number | null): string | null {
   if (state === 'unknown') {
-    return 'Your weekly hours could not be read in full, so Repple cannot say whether your open slots are being generated. This is not an all-clear — pull down to refresh.';
+    return 'Your weekly hours could not be read in full, so Repple cannot say whether your open slots are being generated. This is not an all-clear. Pull down to refresh.';
   }
   if (state !== 'some-zoneless' || !zoneless) return null;
   const n = zoneless === 1 ? 'One of your weekly hours has' : `${zoneless} of your weekly hours have`;
   const they = zoneless === 1 ? 'it' : 'them';
   return `${n} no timezone recorded, so Repple is not opening ${they} for booking. `
-    + `07:00 is not a moment until something says which clock it is on, and guessing would put your slot at the wrong hour — `
+    + `07:00 is not a moment until something says which clock it is on, and guessing would put your slot at the wrong hour: `
     + `a client would book it and arrive to an empty gym.\n\n`
     + `Until this is set, your clients see nothing to book at ${zoneless === 1 ? 'that time' : 'those times'}.`;
 }
@@ -108,7 +108,7 @@ export function selfHealConfirm(zoneless: number, zone: string): string {
 /** What happened, said as what it means rather than as a row count. */
 export function selfHealResult(saved: number, asked: number, zone: string): string {
   if (saved === 0) {
-    return `Nothing was changed — the timezone could not be saved, so your hours are still not being opened. Try again when you have a connection.`;
+    return `Nothing was changed. The timezone could not be saved, so your hours are still not being opened. Try again when you have a connection.`;
   }
   const head = saved === 1
     ? `One hour is now recorded as ${zone} and will be opened for booking tonight.`

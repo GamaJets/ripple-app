@@ -143,7 +143,7 @@ export function lockSettingNote(
   brand = 'this app',
 ): string {
   if (!available) {
-    return `Unavailable — this device does not have ${lockMethodsLabel(platform)} set up.`;
+    return `Unavailable: this device does not have ${lockMethodsLabel(platform)} set up.`;
   }
   return enabled
     ? `${label} is needed to open ${brand} after a minute away. Your training stays signed in either way; this only decides who can see it.`

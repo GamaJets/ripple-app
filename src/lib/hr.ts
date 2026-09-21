@@ -113,7 +113,7 @@ export function maxHr(age?: number | null): number {
  */
 export function hrScaleNote(age?: number | null): string | null {
   if (hrScaleBasis(age) === 'age') return null;
-  return `These zones are worked out from an age of ${ASSUMED_AGE}, because your date of birth is not on your profile — they are a guess, not your scale. Add it in Profile and they redraw around you.`;
+  return `These zones are worked out from an age of ${ASSUMED_AGE}, because your date of birth is not on your profile. They are a guess, not your scale. Add it in Profile and they redraw around you.`;
 }
 
 /** Which zone a bpm reading falls in. */

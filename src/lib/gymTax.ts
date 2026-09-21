@@ -110,7 +110,7 @@ export function taxProfileLine(p: GymTaxProfile, status: LoadStatus): string {
   if (p.registered === false) {
     return 'This gym says it is not registered for a tax on its sales. Nothing on this page is a tax figure either way.';
   }
-  return 'Nobody has said whether this gym is registered for a tax on its sales. That is not the same as saying it is not — until somebody answers, Repple holds no tax fact about this business at all.';
+  return 'Nobody has said whether this gym is registered for a tax on its sales. That is not the same as saying it is not. Until somebody answers, Repple holds no tax fact about this business at all.';
 }
 
 /** Why this profile cannot be saved, or an empty list when it can. A list
@@ -351,7 +351,7 @@ export function periodMovingNote(p: TaxPeriod, closed: readonly MonthKey[]): str
  * inferred from the absence of a number.
  */
 export const TAX_NO_RETURN_FIGURE =
-  'Repple does not work out any tax figure and this page is not a return. It does not apply a rate to anything, it produces no tax amount, no net-of-tax figure and no return box, and it will not estimate one. What it gives you is the record a return is made FROM — what the gym took, what it billed, what it paid out and what it says about its own registration — in a period you can file against. The figure itself is your accountant’s, made with the documents Repple has never seen.';
+  'Repple does not work out any tax figure and this page is not a return. It does not apply a rate to anything, it produces no tax amount, no net-of-tax figure and no return box, and it will not estimate one. What it gives you is the record a return is made FROM (what the gym took, what it billed, what it paid out and what it says about its own registration) in a period you can file against. The figure itself is your accountant’s, made with the documents Repple has never seen.';
 
 /**
  * Everything Repple does not know, named one at a time.
@@ -364,11 +364,11 @@ export const TAX_NO_RETURN_FIGURE =
 export const TAX_UNKNOWNS: ReadonlyArray<{ title: string; detail: string }> = [
   {
     title: 'No rate is recorded against any sale',
-    detail: 'Repple stores no tax rate anywhere, on a membership, an invoice or a payment. A gym’s supplies can sit at different rates in the same week and some can be exempt, so one rate held against the gym would be a claim about all of them — and a rate held against an invoice would say nothing about the card payments at the desk, which are most of the money.',
+    detail: 'Repple stores no tax rate anywhere, on a membership, an invoice or a payment. A gym’s supplies can sit at different rates in the same week and some can be exempt, so one rate held against the gym would be a claim about all of them, and a rate held against an invoice would say nothing about the card payments at the desk, which are most of the money.',
   },
   {
     title: 'The takings are gross, and only what somebody recorded',
-    detail: 'What a member was charged is what is here. The card processor’s fee is in no table in this database, and a payment that was taken and never entered at the desk is not here either — which is what /accounting’s reconciliation section exists to surface.',
+    detail: 'What a member was charged is what is here. The card processor’s fee is in no table in this database, and a payment that was taken and never entered at the desk is not here either. That is what /accounting’s reconciliation section exists to surface.',
   },
   {
     title: 'Nothing here is evidenced',
@@ -391,7 +391,7 @@ export const TAX_UNKNOWNS: ReadonlyArray<{ title: string; detail: string }> = [
 /** What the two stored facts are, said beside them. Neither is checked, and a
  *  reader is entitled to know that before quoting either. */
 export const TAX_FACTS_ARE_STATED_NOT_CHECKED =
-  'Both of these are what somebody at this gym typed. Repple has not checked either against any register — there is no register it could check — and has not inferred either from a country, a currency or a price. They are held exactly as entered.';
+  'Both of these are what somebody at this gym typed. Repple has not checked either against any register (there is no register it could check) and has not inferred either from a country, a currency or a price. They are held exactly as entered.';
 
 /* ── reads and writes ─────────────────────────────────────────────────────── */
 

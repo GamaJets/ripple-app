@@ -442,7 +442,7 @@ export function intakeLine(state: IntakeState, progress: IntakeProgress, who: st
     case 'none':
       return `${who} has not started their intake. Nothing about their readiness, their history or when they can train has been asked yet.`;
     case 'started':
-      return `${progress.done} of ${progress.of} parts answered. What is missing is missing — it has not been read and stored somewhere else.`;
+      return `${progress.done} of ${progress.of} parts answered. What is missing is missing. It has not been read and stored somewhere else.`;
     case 'complete':
       return `All ${progress.of} parts answered. Their readiness answers, history, goals and availability, in their own words.`;
   }
@@ -457,7 +457,7 @@ export function intakeLine(state: IntakeState, progress: IntakeProgress, who: st
  */
 export function intakePrompt(state: IntakeState, progress: IntakeProgress, who: string): string | null {
   if (state === 'none') {
-    return `${who} has not filled in their intake. You cannot fill it in for them — it has to come from them — so ask, and it lands here the moment they finish.`;
+    return `${who} has not filled in their intake. You cannot fill it in for them (it has to come from them), so ask, and it lands here the moment they finish.`;
   }
   if (state === 'started') {
     const missing = progress.sections.filter((s) => !s.done).map((s) => s.title.toLowerCase());
@@ -477,7 +477,7 @@ export function askIntakeMessage(state: IntakeState, progress: IntakeProgress): 
   lines.push(state === 'started'
     ? `Could you finish your intake form when you get a minute? You have ${progress.done} of ${progress.of} parts done.`
     : 'Could you fill in your intake form before we train? It is the readiness questions, a bit of history, and when you can train.');
-  lines.push('I can’t fill it in for you — it has to come from you — and it is what I build your training around.');
+  lines.push('I can’t fill it in for you, because it has to come from you, and it is what I build your training around.');
   return lines.join('\n\n');
 }
 
@@ -572,7 +572,7 @@ export function intakeOwnership(viewerId: string | null, subjectId: string | nul
   if (viewerId !== subjectId) {
     return {
       mayEdit: false,
-      reason: 'An intake belongs to the person who answered it. Only they can change it — the database refuses anybody else, including their coach, which is what makes it worth reading.',
+      reason: 'An intake belongs to the person who answered it. Only they can change it. The database refuses anybody else, including their coach, which is what makes it worth reading.',
     };
   }
   return { mayEdit: true, reason: null };

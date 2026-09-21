@@ -196,7 +196,7 @@ export function gapsNote(gaps: readonly RegisterGap[]): string | null {
     : people === 1
       ? 'The 1 person who booked'
       : `The ${people} people who booked them`;
-  return `${who} reach your gym's record as nobody having attended. A register has no closing time — open one and mark it now, and the class counts.`;
+  return `${who} reach your gym's record as nobody having attended. A register has no closing time. Open one and mark it now, and the class counts.`;
 }
 
 /**

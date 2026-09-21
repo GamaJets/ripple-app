@@ -77,7 +77,7 @@ export const ROLE_LABEL: Record<ProfileRole, string> = {
  *  them needs. Sentence case: these are read as statements. */
 export const STAFF_ROLE_NOTE: Record<StaffRole, string> = {
   trainer:
-    'A coach. Gets a roster row, a place in the rota and in payroll, and a book of their own — and, through that book, the training and health record of every client assigned to them.',
+    'A coach. Gets a roster row, a place in the rota and in payroll, and a book of their own and, through that book, the training and health record of every client assigned to them.',
   receptionist:
     'The front desk. The door and every member’s record; no book, no roster row, no place in payroll, and nothing about what anybody is paid.',
 };
@@ -125,7 +125,7 @@ export const STAFF_ROLE_REACH: Reach[] = [
   {
     what: 'A member’s training and health record',
     owner: 'No', trainer: 'Their own book only', receptionist: 'No',
-    note: 'Workouts, measurements, check-ins, scans, food logs and the private conversation with their coach. It follows the book, not the gym — which is why removing a coach who still has clients is refused rather than done by halves.',
+    note: 'Workouts, measurements, check-ins, scans, food logs and the private conversation with their coach. It follows the book, not the gym, which is why removing a coach who still has clients is refused rather than done by halves.',
   },
   {
     what: 'Passes and drop-ins',
@@ -135,7 +135,7 @@ export const STAFF_ROLE_REACH: Reach[] = [
   {
     what: 'What anybody is paid',
     owner: 'Everything', trainer: 'Their own', receptionist: 'No',
-    note: 'Shift rates, payroll, settlements and per-coach earnings. The gym’s own headline session fee is a different thing and is readable by everybody inside the gym, including members — it always has been.',
+    note: 'Shift rates, payroll, settlements and per-coach earnings. The gym’s own headline session fee is a different thing and is readable by everybody inside the gym, including members. It always has been.',
   },
   {
     what: 'Plans, payments and the ledger',
@@ -144,7 +144,7 @@ export const STAFF_ROLE_REACH: Reach[] = [
   {
     what: 'Gym settings',
     owner: 'Read and write', trainer: 'Read', receptionist: 'No',
-    note: 'The gym’s name, brand, currency and timezone. Part 711’s footer has reception reading this row through `tenants_read`, "which is role-agnostic" — and part 142 dropped `tenants_read` and replaced it with an owner policy, a trainer policy and a client policy. Reception is none of the three: no ownership, no `trainers` row (part 711 refuses them one on purpose) and nobody’s coaching client. So the gym’s own row is closed to them, and the console says the name is unread rather than printing a fallback.',
+    note: 'The gym’s name, brand, currency and timezone. Part 711’s footer has reception reading this row through `tenants_read`, "which is role-agnostic", and part 142 dropped `tenants_read` and replaced it with an owner policy, a trainer policy and a client policy. Reception is none of the three: no ownership, no `trainers` row (part 711 refuses them one on purpose) and nobody’s coaching client. So the gym’s own row is closed to them, and the console says the name is unread rather than printing a fallback.',
   },
 ];
 
@@ -153,7 +153,7 @@ export const STAFF_ROLE_REACH: Reach[] = [
  * read as a description of the product and it is a description of the database.
  */
 export const CONSOLE_LAG_NOTE =
-  'This is what the database allows, and the console offers a receptionist one screen of it: Door — the log, the head count, checking people out, and the next of kin and medical note for whoever is in the building. Members is not offered to them, and not because of the money on it: that roster is built from the membership rows, which no policy opens to this role, so the page would load without error and draw a gym with nobody in it. Everything else here stays with the owner and the coaches.';
+  'This is what the database allows, and the console offers a receptionist one screen of it: Door (the log, the head count, checking people out, and the next of kin and medical note for whoever is in the building). Members is not offered to them, and not because of the money on it: that roster is built from the membership rows, which no policy opens to this role, so the page would load without error and draw a gym with nobody in it. Everything else here stays with the owner and the coaches.';
 
 /* ── before the button is pressed ──────────────────────────────────────────── */
 
@@ -188,7 +188,7 @@ export function grantBlocker(input: {
     return 'You already own this gym. Granting yourself a staff role would take your own access away.';
   }
   if (input.subjectRoleUnread) {
-    return 'That account could not be read, so this console does not know what changing it would do. That is a failed query rather than a person who does not exist — reload before granting anything.';
+    return 'That account could not be read, so this console does not know what changing it would do. That is a failed query rather than a person who does not exist. Reload before granting anything.';
   }
   if (input.subjectRole === 'owner') {
     return 'That account owns a gym. Ownership is not changed from the staff roster.';
@@ -218,7 +218,7 @@ export function revokeBlocker(input: {
   clientsOnBook: number | null;
 }): string | null {
   if (input.subjectId === input.actorId || input.subjectRole === 'owner') {
-    return 'An owner is not removed from the staff roster — a gym with nobody who can administer it cannot be repaired from inside the product.';
+    return 'An owner is not removed from the staff roster. A gym with nobody who can administer it cannot be repaired from inside the product.';
   }
   if (input.subjectRole !== 'trainer' && input.subjectRole !== 'receptionist') {
     return 'That account is a member of this gym rather than staff, so there is no staff access to take away.';
@@ -227,7 +227,7 @@ export function revokeBlocker(input: {
     return 'Their book could not be read, so this console cannot tell whether removing them would leave their access to somebody’s health record behind. That is unknown, not empty.';
   }
   if (input.clientsOnBook > 0) {
-    return `They still have ${input.clientsOnBook} client${input.clientsOnBook === 1 ? '' : 's'} on their book. Taking them off the staff would NOT take away their access to those clients’ training and health record — that access follows the book rather than the gym. Reassign or end those relationships first.`;
+    return `They still have ${input.clientsOnBook} client${input.clientsOnBook === 1 ? '' : 's'} on their book. Taking them off the staff would NOT take away their access to those clients’ training and health record. That access follows the book rather than the gym. Reassign or end those relationships first.`;
   }
   return null;
 }
@@ -238,7 +238,7 @@ export function revokeConsequence(role: ProfileRole | null | undefined): string 
   const who = role === 'receptionist' ? 'They' : 'They';
   return `${who} stop belonging to this gym: the door, the member records and everything else scoped to it close immediately. `
     + (role === 'trainer'
-      ? 'Their roster row is kept — a coach who left is not a coach who never existed, and every figure already filed against them still resolves to a name. Nothing they delivered is deleted.'
+      ? 'Their roster row is kept. A coach who left is not a coach who never existed, and every figure already filed against them still resolves to a name. Nothing they delivered is deleted.'
       : 'Nothing they recorded is deleted; the door log keeps their entries and who made them.');
 }
 
@@ -382,7 +382,7 @@ export function isLiveGrant(g: StaffGrant): boolean {
  */
 export function grantNote(g: StaffGrant | null, actorName: string | null): string {
   if (!g) {
-    return 'No recorded grant — they joined with the gym’s join code, before there was anywhere to write down who let them in.';
+    return 'No recorded grant. They joined with the gym’s join code, before there was anywhere to write down who let them in.';
   }
   const by = g.actorName
     ?? actorName

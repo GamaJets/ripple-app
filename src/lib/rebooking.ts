@@ -245,7 +245,7 @@ export function unrebookedNote(u: Unrebooked, when: (iso: string) => string): st
     : u.daysSince === 1 ? 'yesterday'
     : `${u.daysSince} days ago`;
   const head = u.lastMissed
-    ? `Their last session, ${when(u.lastStartsAt)}, did not go ahead — ${ago}.`
+    ? `Their last session, ${when(u.lastStartsAt)}, did not go ahead, ${ago}.`
     : `Last session ${when(u.lastStartsAt)}, ${ago}.`;
   return `${head} Nothing booked since.`;
 }

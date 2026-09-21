@@ -268,7 +268,7 @@ export function addOutcome(saved: number, attempted: number, duplicates: number)
   }
   if (saved === 0) {
     return `None of those ${attempted} slot${attempted === 1 ? '' : 's'} could be saved, so your clients cannot book any of them yet. `
-      + 'They are not on this phone either — try again when you have a connection.';
+      + 'They are not on this phone either. Try again when you have a connection.';
   }
   const head = `${saved} slot${saved === 1 ? '' : 's'} added.`;
   const tail = duplicates > 0
@@ -278,7 +278,7 @@ export function addOutcome(saved: number, attempted: number, duplicates: number)
     return `${head}${tail} Open them for booking with Generate Open Slots.`;
   }
   const lost = attempted - saved;
-  return `${head}${tail} ${lost} could not be saved and ${lost === 1 ? 'is' : 'are'} not offered to anybody — try again.`;
+  return `${head}${tail} ${lost} could not be saved and ${lost === 1 ? 'is' : 'are'} not offered to anybody. Try again.`;
 }
 
 /* ── whose week this is ─────────────────────────────────────────────────────

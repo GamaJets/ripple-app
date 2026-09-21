@@ -106,7 +106,7 @@ export function myReviewsNote(
     case 'loading':
       return 'Reading what you have written.';
     case 'error':
-      return 'We couldn’t read the reviews you have written. This is not us saying you have written none — check again when you have signal, and don’t write a replacement in the meantime, because a new review of the same coach replaces the old one.';
+      return 'We couldn’t read the reviews you have written. This is not us saying you have written none. Check again when you have signal, and don’t write a replacement in the meantime, because a new review of the same coach replaces the old one.';
     case 'partial':
       return 'We only got part of the list, so the reviews below are not all of the ones you have written.';
     case 'ready':

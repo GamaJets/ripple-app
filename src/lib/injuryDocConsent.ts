@@ -197,7 +197,7 @@ export const CONSENT_WHO =
 
 /** WHAT. The whole page, and what a page of a clinical document has on it. */
 export const CONSENT_WHAT =
-  'What goes is the whole document — every page of it, as a picture, not just the words about your injury. That picture carries your name, your clinician and anything else printed on the page.';
+  'What goes is the whole document: every page of it, as a picture, not just the words about your injury. That picture carries your name, your clinician and anything else printed on the page.';
 
 /** What this app cannot promise about the copy once it has gone. See the
  *  retention note in the header: not softened, and not a claim either way. */
@@ -249,7 +249,7 @@ export type DocSendState = 'granted' | 'refused' | 'no-record' | 'unknown';
  * there is an answer to print.
  */
 export const SCREEN_PROMISE =
-  `Your coach never sees the file — only the injury you confirm. Reading a document means sending a copy of it to ${OCR_VENDOR}, a company outside this app, and we ask you about that every time before anything leaves. Say no and it is saved to your account and sent nowhere.`;
+  `Your coach never sees the file, only the injury you confirm. Reading a document means sending a copy of it to ${OCR_VENDOR}, a company outside this app, and we ask you about that every time before anything leaves. Say no and it is saved to your account and sent nowhere.`;
 
 /**
  * What is true of ONE stored document, in the list.
@@ -300,7 +300,7 @@ export function docSendState(
  *  is the feature working the way they asked for it to. */
 export const REFUSED_TITLE = 'Saved, and sent nowhere';
 export const REFUSED_NOTE =
-  `This document is in your account and nothing about it went to ${OCR_VENDOR}. Nobody read it, so there is nothing to suggest — add the injury in your own words and it works exactly the same.`;
+  `This document is in your account and nothing about it went to ${OCR_VENDOR}. Nobody read it, so there is nothing to suggest. Add the injury in your own words and it works exactly the same.`;
 
 /**
  * Shown when the member said YES and the agreement could not be written down.

@@ -119,7 +119,7 @@ export function classDayCaveat(status: LoadStatus): string | null {
     return 'Your class timetable came back at its row limit, so classes you teach may be missing from this day. An hour that looks free here may not be.';
   }
   if (status === 'error') {
-    return 'Your class timetable could not be read, so no classes are shown for this day. That is the read failing, not a free evening — check before you take a booking.';
+    return 'Your class timetable could not be read, so no classes are shown for this day. That is the read failing, not a free evening. Check before you take a booking.';
   }
   return null;
 }

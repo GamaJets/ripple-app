@@ -190,7 +190,7 @@ export function progressSummary(
   unit: WeightUnit,
 ): string {
   const first = (name || '').split(' ')[0] || 'My';
-  const head = `${first === 'My' ? 'My' : first + "'s"} progress — ${brand}`;
+  const head = `${first === 'My' ? 'My' : first + "'s"} progress · ${brand}`;
   if (!rows.length) return `${head}\nNo scans recorded yet.`;
 
   const lines = progressChangeLines(rows, unit);

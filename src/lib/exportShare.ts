@@ -169,7 +169,7 @@ export const fileExportAvailable = () => !!(fileSystemWritable() && Sharing?.sha
  */
 export function fileShareBlocker(): string | null {
   if (!Sharing?.shareAsync) {
-    return 'This version of the app can’t attach files — the part that hands a file to your phone’s share sheet isn’t in it yet. Update to the next release and the file itself will send. The rows below go as text in the meantime, and nothing is missing from them.';
+    return 'This version of the app can’t attach files. The part that hands a file to your phone’s share sheet isn’t in it yet. Update to the next release and the file itself will send. The rows below go as text in the meantime, and nothing is missing from them.';
   }
   if (!fileSystemWritable()) {
     return 'This version of the app can’t save the file to your phone before sending it. Update to the next release and the file itself will send. The rows below go as text in the meantime, and nothing is missing from them.';
@@ -356,8 +356,8 @@ export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow
   // were spelled two different ways: `toLocaleString` in the document and raw
   // in the text. A 2,400 kcal target read "2,400 kcal" in the PDF a member
   // opened and "2400 kcal" in the message body it was attached to.
-  const text = `${first}'s meal plan (${brand}) — target ~${num(targetKcal)} kcal\n` +
-    meals.map((m) => `• ${m.slot}: ${m.name} — ${m.K} kcal (P${m.P}/C${m.C}/F${m.F})`).join('\n') +
+  const text = `${first}'s meal plan (${brand}) · target ~${num(targetKcal)} kcal\n` +
+    meals.map((m) => `• ${m.slot}: ${m.name} · ${m.K} kcal (P${m.P}/C${m.C}/F${m.F})`).join('\n') +
     `\nTotal: ${totK} kcal · P${totP} C${totC} F${totF}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '') +
     (note ? `\n\n${note}` : '');
   return { html: page('Meal Plan', body, brand, accent), text };
@@ -427,7 +427,7 @@ export function progressDoc(name: string, rows: ProgressRow[], brand = 'Repple',
   // reported "weight 0.0kg · body fat 0.0%" — a client's first scan rendered as
   // having achieved nothing.
   const note = lines.length ? lines.join(' · ')
-    : rows.length ? 'One scan so far — a change needs two.'
+    : rows.length ? 'One scan so far. A change needs two.'
     : 'No scans recorded yet.';
   // Said in the document, not just on the screen that made it. This page is
   // built to be sent, and the coach who opens it is entitled to know that the
@@ -524,8 +524,8 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     <table><thead><tr><th>Metric</th><th class="r">Value</th></tr></thead><tbody>${mRows}</tbody></table>
     ${valueNote ? `<p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${esc(valueNote)}</p>` : ''}
     <table><thead><tr><th>Cohort (signup)</th><th class="r">Active</th><th class="r">Retention</th></tr></thead><tbody>${cRows || '<tr><td colspan="3">No cohorts yet</td></tr>'}</tbody></table>`;
-  const html = page(`Platform report — ${d.generatedOn}`, body, brand);
-  const text = `${brand} — Platform report (${d.generatedOn})\n` +
+  const html = page(`Platform report · ${d.generatedOn}`, body, brand);
+  const text = `${brand} · Platform report (${d.generatedOn})\n` +
     metrics.map(([k, v]) => `${k}: ${v}`).join('\n') +
     (valueNote ? `\n\n${valueNote}` : '') +
     (d.cohorts.length ? '\n\nCohort retention:\n' + d.cohorts.map((c) => `${c.label}: ${num(c.active)}/${num(c.total)} (${c.pct}%)`).join('\n') : '');

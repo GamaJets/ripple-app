@@ -116,7 +116,7 @@ export function acceptedCount(members: AudienceMember[]): number {
 export function audienceLine(members: AudienceMember[] | null | undefined): string | null {
   if (!members || !members.length) return null;
   const sent = sentCount(members);
-  if (sent === 0) return `Everyone you coach can read this — all ${members.length} of them.`;
+  if (sent === 0) return `Everyone you coach can read this, all ${members.length} of them.`;
   if (sent === 1) return 'Sent to 1 client. Nobody else can read it.';
   return `Sent to ${sent} of your ${members.length} clients. Nobody else can read it.`;
 }
@@ -131,14 +131,14 @@ export function audienceLine(members: AudienceMember[] | null | undefined): stri
 export function sendWarning(addressed: boolean): string {
   return addressed
     ? 'They are added to the people who can read it. Nobody already on the list loses it.'
-    : 'Right now everyone you coach can read this. Sending it to one person makes it theirs alone — '
+    : 'Right now everyone you coach can read this. Sending it to one person makes it theirs alone. '
       + 'everybody else stops seeing it, unless they have already accepted it.';
 }
 
 /** The one thing that cannot be undone from this screen, said before the tap. */
 export const SEND_IS_ONE_WAY =
   'A document cannot be un-sent. If you address the wrong person, retire it and upload the version you '
-  + 'meant — everyone who accepted the old one keeps that record and can still read what they agreed to.';
+  + 'meant. Everyone who accepted the old one keeps that record and can still read what they agreed to.';
 
 /** Why a document cannot be sent to anybody at all. */
 export type SendBlock = 'retired' | 'no-clients' | 'unread' | 'part-read';

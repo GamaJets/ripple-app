@@ -515,7 +515,7 @@ export function kindNoun(kind: OutboxKind): { one: string; many: string } {
 export function outboxNote(n: number, kind: OutboxKind): string | null {
   if (n <= 0) return null;
   const { one, many } = kindNoun(kind);
-  return `${n} ${n === 1 ? one : many} saved on this phone and not sent yet — ${n === 1 ? 'it goes' : 'they go'} up next time you have signal.`;
+  return `${n} ${n === 1 ? one : many} saved on this phone and not sent yet. ${n === 1 ? 'It goes' : 'They go'} up next time you have signal.`;
 }
 
 /**

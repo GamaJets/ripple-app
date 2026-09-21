@@ -1144,7 +1144,7 @@ export async function cancelBookedSession(
     promotedTold = (await sendPushChecked(
       [res.promotedClient],
       'The slot you were waiting for is yours',
-      `${dow} ${at} with your coach just freed up and you were next on the list — it is booked for you.`,
+      `${dow} ${at} with your coach just freed up and you were next on the list, so it is booked for you.`,
       { route: '/(client)/calendar' },
     )).ok;
   } else {
@@ -1171,7 +1171,7 @@ export async function cancelBookedSession(
       // because tonight is impossible for them, and never learns the slot was
       // on a day they were free. The other two pushes in this function already
       // carried the day; this one is the one that most needed it.
-      : (await sendPushChecked(others ?? [], 'A PT slot just opened', `${dow} ${at} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
+      : (await sendPushChecked(others ?? [], 'A PT slot just opened', `${dow} ${at} with your coach just opened up. First to book it gets it.`, { route: '/(client)/calendar' })).ok;
   }
 
   // `refundSession` answers ok:false both when there is no pack to credit and
@@ -1184,7 +1184,7 @@ export async function cancelBookedSession(
   const coachTold = (await sendPushChecked(
     [session.trainerId],
     'Session cancelled',
-    `A client cancelled ${dow} ${at}.${res.promotedClient ? ' It went straight to the next client on its waitlist.' : ' The slot re-opened.'}${res.charged ? ' (Late cancel — fee recorded.)' : ''}`,
+    `A client cancelled ${dow} ${at}.${res.promotedClient ? ' It went straight to the next client on its waitlist.' : ' The slot re-opened.'}${res.charged ? ' (Late cancel, fee recorded.)' : ''}`,
     { route: '/(trainer)/calendar' },
     // 'bookings'. The coach may mute chat and still be told their morning
     // changed — which is the whole point of the categories, and this is the
@@ -1226,9 +1226,9 @@ export function ptCancelLines(o: PtCancelOutcome, at: string): string[] {
   // member spent reading the alert, and the credit is not the place to hold
   // them to a rule that changed under them.
   const w = o.noticeHours ?? 24;
-  if (o.lateWhenAsked) lines.push(`Cancelled within ${w} hour${w === 1 ? '' : 's'} — this session is charged from your package.`);
+  if (o.lateWhenAsked) lines.push(`Cancelled within ${w} hour${w === 1 ? '' : 's'}, so this session is charged from your package.`);
   else if (o.refunded) lines.push(`Your ${at} session was cancelled and returned to your package.`);
-  else lines.push(`Your ${at} session was cancelled. Nothing was returned to a session pack — if you booked it with a pack credit, check your package before booking again.`);
+  else lines.push(`Your ${at} session was cancelled. Nothing was returned to a session pack. If you booked it with a pack credit, check your package before booking again.`);
 
   // The fee, and only when a row really exists. `feeRecordedLine` returns null
   // when nothing was charged, so there is no branch on which this app claims a
@@ -1239,7 +1239,7 @@ export function ptCancelLines(o: PtCancelOutcome, at: string): string[] {
   // The member was told a fee applied and then none was recorded. That is not
   // silence-worthy: they will be expecting one.
   else if (o.late && o.policyApplies) {
-    lines.push('Your coach’s late-cancellation policy applies to this one, but no fee was recorded — check with them what you owe.');
+    lines.push('Your coach’s late-cancellation policy applies to this one, but no fee was recorded. Check with them what you owe.');
   }
 
   // Where the slot went. One of three, and the waitlist case is the only one
@@ -1247,13 +1247,13 @@ export function ptCancelLines(o: PtCancelOutcome, at: string): string[] {
   if (o.promoted) {
     lines.push(o.promotedTold === false
       ? 'The slot went straight to the next client on its waitlist. We couldn’t notify them, so your coach may need to.'
-      : 'The slot went straight to the next client on its waitlist — nobody had to race for it.');
+      : 'The slot went straight to the next client on its waitlist; nobody had to race for it.');
   } else {
     lines.push(o.offerPushed === true ? `The freed slot was offered to your coach's other clients.`
       : o.offerPushed === false ? `The slot is open again, but we couldn't tell your coach's other clients about it.`
       : `The slot is open again on your coach's calendar.`);
   }
-  if (!o.coachTold) lines.push('We couldn’t notify your coach — message them if this session is soon.');
+  if (!o.coachTold) lines.push('We couldn’t notify your coach. Message them if this session is soon.');
   return lines;
 }
 
@@ -1442,7 +1442,7 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
   // accepts what a coach types and silently drops it is the failure mode this
   // screen family already has a rule about.
   const blocker = applies && (fee == null || !(fee > 0))
-    ? 'Set an amount before switching the policy on — a fee of nothing is a policy that does not apply.'
+    ? 'Set an amount before switching the policy on. A fee of nothing is a policy that does not apply.'
     : null;
 
   const [save, setSave] = useState<SaveStatus>(IDLE_SAVE);

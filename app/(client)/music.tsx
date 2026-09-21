@@ -296,7 +296,7 @@ export default function Music() {
    if (!usable.length) {
      Alert.alert(
        title,
-       'Spotify is not reporting any device for your account — not even this phone. Open the Spotify app once so it registers, then try again.',
+       'Spotify is not reporting any device for your account, not even this phone. Open the Spotify app once so it registers, then try again.',
      );
      return;
    }
@@ -429,7 +429,7 @@ export default function Music() {
    // connecting described a feature the header of this file records as never
    // having existed — and it was read by exactly the person it was worst for,
    // an Apple Music subscriber with no Spotify account.
-   Alert.alert('Connect Spotify', 'Saving a playlist to an account needs Spotify. Without it you can still use the list here — tapping a track searches for it in Spotify, and the titles are ordinary ones you can find in whatever you listen on.');
+   Alert.alert('Connect Spotify', 'Saving a playlist to an account needs Spotify. Without it you can still use the list here. Tapping a track searches for it in Spotify, and the titles are ordinary ones you can find in whatever you listen on.');
  };
 
  const G = layout.gutter;
@@ -441,7 +441,7 @@ export default function Music() {
  <PageHead title="Music" subtitle="Your session soundtrack" />
 
  <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
- Play your own playlists, or build one for the session — picked for the work, not for the mood.
+ Play your own playlists, or build one for the session, picked for the work rather than the mood.
  </Text>
 
  <Rule />
@@ -498,8 +498,8 @@ export default function Music() {
  {spotifyUsable
  ? 'Searches Spotify’s catalogue. If that fails, you get the built-in list of ' + CURATED_POOL_SIZE + ' songs and it says so.'
  : linkState(link) === 'refused'
- ? 'Spotify has signed this account out, so this uses the built-in list of ' + CURATED_POOL_SIZE + ' songs — not your library. Reconnect below and it searches Spotify again.'
- : 'Without Spotify connected this uses the built-in list of ' + CURATED_POOL_SIZE + ' songs — not your library.'}
+ ? 'Spotify has signed this account out, so this uses the built-in list of ' + CURATED_POOL_SIZE + ' songs, not your library. Reconnect below and it searches Spotify again.'
+ : 'Without Spotify connected this uses the built-in list of ' + CURATED_POOL_SIZE + ' songs, not your library.'}
  </Text>
  </Section>
 
@@ -581,7 +581,7 @@ export default function Music() {
  note={(refusal ?? '') + ' Until it is reconnected, this screen cannot read your playlists or control playback, and Generate uses the built-in list.'} />
  ) : needsReconnect ? (
  <Notice kicker="Spotify" title="Reconnect to Finish This"
- note="Your Spotify sign-in predates playlist and playback permission, and Spotify cannot add permissions to a token that already exists. Disconnect and connect again — it takes one tap each." />
+ note="Your Spotify sign-in predates playlist and playback permission, and Spotify cannot add permissions to a token that already exists. Disconnect and connect again. It takes one tap each." />
  ) : null}
  {SERVICES.map((s, i) => {
  // Spotify is the only member of SERVICES, and this row asks the state

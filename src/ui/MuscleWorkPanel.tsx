@@ -409,13 +409,13 @@ export function MuscleWorkPanel({
                 with fewer muscles on it than the two lists have rows. */}
             {rankings.overlapping ? (
               caption(`That is every muscle ${voice.they} ${voice.have} trained in this window, hardest `
-                + 'first, so there is no separate least-trained list to draw — the bottom of this one '
+                + 'first, so there is no separate least-trained list to draw. The bottom of this one '
                 + 'is it.', sp.md)
             ) : (
               <View style={{ marginTop: sp.lg }}>
                 <Text style={{ ...ty.micro, color: t.ink3 }}>Least Worked, of the Muscles with Work</Text>
                 {caption('Every muscle here was trained. A muscle with nothing against it is not in this '
-                  + 'list — that is the sentence below, and it is a different kind of claim.', 4)}
+                  + 'list. That is the sentence below, and it is a different kind of claim.', 4)}
                 <View style={{ marginTop: sp.sm }}>
                   {rankings.least.map((m, i) => rankRow(m.muscle, rankingLine(m), i))}
                 </View>

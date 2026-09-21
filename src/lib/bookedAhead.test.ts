@@ -83,11 +83,11 @@ eq(tied.map((c) => c.clientId).join(','), 'abe,zeb', 'a tie is broken on a stabl
 
 const day = (iso: string) => iso.slice(0, 10);
 eq(bookedAheadNote({ clientId: 'c1', startsAt: [inDays(1)] }, day),
-  `1 session — ${day(inDays(1))}.`, 'one session is singular and names its date');
+  `1 session: ${day(inDays(1))}.`, 'one session is singular and names its date');
 eq(bookedAheadNote({ clientId: 'c1', startsAt: [inDays(1), inDays(3)] }, day),
-  `2 sessions — ${day(inDays(1))}, ${day(inDays(3))}.`, 'two are listed in full');
+  `2 sessions: ${day(inDays(1))}, ${day(inDays(3))}.`, 'two are listed in full');
 eq(bookedAheadNote({ clientId: 'c1', startsAt: [inDays(1), inDays(2), inDays(3), inDays(4), inDays(5), inDays(6)] }, day, 4),
-  `6 sessions — ${day(inDays(1))}, ${day(inDays(2))}, ${day(inDays(3))}, ${day(inDays(4))} and 2 more.`,
+  `6 sessions: ${day(inDays(1))}, ${day(inDays(2))}, ${day(inDays(3))}, ${day(inDays(4))} and 2 more.`,
   'past the ceiling the count is still exact and the tail becomes a number');
 
 eq(bookedAheadHeading(0), null, 'no heading over an empty list');

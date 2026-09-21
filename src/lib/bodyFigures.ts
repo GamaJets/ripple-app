@@ -249,7 +249,7 @@ export function stalenessNote(reading: BodyReading | null, today: string, staleA
   if (!reading) return null;
   const d = daysBetween(reading.at, today);
   if (d == null || d <= staleAfter) return null;
-  return `This is your most recent ${sourceLabel(reading.source)} and it is ${d} days old — your body has had ${d} days to change since.`;
+  return `This is your most recent ${sourceLabel(reading.source)} and it is ${d} days old. Your body has had ${d} days to change since.`;
 }
 
 /**
@@ -268,7 +268,7 @@ export function mixedSourceNote(readings: (BodyReading | null)[]): string | null
   if (kinds.size < 2 && days.size < 2) return null;
   return kinds.size > 1
     ? 'These were not all measured by the same thing. Weight and body fat use the most recent of your scans and your logged weigh-ins; skeletal muscle only ever comes from a scan, because a bathroom scale does not report it.'
-    : 'These were not all measured on the same day — each figure carries the date it was actually taken.';
+    : 'These were not all measured on the same day. Each figure carries the date it was actually taken.';
 }
 
 /**

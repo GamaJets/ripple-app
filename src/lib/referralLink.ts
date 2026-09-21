@@ -114,7 +114,7 @@ export function referralLink(code: string): string {
  */
 export function referralMessage(code: string, appName: string): string {
   const c = normaliseReferralCode(code);
-  return `Join me on ${appName} — I use it to plan my training, track what I lift and stay on top of what I eat.\n\n`
+  return `Join me on ${appName}. I use it to plan my training, track what I lift and stay on top of what I eat.\n\n`
     + `${referralLink(c)}\n\n`
     + `If it asks for a code, mine is ${c}.`;
 }

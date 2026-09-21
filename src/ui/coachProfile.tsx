@@ -594,7 +594,7 @@ function warnOnceOffCoachApp(): void {
   warnedOffCoachApp = true;
   console.warn(
     `useMyTrainerProfile() was read on the ${VARIANT} app. It loads the SIGNED-IN user's own ` +
-    'profile and trainers row, so here it can only ever describe the reader — it is blanked ' +
+    'profile and trainers row, so here it can only ever describe the reader, so it is blanked ' +
     'rather than answered. To name a client\'s coach use useThreadPeerName (src/lib/threadPeer.ts).',
   );
 }

@@ -122,7 +122,7 @@ export function credentialBadge(c: Pick<Credential, 'verification'>): { label: s
 
 /** The sentence that goes above a list of claims, once, in the reader's app. */
 export const CLAIM_NOTE =
-  'These are what the coach has told us about themselves. Repple has not seen the certificates and has not checked them with the awarding bodies — ask to see them, or look the registration number up yourself.';
+  'These are what the coach has told us about themselves. Repple has not seen the certificates and has not checked them with the awarding bodies. Ask to see them, or look the registration number up yourself.';
 
 /** The same fact said to the coach, on the screen where they type it. */
 export const CLAIM_NOTE_COACH =
@@ -225,7 +225,7 @@ export function insuranceLine(claim: InsuranceClaim): string {
     case 'unknown':     return 'We could not load this coach’s insurance details.';
     case 'none-stated': return 'No insurance stated.';
     case 'lapsed':      return 'Insurance stated, but the cover they listed has expired.';
-    case 'stated':      return 'Insurance stated by the coach — not checked by Repple.';
+    case 'stated':      return 'Insurance stated by the coach, not checked by Repple.';
   }
 }
 
@@ -295,11 +295,11 @@ export function validateDraft(d: CredentialDraft): DraftProblem {
 export function draftProblemText(p: DraftProblem): string {
   switch (p) {
     case 'ok':                    return '';
-    case 'no-title':              return 'Give the qualification a name — "Level 3 Personal Trainer", "Public liability".';
+    case 'no-title':              return 'Give the qualification a name, such as "Level 3 Personal Trainer" or "Public liability".';
     case 'title-too-long':        return `Keep the name under ${MAX_TITLE} characters.`;
     case 'issuer-too-long':       return `Keep the awarding body under ${MAX_ISSUER} characters.`;
     case 'reference-too-long':    return `Keep the registration number under ${MAX_REFERENCE} characters.`;
-    case 'reference-not-allowed': return 'Policy numbers are not published. Nobody can check one, and it identifies a live policy — leave it out.';
+    case 'reference-not-allowed': return 'Policy numbers are not published. Nobody can check one, and it identifies a live policy. Leave it out.';
     case 'bad-issued':            return 'Write the issue date as YYYY-MM-DD.';
     case 'bad-expires':           return 'Write the expiry date as YYYY-MM-DD.';
     case 'expires-before-issued': return 'The expiry date is before the issue date.';

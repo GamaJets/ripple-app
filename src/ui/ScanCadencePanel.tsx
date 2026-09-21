@@ -126,7 +126,7 @@ export function ScanCadencePanel({ days, status, today, subject }: {
         // Whole read, no rhythm: there are fewer than two scans. Said as what
         // it is — one reading is a reading — rather than as a cadence of zero.
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-          There is not enough on the record to say how often — a cadence needs at least two
+          There is not enough on the record to say how often. A cadence needs at least two
           measurements to sit between.
         </Text>
       ) : (
@@ -136,7 +136,7 @@ export function ScanCadencePanel({ days, status, today, subject }: {
         // still true, because the cut falls at the old end.
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
           Only part of the scan history came back, so how often cannot be counted from it. The date
-          above is still the newest one — it is the oldest scans that are missing, not the recent ones.
+          above is still the newest one. It is the oldest scans that are missing, not the recent ones.
         </Text>
       )}
 

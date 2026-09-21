@@ -371,7 +371,7 @@ export default function Membership() {
   }, [primary, standing]);
 
   const actions: { label: string; note: string; icon: IconName; route: string; tone?: Tone; hero?: boolean }[] = [
-    { label: 'Entry Barcode', note: `Your ${appName} ID — link it at reception`, icon: 'grid', route: '/(client)/access', hero: true },
+    { label: 'Entry Barcode', note: `Your ${appName} ID · link it at reception`, icon: 'grid', route: '/(client)/access', hero: true },
     { label: 'Classes', note: 'Book a group class at your branch', icon: 'calendar', tone: 'purple', route: '/(client)/classes' },
     { label: 'Personal Training', note: 'Approve sessions your trainer delivered', icon: 'people', tone: 'brand', route: '/(client)/pt-sessions' },
     { label: 'My Bookings', note: 'Everything you have booked', icon: 'check', tone: 'blue', route: '/(client)/bookings' },
@@ -414,7 +414,7 @@ export default function Membership() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
             {c.profileStatus === 'loading'
               ? 'Your member number is built from your account, so it appears here once that has been read.'
-              : 'Your member number is built from your account, and that could not be read just now — so it is left out rather than shown as a number that is not yours. Pull down to try again.'}
+              : 'Your member number is built from your account, and that could not be read just now, so it is left out rather than shown as a number that is not yours. Pull down to try again.'}
           </Text>
         )}
 
@@ -451,7 +451,7 @@ export default function Membership() {
           <Section>
             <View style={{ gap: sp.md }}>
               <Flag tone={t.crit}>
-              We couldn’t read your membership. That is a read that failed, not an answer — it does not mean your gym has no record of you.
+              We couldn’t read your membership. That is a read that failed, not an answer. It does not mean your gym has no record of you.
             </Flag>
             {/* …and when there IS something below, say where it came from and
                 how old it is. A member reading a cached membership as a live
@@ -496,7 +496,7 @@ export default function Membership() {
             // claim about somebody's standing at their own gym and may only be
             // made about a read that landed.
             : (!primary || !standing || !planState) && mStatus !== 'error'
-              ? 'Your gym has not recorded a membership against your account. Plenty of gyms run on day passes and packs instead — if you believe you are on a plan, reception can add it.'
+              ? 'Your gym has not recorded a membership against your account. Plenty of gyms run on day passes and packs instead. If you believe you are on a plan, reception can add it.'
               : undefined}>
           {mStatus === 'loading' ? null : (<>
             {!primary || !standing || !planState ? null : (
@@ -651,7 +651,7 @@ export default function Membership() {
             // read, when it was read and only the oldest of it was left behind,
             // is a sentence that is simply false.
             : logStatus === 'partial' ? 'You have more training logged than we can read in one go, so this month is left blank rather than counted over part of it. Nothing failed and nothing is missing from your log.'
-            : !logKnown ? 'We couldn’t read your training log — this is not a month with nothing in it.'
+            : !logKnown ? 'We couldn’t read your training log. This is not a month with nothing in it.'
             : visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month';
           return (
             /* The board's figure card in place of the retired Hero: the

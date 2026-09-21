@@ -1743,7 +1743,7 @@ export function useThreadSafety(clientId: string | null, role: ChatRole): Thread
         return { ok: false, error: 'That did not save, so they are still blocked.' };
       }
       if (!((data ?? []) as any[]).length) {
-        return { ok: false, error: 'Nothing was unblocked. Open this screen again — the block may already have been lifted somewhere else.' };
+        return { ok: false, error: 'Nothing was unblocked. Open this screen again. The block may already have been lifted somewhere else.' };
       }
       reload();
       return { ok: true, error: null };

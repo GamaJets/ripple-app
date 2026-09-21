@@ -115,9 +115,9 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit): stri
   };
   switch (p.kind) {
     case 'reached':
-      return 'You’ve reached this one — mark it done, or set a new target.';
+      return 'You’ve reached this one. Mark it done, or set a new target.';
     case 'tooshort':
-      return `Only ${p.days === 1 ? 'a day' : `${p.days} days`} between your readings so far. A finish date needs about ${MIN_TREND_DAYS} days of them — a shorter gap is noise, not a trend.`;
+      return `Only ${p.days === 1 ? 'a day' : `${p.days} days`} between your readings so far. A finish date needs about ${MIN_TREND_DAYS} days of them. A shorter gap is noise, not a trend.`;
     case 'flat':
       return 'Your readings haven’t moved since you set this, so there’s no pace to project from.';
     case 'wrongway':
@@ -218,7 +218,7 @@ export default function Goal() {
         ? `Reading your ${GOAL_METRIC[k].source}…`
         : c.status === 'partial'
           ? `More ${GOAL_METRIC[k].source} on record than can be read in one go, so progress is unknown.`
-          : `Your ${GOAL_METRIC[k].source} could not be read, so progress is unknown — not a statement that you have none.`;
+          : `Your ${GOAL_METRIC[k].source} could not be read, so progress is unknown. This is not a statement that you have none.`;
 
   const goals = sortGoals(g.goals);
   const open = goals.filter((x) => !x.achievedAtISO);
@@ -312,7 +312,7 @@ export default function Goal() {
       // app/(client)/scans.tsx.
       Alert.alert(
         'Saved on This Phone',
-        'Your goal is saved on this phone and has not reached your record yet — it goes up on its own next time you have signal. It is in your list in the meantime, and until it has gone up it can’t be removed or marked done.',
+        'Your goal is saved on this phone and has not reached your record yet. It goes up on its own next time you have signal. It is in your list in the meantime, and until it has gone up it can’t be removed or marked done.',
       );
     }
   };
@@ -330,7 +330,7 @@ export default function Goal() {
     Alert.alert('Remove This Goal?', goalLabel(x), [
       { text: 'Keep It', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
-        if (!(await g.removeGoal(x.id))) Alert.alert('Not Removed', 'That goal is still there — it could not be removed just now.');
+        if (!(await g.removeGoal(x.id))) Alert.alert('Not Removed', 'That goal is still there. It could not be removed just now.');
       } },
     ]);
   };
@@ -356,7 +356,7 @@ export default function Goal() {
             eyebrow and the tagline under it were two lines of prose in the
             first viewport that the board does not have. */}
         <PageHead title="Goals" trailing={<Ghost icon="info" a11yLabel={SCREEN_HELP.goal.title}
-          onPress={() => Alert.alert(SCREEN_HELP.goal.title, SCREEN_HELP.goal.lines.map((l) => `${l.term} — ${l.means}`).join('\n\n'))} />} />
+          onPress={() => Alert.alert(SCREEN_HELP.goal.title, SCREEN_HELP.goal.lines.map((l) => `${l.term}: ${l.means}`).join('\n\n'))} />} />
 
         {/* The projected finish is drawn beside a date the member chose, which
             is exactly what makes it read as a commitment. What each of the two
@@ -447,7 +447,7 @@ export default function Goal() {
         <SectionHead title="Your Goals" note={g.status === 'ready' && goals.length ? `${open.length} open` : undefined} />
               {!goals.length ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
-                  No goals yet. Set one below — a number to work toward, or anything else you’re chasing.
+                  No goals yet. Set one below: a number to work toward, or anything else you’re chasing.
                 </Text>
               ) : goals.map((x) => {
                 const measured = isMeasured(x);
@@ -475,7 +475,7 @@ export default function Goal() {
                         </View>
                         {waiting ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                            Saved on this phone — not sent yet. It goes up on its own when you have signal.
+                            Saved on this phone, not sent yet. It goes up on its own when you have signal.
                           </Text>
                         ) : null}
                         {/* What the readings can and cannot say about this goal. */}
@@ -489,7 +489,7 @@ export default function Goal() {
                             : <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{noReadingLine(x.kind as MeasuredKind)}</Text>
                         ) : (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                            Nothing to measure this against — mark it done when you get there.
+                            Nothing to measure this against. Mark it done when you get there.
                           </Text>
                         )}
                       </View>
@@ -560,7 +560,7 @@ export default function Goal() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }} accessibilityLiveRegion="polite">
                 {targetDay
                   ? `That is ${shortDate(targetDay)}.`
-                  : 'No date — it stays open until you mark it done, and is never overdue.'}
+                  : 'No date. It stays open until you mark it done, and is never overdue.'}
               </Text>
 
               <View style={{ marginTop: sp.lg }}>

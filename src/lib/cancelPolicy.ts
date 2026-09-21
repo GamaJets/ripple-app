@@ -78,14 +78,14 @@ export function parseCancelHours(input: string | null | undefined): PolicyField 
   if (!Number.isFinite(n) || n < 0) {
     return {
       ok: false,
-      reason: 'A notice period is a number of hours. Nothing has changed — clear the field entirely to withdraw that half of the policy.',
+      reason: 'A notice period is a number of hours. Nothing has changed. Clear the field entirely to withdraw that half of the policy.',
     };
   }
   // The column is an `integer`, so a fraction does not survive the write. It is
   // refused rather than rounded, because rounding it stores a policy the owner
   // did not state and tells them it saved.
   if (!Number.isInteger(n)) {
-    return { ok: false, reason: 'A notice period is a whole number of hours. Nothing has changed — 12 or 24, not 12.5.' };
+    return { ok: false, reason: 'A notice period is a whole number of hours. Nothing has changed. Use 12 or 24, not 12.5.' };
   }
   if (n > MAX_CANCEL_HOURS) {
     return { ok: false, reason: 'A notice period longer than two weeks is refused. Nothing has changed.' };
@@ -122,7 +122,7 @@ export function parseCancelFee(
   const value = Number(majorFromMinor(read.minorUnits, currency));
   if (!Number.isFinite(value)) return { ok: false, reason: 'That is not an amount. Nothing has changed.' };
   if (value > MAX_CANCEL_FEE) {
-    return { ok: false, reason: 'That is more than Repple will record as a cancellation fee — check the zeros. Nothing has changed.' };
+    return { ok: false, reason: 'That is more than Repple will record as a cancellation fee. Check the zeros. Nothing has changed.' };
   }
   return { ok: true, value };
 }

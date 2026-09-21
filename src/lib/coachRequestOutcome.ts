@@ -202,7 +202,7 @@ export function coachRequestLine(
     case 'pending':
       return `${who} has not answered yet. Nothing is arranged, they are not coaching you, and you will see the answer here when it comes.`;
     case 'accepted':
-      return `${who} said yes, so they are coaching you — ${COACHED_MODE_SHORT[r.mode].toLowerCase()}. Your Coach is where the rest of it is.`;
+      return `${who} said yes, so they are coaching you (${COACHED_MODE_SHORT[r.mode].toLowerCase()}). Your Coach is where the rest of it is.`;
     case 'declined':
       return `${who} said no, so they are not coaching you and nobody is waiting on anything. Asking another coach is the thing left to do.`;
     case 'withdrawn':
@@ -267,7 +267,7 @@ export function coachRequestsUnreadNote(status: LoadStatus): string | null {
     case 'partial':
       return 'There are more requests on your record than fitted in one read, so these are the most recent of them rather than all of them.';
     case 'error':
-      return 'We couldn’t read the coaches you have asked, so this is not a list of your requests — and it is not us saying you have none. Check again when you have signal, and don’t ask a second coach on the strength of this.';
+      return 'We couldn’t read the coaches you have asked, so this is not a list of your requests, and it is not us saying you have none. Check again when you have signal, and don’t ask a second coach on the strength of this.';
   }
 }
 

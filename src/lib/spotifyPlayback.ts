@@ -62,7 +62,7 @@ function errorBody(body: unknown): { message?: string; reason?: string } {
 }
 
 export const ALLOWLIST_ADVICE =
-  'A Spotify app in development mode only works for the accounts on its allowlist — up to 5. ' +
+  'A Spotify app in development mode only works for the accounts on its allowlist, up to 5. ' +
   'The owner adds this Spotify account in the Spotify developer dashboard under the app’s Settings → User Management.';
 
 /**
@@ -234,6 +234,7 @@ export function playlistsFrom(raw: unknown): PlaylistRef[] {
 
 /** "24 tracks · Tim", with a dash where the record is silent. */
 export function playlistLine(p: PlaylistRef): string {
+  // dash-ok: the dash stands for a figure that could not be read, the app's unknown-not-zero sign (see fig() in src/ui/kit.tsx). Not punctuation.
   const count = p.trackCount === null ? '— tracks' : `${p.trackCount} track${p.trackCount === 1 ? '' : 's'}`;
   return p.ownerName ? `${count} · ${p.ownerName}` : count;
 }
@@ -268,8 +269,8 @@ export function playlistTracksNote(shown: number, total: number | null): string 
   if (total == null || total <= shown) return null;
   const missing = total - shown;
   return missing === 1
-    ? 'One more track is in this playlist and cannot be shown — it is either a file from your own machine or a track Spotify has since removed.'
-    : `${missing} more tracks are in this playlist and cannot be shown — they are files from your own machine, or tracks Spotify has since removed.`;
+    ? 'One more track is in this playlist and cannot be shown. It is either a file from your own machine or a track Spotify has since removed.'
+    : `${missing} more tracks are in this playlist and cannot be shown. They are files from your own machine, or tracks Spotify has since removed.`;
 }
 
 /**

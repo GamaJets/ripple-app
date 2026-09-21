@@ -215,11 +215,11 @@ export default function Cards() {
   // gate two lines above, and it was applied to the Progress card and to
   // nothing else on the screen.
   const hasPr = logKnown && scansKnown && !!topPr;
-  const UNREAD = logStatus === 'loading' ? 'Reading your training log…' : logStatus === 'partial' ? 'More logged than can be read at once — a “best ever” over part of it is not one' : 'We couldn’t read your training log';
+  const UNREAD = logStatus === 'loading' ? 'Reading your training log…' : logStatus === 'partial' ? 'More logged than can be read at once, and a “best ever” over part of it is not one' : 'We couldn’t read your training log';
   // The same three sentences for the OTHER read, in the words
   // app/(client)/records.tsx already uses for this exact case.
   const UNWEIGHED = c.scansStatus === 'loading' ? 'Reading your weight history…'
-    : c.scansStatus === 'partial' ? 'More weigh-ins on record than can be read at once — a top lift priced against part of them is not one'
+    : c.scansStatus === 'partial' ? 'More weigh-ins on record than can be read at once, and a top lift priced against part of them is not one'
     : 'We couldn’t read your weight history, and pull-ups and dips are priced against it';
   // The same three sentences again for the Progress card, which asks a
   // different question of the same read and so cannot borrow the one above.
@@ -234,7 +234,7 @@ export default function Cards() {
   // every figure on one is a public claim — a false claim about our own
   // failure is still a false claim.
   const UNWEIGHED_PROGRESS = c.scansStatus === 'loading' ? 'Reading your weight history…'
-    : c.scansStatus === 'partial' ? 'More weigh-ins on record than can be read at once — a change measured over part of them is not one'
+    : c.scansStatus === 'partial' ? 'More weigh-ins on record than can be read at once, and a change measured over part of them is not one'
     : 'We couldn’t read your weigh-ins';
 
   const cards = [
@@ -272,7 +272,7 @@ export default function Cards() {
     if (i === 1) {
       const lift = topPr ? weightIn(topPr.est1RM, wu) : null;
       return lift != null && topPr
-        ? `New milestone on ${appName}: ${topPr.exercise} — estimated 1RM ${lift}${wu}. The work is working.`
+        ? `New milestone on ${appName}: ${topPr.exercise}, estimated 1RM ${lift}${wu}. The work is working.`
         : `Chasing my first PR on ${appName}.`;
     }
     // Never a zero: this string leaves the phone. The card is unavailable
@@ -324,7 +324,7 @@ export default function Cards() {
       Alert.alert(
         'Card Sent to Your Share Sheet',
         r.captionCopied
-          ? 'Your words are on the clipboard — paste them into the post. A share sheet cannot carry a picture and its words to the same place, so they travel separately.'
+          ? 'Your words are on the clipboard. Paste them into the post. A share sheet cannot carry a picture and its words to the same place, so they travel separately.'
           : 'This version of the app could not put your words on the clipboard, so the picture went on its own.',
       );
       return;
@@ -379,7 +379,7 @@ export default function Cards() {
                 build, which is a different sentence with a different answer. */}
             {card.available ? (imageShareBlocker() ?? 'The card goes as a picture, and your words go on the clipboard to paste beside it.')
               : logKnown ? 'This card unlocks once there is something real to show.'
-              : 'Cards stay locked until we can read your record — nothing has been lost.'}
+              : 'Cards stay locked until we can read your record. Nothing has been lost.'}
           </Text>
         </Section>
 

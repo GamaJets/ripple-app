@@ -281,7 +281,7 @@ export default function InjuryDoc() {
     if (!fresh) {
       Alert.alert(
         'Could Not Open It Just Now',
-        'Your document is still stored — this is a problem getting a link to it, not a missing file. Pull the list down to refresh and try again.',
+        'Your document is still stored. This is a problem getting a link to it, not a missing file. Pull the list down to refresh and try again.',
       );
       return;
     }
@@ -329,7 +329,7 @@ export default function InjuryDoc() {
   const removeDoc = (doc: InjuryDocFile) => {
     Alert.alert(
       'Delete This Document?',
-      'The file is removed from your account. Any injuries you already confirmed from it stay — they are yours now, not the document\'s.',
+      'The file is removed from your account. Any injuries you already confirmed from it stay. They are yours now, not the document\'s.',
       [
         { text: 'Keep It', style: 'cancel' },
         {
@@ -383,7 +383,7 @@ export default function InjuryDoc() {
         <View key={cand.key} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
           <Icon name={d.verdict === 'added' ? 'check' : 'minus'} size={16} color={t.ink3} />
           <Text style={{ ...ty.body, color: t.ink2, flex: 1 }}>
-            {areaLabel(d.area)} — {d.verdict === 'added' ? 'added to your injuries' : 'not added'}
+            {areaLabel(d.area)} · {d.verdict === 'added' ? 'added to your injuries' : 'not added'}
           </Text>
           {d.verdict === 'rejected'
             ? <Ghost label="Undo" onPress={() => setDraft(cand.key, { verdict: 'open' })} />
@@ -486,7 +486,7 @@ export default function InjuryDoc() {
             per-document truth is printed against each document in the list
             below, once there is an answer to print. */}
         <Notice tone={t.brand} kicker="Private" title="Your coach never sees the file"
-          note={`${SCREEN_PROMISE} ${OPENS_IN_APP_NOTE} What your coach sees is the injury you confirm below — the area, how bad it is and your note — the same as if you had typed it in yourself.`} />
+          note={`${SCREEN_PROMISE} ${OPENS_IN_APP_NOTE} What your coach sees is the injury you confirm below (the area, how bad it is and your note), the same as if you had typed it in yourself.`} />
 
         {busy ? (
           <Card style={{ marginTop: sp.md }}>
@@ -651,7 +651,7 @@ export default function InjuryDoc() {
                   </Text>
                   {c.saveFailed ? (
                     <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-                      Your last profile change has not reached the server yet, so your coach may not see this one. It will retry — check the list before you rely on it.
+                      Your last profile change has not reached the server yet, so your coach may not see this one. It will retry. Check the list before you rely on it.
                     </Flag>
                   ) : null}
                   <View style={{ marginTop: sp.md }}>
@@ -682,7 +682,7 @@ export default function InjuryDoc() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Checking…</Text>
           ) : docsStatus === 'error' ? (
             <Flag tone={t.warn}>
-              We could not check what you have stored, so this is not a list of nothing — it is a list we could not read. Pull back in a moment.
+              We could not check what you have stored, so this is not a list of nothing. It is a list we could not read. Pull back in a moment.
             </Flag>
           ) : docsStatus === 'partial' ? (
             /* Its own sentence, and the list is still drawn under it: these
@@ -691,7 +691,7 @@ export default function InjuryDoc() {
                smaller number, it is a wrong one. */
             <View>
               <Flag tone={t.warn}>
-                You have more than {INJURY_DOC_LIST_CAP} documents stored, so this shows your {INJURY_DOC_LIST_CAP} most recent. The older ones are still here — they are just not on this list.
+                You have more than {INJURY_DOC_LIST_CAP} documents stored, so this shows your {INJURY_DOC_LIST_CAP} most recent. The older ones are still here. They are just not on this list.
               </Flag>
               {docs.map((doc, idx) => renderDoc(doc, idx))}
             </View>
@@ -710,7 +710,7 @@ export default function InjuryDoc() {
                member's own decision, which `SCREEN_PROMISE` above has already
                explained and `docSendLine` answers per document once there is
                an answer. */
-            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing stored yet. Anything you add is stored where only you can open it — and if you choose to have one read, this screen asks you first and then says, against that document, where it went.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>Nothing stored yet. Anything you add is stored where only you can open it. If you choose to have one read, this screen asks you first and then says, against that document, where it went.</Text>
           ) : docs.map((doc, idx) => renderDoc(doc, idx))}
         </Section>
       </ScrollView>
@@ -821,7 +821,7 @@ export default function InjuryDoc() {
                 This document did not open
               </Text>
               <Text style={{ ...ty.label, color: '#fff', opacity: 0.8, textAlign: 'center' }}>
-                Your file is still stored — this is a problem loading it, not a missing document. Try again, or close this and pull the list down to refresh.
+                Your file is still stored. This is a problem loading it, not a missing document. Try again, or close this and pull the list down to refresh.
               </Text>
               {/* A failed re-signature used to `return` with nothing said, so
                   the one button on a black screen over somebody's medical
@@ -840,7 +840,7 @@ export default function InjuryDoc() {
                   if (!fresh) {
                     Alert.alert(
                       'Still Could Not Open It',
-                      'Your document is still stored — this is a problem getting a link to it, not a missing file. Close this and pull the list down to refresh, then try again.',
+                      'Your document is still stored. This is a problem getting a link to it, not a missing file. Close this and pull the list down to refresh, then try again.',
                     );
                     return;
                   }

@@ -454,7 +454,7 @@ export function periodNote(span: ZoneSpan, period: string): string | null {
       const tail = span.unzoned
         ? `${named}, and at least one gym that has not set one`
         : named;
-      return `These gyms keep different clocks — ${tail} — so ${period} is not one window here. Each gym’s day starts and ends at its own hour, and this figure covers all of them.`;
+      return `These gyms keep different clocks (${tail}), so ${period} is not one window here. Each gym’s day starts and ends at its own hour, and this figure covers all of them.`;
     }
   }
 }
@@ -522,7 +522,7 @@ export function floorNote(roll: Roll): string | null {
   // which is nobody's.
   if (!roll.counted.length) {
     // numbers-ok: a count of GYMS under one owner, which cannot reach a thousand.
-    return `Not one of these ${total} gyms could be added up, so there is no figure — which is not the same as a figure of nothing. ${gaps}`;
+    return `Not one of these ${total} gyms could be added up, so there is no figure, which is not the same as a figure of nothing. ${gaps}`;
   }
   const n = roll.counted.length;
   // numbers-ok: both are counts of GYMS under one owner, and cannot reach a thousand.
@@ -543,10 +543,10 @@ export function moneyNote(roll: MoneyRoll): string | null {
     const pots = named
       ? `${named}, and at least one gym that recorded no currency at all`
       : 'and no two of them recorded the same thing';
-    return `These gyms do not count in one money — ${pots} — so there is no combined figure. Repple never adds money across currencies and never converts it.`;
+    return `These gyms do not count in one money (${pots}), so there is no combined figure. Repple never adds money across currencies and never converts it.`;
   }
   if (roll.cents != null && roll.currency == null) {
-    return 'This figure is real and no gym in it recorded what money it is in, so it is deliberately not labelled with what any of them charges today — that would be a guess.';
+    return 'This figure is real and no gym in it recorded what money it is in, so it is deliberately not labelled with what any of them charges today, because that would be a guess.';
   }
   return null;
 }
@@ -605,7 +605,7 @@ export function drillInto(sites: readonly SiteFigures[], siteId: string): Drill 
       site,
       depthNote: null,
       blocked:
-        'Your account is recorded as owning this gym and this sign-in cannot read it. Nothing failed — Repple has been told who owns it and has not been told to open its records here. Its own sign-in still shows everything.',
+        'Your account is recorded as owning this gym and this sign-in cannot read it. Nothing failed. Repple has been told who owns it and has not been told to open its records here. Its own sign-in still shows everything.',
     };
   }
   if (!isWhole(site.status)) {
@@ -617,13 +617,13 @@ export function drillInto(sites: readonly SiteFigures[], siteId: string): Drill 
           ? 'This gym’s figures have not come back yet.'
           : site.status === 'partial'
             ? 'This gym answered with more rows than came back, so nothing here can be totalled for it. The figures are withheld rather than shown short.'
-            : 'This gym’s figures could not be read. That is a read that failed rather than an answer about the gym — nothing here says it is empty.',
+            : 'This gym’s figures could not be read. That is a read that failed rather than an answer about the gym. Nothing here says it is empty.',
     };
   }
   return {
     site,
     depthNote:
-      'These are this gym’s totals. Its members, payments and timetable are not on this sign-in — every other screen in this console is showing the gym you are signed in to.',
+      'These are this gym’s totals. Its members, payments and timetable are not on this sign-in. Every other screen in this console is showing the gym you are signed in to.',
     blocked: null,
   };
 }

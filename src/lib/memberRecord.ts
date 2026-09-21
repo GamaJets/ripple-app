@@ -352,15 +352,15 @@ export function renewalNote(s: Standing, plan: PlanState): string {
   const every = plan.kind === 'plan'
     ? (plan.plan.interval === 'month' ? 'Renews monthly'
       : plan.plan.interval === 'year' ? 'Renews yearly'
-      : 'A one-off — this does not renew')
+      : 'A one-off that does not renew')
     : null;
   switch (s.kind) {
     case 'open':
       return every
         ? (plan.kind === 'plan' && plan.plan.interval === 'once'
-          ? 'A one-off — this does not renew'
+          ? 'A one-off that does not renew'
           : `${every}. Your gym has not recorded an end date.`)
-        : 'Open-ended — your gym has not recorded an end date.';
+        : 'Open-ended. Your gym has not recorded an end date.';
     case 'current':
     case 'expiring':
       return every ? `${every}. Runs to ${s.endsOn}.` : `Runs to ${s.endsOn}.`;

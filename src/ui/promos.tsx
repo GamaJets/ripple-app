@@ -234,7 +234,7 @@ export function PromosProvider({ children }: { children: ReactNode }) {
         duplicatesChecked: status === 'ready',
         reason: status === 'ready'
           ? `“${c}” is already one of this gym’s codes.`
-          : `“${c}” is in the list of codes this screen last read. That list may be out of date — pull down to read them again if you think this code was removed.`,
+          : `“${c}” is in the list of codes this screen last read. That list may be out of date. Pull down to read them again if you think this code was removed.`,
       };
     }
 

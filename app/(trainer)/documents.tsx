@@ -534,7 +534,7 @@ export default function CoachDocumentsScreen() {
       `Retire “${d.title}”?`,
       'It stops being shown to clients who have not accepted it, and stops being something you can require. '
       + 'Everyone who has already accepted it keeps that record and can still read what they agreed to. '
-      + 'This cannot be undone — issue a new version instead of bringing this one back.',
+      + 'This cannot be undone. Issue a new version instead of bringing this one back.',
       [
         { text: 'Keep It', style: 'cancel' },
         {
@@ -636,9 +636,9 @@ export default function CoachDocumentsScreen() {
                     had added no paperwork. The two cases are separated now, and
                     only the genuinely empty one says nothing was ever added. */}
                 {status === 'loading' ? 'Reading your documents.'
-                  : status === 'partial' ? 'Showing the most recent of your documents — there are more than fit in one read.'
+                  : status === 'partial' ? 'Showing the most recent of your documents. There are more than fit in one read.'
                     : live.length === 0 && retired.length === 0 ? 'You haven’t added any paperwork yet.'
-                      : live.length === 0 ? `Nothing is in circulation — the ${retired.length === 1 ? 'document you have added has' : `${retired.length} documents you have added have`} all been retired.`
+                      : live.length === 0 ? `Nothing is in circulation. The ${retired.length === 1 ? 'document you have added has' : `${retired.length} documents you have added have`} all been retired.`
                         : `${live.length} document${live.length === 1 ? '' : 's'} in circulation.`}
               </Text>
             )}
@@ -803,7 +803,7 @@ export default function CoachDocumentsScreen() {
                         <View style={{ marginTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring, paddingTop: sp.md }}>
                           {standingStatus === 'error' ? (
                             <Flag tone={t.warn}>
-                              That could not be read just now. Nobody’s acceptance has changed — this list simply isn’t it.
+                              That could not be read just now. Nobody’s acceptance has changed. This list simply isn’t it.
                             </Flag>
                           ) : standingStatus === 'partial' ? (
                             /* A mark, not coloured words: a truncated read is the

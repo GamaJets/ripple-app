@@ -75,7 +75,7 @@ const gymLabel = (inv: MemberInvite, names?: GymNames): string | null => {
  */
 export function invitePlanLine(inv: Pick<MemberInvite, 'planId' | 'planName'>): string | null {
   if (inv.planName && inv.planName.trim()) return `The plan attached to it is ${inv.planName.trim()}.`;
-  if (inv.planId) return 'A membership plan is attached to it, and its name could not be read here — the gym can tell you which.';
+  if (inv.planId) return 'A membership plan is attached to it, and its name could not be read here. The gym can tell you which.';
   return 'No plan is attached to it, so what you pay for is settled with the gym.';
 }
 
@@ -99,7 +99,7 @@ export function inviteWindowLine(
 /** What a member can do about an invitation that has run out, which is nothing
  *  in this app — so the sentence points at the only party who can reopen it. */
 export const LAPSED_NOTE =
-  'This invitation has passed its date, so it can no longer be accepted here. Ask the gym to send it again — nothing on this screen can reopen it.';
+  'This invitation has passed its date, so it can no longer be accepted here. Ask the gym to send it again. Nothing on this screen can reopen it.';
 
 /** What accepting actually does. Written in the present tense of the record it
  *  makes, not as a promise about what the gym will then do for you. */
@@ -198,6 +198,6 @@ export function acceptFailedMessage(reason?: string | null): string {
   if (r.includes('withdrawn')) return 'The gym withdrew that invitation, so nothing was accepted. They can send you another.';
   if (r.includes('expired')) return 'That invitation has passed its date, so nothing was accepted. Ask the gym to send it again.';
   if (r.includes('owner cannot join')) return 'This account owns a gym, so it cannot join one as a member. Nothing was accepted.';
-  if (r.includes('trainer cannot be moved')) return 'This account coaches at another gym, so a member invitation cannot move it. Nothing was accepted — the gym can add you at the desk instead.';
-  return 'Nothing was accepted — this did not reach the gym. Your invitation is still waiting, so you can try again in a moment.';
+  if (r.includes('trainer cannot be moved')) return 'This account coaches at another gym, so a member invitation cannot move it. Nothing was accepted. The gym can add you at the desk instead.';
+  return 'Nothing was accepted. This did not reach the gym. Your invitation is still waiting, so you can try again in a moment.';
 }

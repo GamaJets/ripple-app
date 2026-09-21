@@ -120,6 +120,6 @@ export function whyFailed(e: unknown): string {
   const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
   const msg = raw.trim();
   if (!msg) return 'no reason given';
-  if (/network|fetch|timeout|offline|connection/i.test(msg)) return `${msg} — the phone may have been offline`;
+  if (/network|fetch|timeout|offline|connection/i.test(msg)) return `${msg}. The phone may have been offline`;
   return msg;
 }

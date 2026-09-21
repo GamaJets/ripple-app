@@ -92,7 +92,7 @@ export const HAS_NATIVE_AUDIO = requireOptionalNativeModule(AUDIO) != null;
  * updates" sends people to the App Store listing where nothing is waiting.
  */
 export const UPDATE_REQUIRED_NOTE =
-  'This version of the app was installed before video playback was added, so the player is not in it. Updating to the latest build restores it — there is nothing wrong with the clip itself.';
+  'This version of the app was installed before video playback was added, so the player is not in it. Updating to the latest build restores it. There is nothing wrong with the clip itself.';
 
 /** Whether this binary can put text on the clipboard. */
 export const HAS_NATIVE_CLIPBOARD = requireOptionalNativeModule(CLIPBOARD) != null;
@@ -160,7 +160,7 @@ export const CALENDAR_UNAVAILABLE_NOTE =
   'This version of the app was installed before reading your phone\u2019s calendar was added, so it cannot see what is already in your diary. Blocking time by hand still works and is unaffected, and updating to the latest build brings this in.';
 
 export const DOCUMENT_PICKER_UNAVAILABLE_NOTE =
-  'This version of the app was installed before choosing a file was added, so it cannot open your files. Updating to the latest build restores it — there is nothing wrong with the file itself.';
+  'This version of the app was installed before choosing a file was added, so it cannot open your files. Updating to the latest build restores it. There is nothing wrong with the file itself.';
 
 // Required through try/catch rather than imported, exactly as src/ui/sounds.ts
 // requires expo-audio and for the same reason: a bare `import` is evaluated at

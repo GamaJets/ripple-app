@@ -313,7 +313,7 @@ export function pausePreviewLine(
     // Deliberately says nothing about a fee, in either direction. "This costs
     // nothing" and "this will cost you" are both claims, and a floor supports
     // neither.
-    return 'We could not read your own calendar fully just now, so we cannot tell you how many sessions fall in those dates or whether any would carry a late fee. Your coach’s calendar is the authority and is checked when you confirm — the account you get afterwards is the true one.';
+    return 'We could not read your own calendar fully just now, so we cannot tell you how many sessions fall in those dates or whether any would carry a late fee. Your coach’s calendar is the authority and is checked when you confirm, and the account you get afterwards is the true one.';
   }
   if (upcoming === 0) return 'Nothing of this arrangement is booked in those dates, so we do not expect anything to be cancelled. Your coach’s calendar is the authority and is checked when you confirm.';
   // "will be cancelled" was stated as fact over a set counted on this device.
@@ -351,7 +351,7 @@ export function pauseOutcomeLines(r: PauseReport): string[] {
   // charged. Those are the two sentences a member reads after an irreversible
   // act, and neither may be printed from a figure nobody sent.
   if (r.freed == null) {
-    lines.push('Those dates are paused. Repple could not read back how many sessions were booked inside them, so it cannot say how many were cancelled — check those dates on your calendar.');
+    lines.push('Those dates are paused. Repple could not read back how many sessions were booked inside them, so it cannot say how many were cancelled. Check those dates on your calendar.');
   } else {
     lines.push(r.freed === 0
       ? 'Those dates are paused. Nothing was booked in them, so nothing was cancelled.'
@@ -397,7 +397,7 @@ export function pauseOutcomeLines(r: PauseReport): string[] {
  */
 export function pauseRangeRefusal(from: string, to: string, today: string): string | null {
   const iso = /^\d{4}-\d{2}-\d{2}$/;
-  if (!iso.test(from) || !iso.test(to)) return 'Pick both dates — the first day you are away and the last.';
+  if (!iso.test(from) || !iso.test(to)) return 'Pick both dates: the first day you are away and the last.';
   if (to < from) return 'The last day is before the first. Tap the dates again in the other order.';
   // A pause over dates that have already gone cannot remove anything: the
   // occurrences are in the past, and the materialiser does not revisit them. It
@@ -520,7 +520,7 @@ export function coachMoveRefusalLine(r: CoachMoveReport, who: string | null, at:
   const still = `${subject} has not moved and is still booked as it was.`;
   switch (r.reason) {
     case 'taken':
-      return `That slot is no longer open — somebody booked it, or it was removed. ${still} Pick another time.`;
+      return `That slot is no longer open. Somebody booked it, or it was removed. ${still} Pick another time.`;
     case 'clash':
       return `${who ?? 'That client'} already has a session with you across that hour. ${still} Pick another time.`;
     case 'already_started':
@@ -559,13 +559,13 @@ export function coachMovedLine(
   const head = `${who} moved from ${from} to ${to}.`;
   const told = toldClient
     ? ` ${who} was sent a notification.`
-    : ` ${who} could NOT be notified, so tell them yourself — they are expecting ${from}.`;
+    : ` ${who} could NOT be notified, so tell them yourself. They are expecting ${from}.`;
   const hour = r.promoted
     ? ` ${from} went straight to the next client on its waitlist.`
     : r.waiting == null
       // Neither of the other two sentences. Nobody was counted, so nobody can
       // say the queue was empty and nobody can say it was not.
-      ? ` ${from} is open again on your calendar. No waitlist count came back with the move, so this app cannot say whether anybody is still in line for it — check the waitlist before you offer that hour to somebody else.`
+      ? ` ${from} is open again on your calendar. No waitlist count came back with the move, so this app cannot say whether anybody is still in line for it. Check the waitlist before you offer that hour to somebody else.`
       : r.waiting > 0
         ? ` ${from} is open again on your calendar.`
         : ` ${from} is open again on your calendar and nobody was waiting for it.`;

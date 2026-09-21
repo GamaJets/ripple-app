@@ -173,8 +173,8 @@ export function weakestLift(lifts: readonly LiftStanding[]): BalanceRead {
 export function balanceLine(read: BalanceRead): string | null {
   if (read.kind === 'too-few') return null;
   if (read.kind === 'even') {
-    return 'Your graded lifts all sit within about a level of each other — nothing is lagging the rest.';
+    return 'Your graded lifts all sit within about a level of each other. Nothing is lagging the rest.';
   }
   const rungs = read.levels === 1 ? 'about a level' : `about ${read.levels} levels`;
-  return `Of the lifts we could grade, your ${read.name} sits furthest back — ${rungs} below your ${read.aheadName} on their own scales. Ratios are not comparable between lifts, so this compares each one against its own standard.`;
+  return `Of the lifts we could grade, your ${read.name} sits furthest back, ${rungs} below your ${read.aheadName} on their own scales. Ratios are not comparable between lifts, so this compares each one against its own standard.`;
 }

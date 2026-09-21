@@ -112,8 +112,8 @@ export const answerProblem = (why: UnreadableAnswer): string =>
   why === 'no-json'
     ? 'The reader answered in words rather than with figures, so there is nothing to fill in. Type it in instead.'
     : why === 'unparseable'
-      ? 'The reader’s answer was malformed and none of it could be read. Nothing has been filled in — try again, or type it in.'
-      : 'The reader answered with something that is not a set of figures. Nothing has been filled in — try again, or type it in.';
+      ? 'The reader’s answer was malformed and none of it could be read. Nothing has been filled in. Try again, or type it in.'
+      : 'The reader answered with something that is not a set of figures. Nothing has been filled in. Try again, or type it in.';
 
 /**
  * A number, or null. Never a zero standing in for an absence.

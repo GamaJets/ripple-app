@@ -484,7 +484,7 @@ export default function OwnerOps() {
     if (!zone || zone === next) { void saveZone(next); return; }
     Alert.alert(
       'Change This Gym’s Timezone?',
-      `This gym is measured in ${zone}. Changing it to ${next} re-cuts every day, month and payroll period in the owner console — including months already closed, where a late class can move into the month next door.`,
+      `This gym is measured in ${zone}. Changing it to ${next} re-cuts every day, month and payroll period in the owner console, including months already closed, where a late class can move into the month next door.`,
       [
         { text: 'Keep ' + zone, style: 'cancel' },
         { text: 'Use ' + next, style: 'destructive', onPress: () => { void saveZone(next); } },
@@ -502,7 +502,7 @@ export default function OwnerOps() {
       setZone(next); setZoneQuery(''); setZoneErr(null);
       setZoneMsg({
         bad: false,
-        text: `This gym’s day is now measured in ${next}. Every date and time on the owner console — the month close, the payroll month, footfall by hour — is drawn on it from here on, and figures already on a screen change when it is next read.`,
+        text: `This gym’s day is now measured in ${next}. Every date and time on the owner console (the month close, the payroll month, footfall by hour) is drawn on it from here on, and figures already on a screen change when it is next read.`,
       });
     } catch (e: any) {
       reportError('ops.saveZone', e);
@@ -574,7 +574,7 @@ export default function OwnerOps() {
     if (!cur) { void saveCurrency(next); return; }
     Alert.alert(
       'Change What This Gym Is Priced In?',
-      `This gym is priced in ${cur}. Nothing already recorded is re-denominated — payments, plans and passes keep the currency they were written in — so this gym would hold both ${cur} and ${next}, and any total that mixes them is withheld rather than added up.`,
+      `This gym is priced in ${cur}. Nothing already recorded is re-denominated. Payments, plans and passes keep the currency they were written in, so this gym would hold both ${cur} and ${next}, and any total that mixes them is withheld rather than added up.`,
       [
         { text: `Keep ${cur}`, style: 'cancel' },
         { text: `Use ${next}`, style: 'destructive', onPress: () => { void saveCurrency(next); } },
@@ -609,7 +609,7 @@ export default function OwnerOps() {
     const saved = await updateTenant({ sessionFee: next });
     setFeeBusy(false);
     if (!saved) {
-      setFeeMsg({ bad: true, text: 'Not saved. Your session fee is unchanged — nothing on the other screens has moved.' });
+      setFeeMsg({ bad: true, text: 'Not saved. Your session fee is unchanged, and nothing on the other screens has moved.' });
       return;
     }
     setFeeDraft(null);
@@ -847,7 +847,7 @@ export default function OwnerOps() {
     const { data, error } = await supabase.rpc('resolve_feedback', { p_id: rowId, p_resolved: true });
     if (error || !data) {
       if (error) reportError('ownerOps.resolveTicket', error);
-      Alert.alert('Not Resolved', 'This ticket is still open — nothing was saved. Try again in a moment.');
+      Alert.alert('Not Resolved', 'This ticket is still open. Nothing was saved. Try again in a moment.');
       return;
     }
     setResolvedAt((p) => ({ ...(p ?? {}), [rowId]: String(data) }));
@@ -994,7 +994,7 @@ export default function OwnerOps() {
             : needsWhole ? (needs.length ? `${needs.length} Need${needs.length === 1 ? 's' : ''} You` : 'All Clear')
             : needs.length ? 'Needs You' : 'Not Checked'}
           meta={needsReading && !needs.length ? undefined
-            : !needsWhole ? 'Not everything could be checked — see below.'
+            : !needsWhole ? 'Not everything could be checked. See below.'
             : needs.length ? needs.slice(0, 2).map((n) => n.name).join(' · ')
             : 'Payments, support, deletions, equipment and settings all read.'} />
 
@@ -1012,7 +1012,7 @@ export default function OwnerOps() {
               source that did not answer. */}
           {unchecked.length > 0 ? (
             <Flag tone={t.warn} style={{ marginTop: needs.length ? sp.md : 0 }}>
-              {`Could not be checked: ${listOf(unchecked)}. That is a read that failed, not an all-clear — pull down to try again.`}
+              {`Could not be checked: ${listOf(unchecked)}. That is a read that failed, not an all-clear. Pull down to try again.`}
             </Flag>
           ) : null}
           {shortRead.length > 0 ? (
@@ -1122,7 +1122,7 @@ export default function OwnerOps() {
                     // once, and a cleared field after a refused write is how a
                     // notice gets lost between the owner and the server.
                     if (!res.ok || !res.delivery) {
-                      Alert.alert('Not Posted', 'That could not be posted, so no member has seen it. Your words are still here — try again in a moment.');
+                      Alert.alert('Not Posted', 'That could not be posted, so no member has seen it. Your words are still here. Try again in a moment.');
                       return;
                     }
                     setText(''); setAnnPush(false);
@@ -1152,8 +1152,8 @@ export default function OwnerOps() {
                       on 'ready'; the sentence below it was not. */}
                   {noticeStatus === 'loading' ? 'Reading your notices…'
                     : !isWhole(noticeStatus)
-                    ? 'More notices than fit in one read, and none of yours is among the ones that came back. That is not the same as having sent none — pull down to read them again.'
-                    : 'Nothing sent yet — notices you post appear here.'}
+                    ? 'More notices than fit in one read, and none of yours is among the ones that came back. That is not the same as having sent none. Pull down to read them again.'
+                    : 'Nothing sent yet. Notices you post appear here.'}
                 </Empty>
               ) : myNotices.map((a, i) => (
                 <View key={a.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -1185,7 +1185,7 @@ export default function OwnerOps() {
                   // An empty field under a failed read is not "no fee set", and
                   // saving over it would write a value read off a failure.
                   <Empty tone={t.warn}>
-                    Your gym could not be read, so the fee it currently holds is not known — this is not a
+                    Your gym could not be read, so the fee it currently holds is not known. This is not a
                     statement that none is set. Nothing can be changed until it can be read.
                   </Empty>
                 ) : !tenant ? (
@@ -1207,7 +1207,7 @@ export default function OwnerOps() {
                       placeholder="Not set" placeholderTextColor={t.ink3} keyboardType="decimal-pad"
                       accessibilityLabel={cur
                         ? `Session fee in ${cur}`
-                        : `Session fee. Your gym has not said what it charges in, so this field is only labelled ${GYM_CURRENCY} as a placeholder — set your currency below first.`}
+                        : `Session fee. Your gym has not said what it charges in, so this field is only labelled ${GYM_CURRENCY} as a placeholder. Set your currency below first.`}
                       style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
                   </View>
                   {/* ── the currency, ALWAYS offered ────────────────────────
@@ -1250,7 +1250,7 @@ export default function OwnerOps() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                       {tenant.sessionFee == null
                         ? 'Not set. Until it is, delivered sessions are counted but not valued.'
-                        : 'Clear the field and save to withdraw it — an empty fee is not a fee of zero.'}
+                        : 'Clear the field and save to withdraw it. An empty fee is not a fee of zero.'}
                     </Text>
                   )}
                   <View style={{ marginTop: sp.lg }}>
@@ -1350,7 +1350,7 @@ export default function OwnerOps() {
                 <Empty tone={t.ink3}>Reading your gym…</Empty>
               ) : tenantStatus === 'error' ? (
                 <Empty tone={t.warn}>
-                  Your gym could not be read, so the policy it currently holds is not known — this is not a
+                  Your gym could not be read, so the policy it currently holds is not known. This is not a
                   statement that none is set. Nothing can be changed until it can be read.
                 </Empty>
               ) : (<>
@@ -1397,7 +1397,7 @@ export default function OwnerOps() {
                     goes on the mark and the words stay in ink. */}
                 {!cur ? (
                   <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
-                    Your gym has no currency set, so a fee saved here cannot be shown to members as an amount —
+                    Your gym has no currency set, so a fee saved here cannot be shown to members as an amount;
                     they are told you charge for it and to ask you what it is. Set a currency above and the
                     figure appears.
                   </Flag>
@@ -1409,7 +1409,7 @@ export default function OwnerOps() {
                 ) : (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     Clear both and save to withdraw the policy. An empty notice is not a zero-hour window, and
-                    an empty fee is not a free cancellation — both of those you can state by entering 0.
+                    an empty fee is not a free cancellation. Both of those you can state by entering 0.
                   </Text>
                 )}
                 <View style={{ marginTop: sp.lg }}>
@@ -1495,7 +1495,7 @@ export default function OwnerOps() {
                   <Empty tone={t.ink3}>This account is not attached to a gym, so there is no timezone to set.</Empty>
                 ) : zoneErr ? (
                   <Empty tone={t.warn}>
-                    This gym’s timezone could not be read, so whether one is set is not known — this is
+                    This gym’s timezone could not be read, so whether one is set is not known. This is
                     not a statement that none is. Nothing can be changed until it can be read.
                   </Empty>
                 ) : (<>
@@ -1514,13 +1514,13 @@ export default function OwnerOps() {
                   ) : (
                     <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
                       Not set. Until it is, every date in the owner console is drawn on whichever
-                      machine it is read from — right at the front desk by accident, and wrong for
+                      machine it is read from: right at the front desk by accident, and wrong for
                       anyone reading from another country.
                     </Flag>
                   )}
 
                   <TextInput value={zoneQuery} onChangeText={(v) => { setZoneQuery(v); if (zoneMsg) setZoneMsg(null); }}
-                    placeholder={zoneAll.length ? 'Search a city — London, Dubai' : 'Europe/London'}
+                    placeholder={zoneAll.length ? 'Search a city, e.g. London, Dubai' : 'Europe/London'}
                     placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
                     accessibilityLabel="Search for the city this gym is in"
                     style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
@@ -1546,7 +1546,7 @@ export default function OwnerOps() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                       {typedZone.kind === 'bad'
                         ? typedZone.reason
-                        : `Nothing matches “${zoneQuery.trim()}”. Search the nearest large city rather than the town — zones are named after the city whose clock a place keeps.`}
+                        : `Nothing matches “${zoneQuery.trim()}”. Search the nearest large city rather than the town. Zones are named after the city whose clock a place keeps.`}
                     </Text>
                   ) : null}
 
@@ -1561,7 +1561,7 @@ export default function OwnerOps() {
                   {readerZone() ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                       This phone’s own clock is set to {readerZone()}. That is where the phone is, which
-                      is not necessarily where the gym is — so it is not filled in for you.
+                      is not necessarily where the gym is, so it is not filled in for you.
                     </Text>
                   ) : null}
                 </>)}
@@ -1579,7 +1579,7 @@ export default function OwnerOps() {
                 // but they are not the inbox, and saying nothing here would let
                 // however many of them there are stand in for all of it.
                 <Empty tone={t.warn}>
-                  The support inbox could not be read. This is not "no tickets" — feedback sent from inside the app
+                  The support inbox could not be read. This is not "no tickets": feedback sent from inside the app
                   may be waiting, and nothing on this screen has ruled that out.
                 </Empty>
               ) : resolvedFailed ? (
@@ -1687,7 +1687,7 @@ export default function OwnerOps() {
                       is the only state in which a hundred rows means there are
                       more, and it is the only state that now says so. */}
                   {evStatus === 'partial'
-                    ? ' There is more activity than fits in one read, so these are the most recent hundred and there are older entries this screen has not seen — which is why there is no count above it.'
+                    ? ' There is more activity than fits in one read, so these are the most recent hundred and there are older entries this screen has not seen. That is why there is no count above it.'
                     : ''}
                 </Text>
               )}

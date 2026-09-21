@@ -116,7 +116,7 @@ export interface SpendEntry {
 }
 
 export const SPEND_COMES_FROM_THE_BOOKS_NOTE =
-  'What a machine has cost is read from the gym’s costs — the rows in the books — and never from the '
+  'What a machine has cost is read from the gym’s costs (the rows in the books) and never from the '
   + 'figures typed on the maintenance log. The two are separate records of the same money, they are '
   + 'never added together, and a repair that was written on the log and never entered as a cost is '
   + 'listed below rather than counted.';
@@ -254,7 +254,7 @@ export function machineSpend(
 export function offBooksNote(n: number): string | null {
   if (n <= 0) return null;
   return n === 1
-    ? 'One maintenance record carries a figure that is in no cost row, so it is not in the books and is not counted above. Enter it as a cost and link it, or leave it — but it is not in this gym’s P&L as things stand.'
+    ? 'One maintenance record carries a figure that is in no cost row, so it is not in the books and is not counted above. Enter it as a cost and link it, or leave it, but it is not in this gym’s P&L as things stand.'
     : `${n} maintenance records carry figures that are in no cost row, so they are not in the books and are not counted above. Each is money this gym’s P&L does not know about.`;
 }
 
@@ -279,15 +279,15 @@ export function offBooksFirst(entries: readonly SpendEntry[]): SpendEntry[] {
  */
 export function linkBlocker(entry: SpendEntry, cost: GymCost | null): string | null {
   if (!cost) {
-    return 'Choose a cost to link this to. If the money is not in the books yet, record it on the costs screen first — linking cannot create a cost, and a cost nobody typed is not one.';
+    return 'Choose a cost to link this to. If the money is not in the books yet, record it on the costs screen first. Linking cannot create a cost, and a cost nobody typed is not one.';
   }
   if (entry.costId && entry.costId !== cost.id) {
-    return 'This entry is already linked to a cost. Unlink it first — an entry pointing at two costs would count the same repair twice, which is the one thing this must not do.';
+    return 'This entry is already linked to a cost. Unlink it first. An entry pointing at two costs would count the same repair twice, which is the one thing this must not do.';
   }
   const a = (entry.currency || '').trim().toUpperCase();
   const b = (cost.currency || '').trim().toUpperCase();
   if (a && b && a !== b) {
-    return `This entry says ${a} and that cost says ${b}. Two currencies about one repair is not a difference this can absorb — check which is right, and correct the one that is wrong, before linking them.`;
+    return `This entry says ${a} and that cost says ${b}. Two currencies about one repair is not a difference this can absorb. Check which is right, and correct the one that is wrong, before linking them.`;
   }
   return null;
 }
@@ -418,7 +418,7 @@ export async function linkLogToCost(
   if (!row || row.cost_id !== costId) {
     throw new Error(
       'That maintenance record may not have been linked: the row came back without the cost on it. '
-      + 'Reload this page and check before linking it again — nothing about the cost itself has been '
+      + 'Reload this page and check before linking it again. Nothing about the cost itself has been '
       + 'changed either way.',
     );
   }

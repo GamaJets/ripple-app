@@ -34,7 +34,7 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
    */
   const healthConnectReason = (): string =>
     Platform.OS === 'android'
-      ? 'This build of Repple does not contain the Health Connect reader. It is part of the app itself, so it arrives with a new version rather than in an update — WHOOP and Oura connect here today and are unaffected.'
+      ? 'This build of Repple does not contain the Health Connect reader. It is part of the app itself, so it arrives with a new version rather than in an update. WHOOP and Oura connect here today and are unaffected.'
       : 'Health Connect is Android’s health store, so there is nothing on this phone for it to read. Apple Health above is the equivalent here.';
 
   return {

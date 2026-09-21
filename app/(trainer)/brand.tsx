@@ -210,7 +210,7 @@ export default function CoachBrand() {
         {status === 'error' ? (
           <Section>
             <Flag tone={t.warn}>
-              Your branding could not be read, so what is set is not known — this is not a coach who has set none.
+              Your branding could not be read, so what is set is not known. This is not a coach who has set none.
               Nothing here can be changed until it can be read.
             </Flag>
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
@@ -255,7 +255,7 @@ export default function CoachBrand() {
               <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{nameMsg.text}</Flag>
             ) : (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                {nameMsg ? nameMsg.text : 'Leave it empty to coach under your own name. An empty field clears it — it does not mean you have no name.'}
+                {nameMsg ? nameMsg.text : 'Leave it empty to coach under your own name. An empty field clears it; it does not mean you have no name.'}
               </Text>
             )}
             <View style={{ marginTop: sp.lg }}>
@@ -411,7 +411,7 @@ export default function CoachBrand() {
               A client who trains at a gym sees that gym's branding instead of yours. Membership is what the gym holds about them; you are their coach, not their club.
             </Text>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
-              This does not change the app itself — its name in the store, its icon, or who published it. Repple makes the app; the coaching inside it is yours.
+              This does not change the app itself: its name in the store, its icon, or who published it. Repple makes the app; the coaching inside it is yours.
             </Text>
           </Expandable>
         </>)}

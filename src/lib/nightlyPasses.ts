@@ -117,7 +117,7 @@ export const NIGHTLY_PASSES: readonly PassDef[] = [
     title: 'Session packs out of time',
     what: 'Looks for paid session packs whose validity has run out.',
     titles: ['A session pack has run out of time'],
-    alsoDoes: 'This one also CLOSES those packs — the unused sessions on an expired pack stop being '
+    alsoDoes: 'This one also CLOSES those packs: the unused sessions on an expired pack stop being '
       + 'bookable. On a night it does not run, they stay bookable.',
   },
   {
@@ -213,7 +213,7 @@ export function tallyPasses(rows: readonly PassNotice[]): PassTally[] {
 export function passCountLine(t: PassTally, whole: boolean): string {
   if (!whole) {
     return t.seen === 0
-      ? 'Nothing came back for this one, and the read was not whole — which is not the same as nothing.'
+      ? 'Nothing came back for this one, and the read was not whole, which is not the same as nothing.'
       : `At least ${num(t.seen)} in the last week. The read stopped short, so there may be more.`;
   }
   if (t.seen === 0) return 'Nothing written to your inbox in the last week.';
@@ -231,7 +231,7 @@ export function passCountLine(t: PassTally, whole: boolean): string {
  * the product at once.
  */
 export const SILENCE_IS_NOT_PROOF =
-  'An empty line above means nothing was written to your inbox — not that the check ran and found '
+  'An empty line above means nothing was written to your inbox, not that the check ran and found '
   + 'nothing. Repple cannot show you that these ran: that is kept on the server, in a place the app '
   + 'is not allowed to read. They have failed on every run for a whole day before now, and this '
   + 'screen looked exactly like a quiet week while it happened.';
@@ -240,7 +240,7 @@ export const SILENCE_IS_NOT_PROOF =
 export const HANDED_NOT_ARRIVED =
   'Where a notice was handed to the push sender, that is the last thing Repple sees of it. Whether '
   + 'your phone was on, whether the banner appeared and whether you read it are not things it is '
-  + 'told — and several notices in one night are folded into a single banner on purpose, so one '
+  + 'told, and several notices in one night are folded into a single banner on purpose, so one '
   + 'banner is not one notice.';
 
 /** How many of a pass's notices went out to the sender, or null when there is

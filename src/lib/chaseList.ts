@@ -188,7 +188,7 @@ export function chaseGroups(book: AgeingBook | null | undefined, status: LoadSta
 function noteLine(row: AgedInvoice): string {
   const inv: CoachInvoice = row.invoice;
   const amount = minorMoney(inv.amountCents, inv.currency);
-  const head = `${invoiceNumber(inv.seq)} — ${amount ?? 'see the invoice for the amount'}`;
+  const head = `${invoiceNumber(inv.seq)} · ${amount ?? 'see the invoice for the amount'}`;
   const what = String(inv.description ?? '').trim();
   const body = what ? `${head}, for ${what}` : head;
   // A chase date is the coach's own working note and was never shown to
@@ -196,7 +196,7 @@ function noteLine(row: AgedInvoice): string {
   // "late" against one carries its issue date and nothing about lateness.
   if (row.age.state === 'overdue' && !row.age.fromChaseDate && inv.dueOn) {
     const d = row.age.daysOverdue ?? 0;
-    return `${body}, due ${invoiceDayLabel(inv.dueOn)} — ${d} ${d === 1 ? 'day' : 'days'} ago`;
+    return `${body}, due ${invoiceDayLabel(inv.dueOn)}, ${d} ${d === 1 ? 'day' : 'days'} ago`;
   }
   if (row.age.state === 'due-today' && !row.age.fromChaseDate && inv.dueOn) {
     return `${body}, due today`;

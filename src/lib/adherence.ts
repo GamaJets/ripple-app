@@ -218,7 +218,7 @@ function daysOf(w: DayWindow): string[] {
  *  under its own id, because a line the coach cannot name is better than a line
  *  they cannot see. The ids are buildChecklist's, in src/lib/checklist.ts. */
 const DERIVED_LABEL: Record<string, string> = {
-  train: 'Train — the session their plan schedules',
+  train: 'Train: the session their plan schedules',
   kcal: 'Their calorie target',
   protein: 'Their protein target',
   water: 'Water',
@@ -373,7 +373,7 @@ export function summariseAdherence(input: AdherenceInput): AdherenceSummary {
  */
 export function setItemLine(a: SetItemAdherence): string {
   if (a.noRate === 'too-new') {
-    return 'Added just now — no complete day has passed under it yet, so there is nothing to look at.';
+    return 'Added just now. No complete day has passed under it yet, so there is nothing to look at.';
   }
   if (a.noRate === 'undated') {
     return `No date on this line, so how far back it could have been ticked is unknown. ${a.ticked} ${a.ticked === 1 ? 'tick' : 'ticks'} on the record in the last four weeks, out of a number of days this screen cannot work out.`;
@@ -386,5 +386,5 @@ export function setItemLine(a: SetItemAdherence): string {
   const n = a.eligibleDays ?? 0;
   const head = `Ticked ${a.ticked} of the ${n} ${n === 1 ? 'day' : 'days'} it has been on their list.`;
   if (!a.silentDays) return head;
-  return `${head} ${a.silentDays} of those ${a.silentDays === 1 ? 'is a day' : 'are days'} with nothing logged at all — a miss and a day they never opened the app look the same from here.`;
+  return `${head} ${a.silentDays} of those ${a.silentDays === 1 ? 'is a day' : 'are days'} with nothing logged at all. A miss and a day they never opened the app look the same from here.`;
 }

@@ -272,7 +272,7 @@ export default function Muscles() {
         <SectionHead title="Could Not Read This" />
         <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>
           We could not read your training, the exercise catalogue, or both, so there is no picture
-          of your muscles to draw. Nothing has been lost — this screen failed to read what is
+          of your muscles to draw. Nothing has been lost. This screen failed to read what is
           there, so it cannot tell you what is in it either way.
         </Text>
         <View style={{ alignSelf: 'flex-start' }}><Ghost label="Try Again" onPress={retry} /></View>
@@ -470,7 +470,7 @@ export default function Muscles() {
               {bodyKnown
                 ? `${num(e.unpricedSets)} of the sets counted here carry no load on record, so no weight is shown for them.`
                 : bodyPending
-                ? `${num(e.unpricedSets)} of the sets counted here carry no load yet — your weight history is still being read. Nothing is missing from your record.`
+                ? `${num(e.unpricedSets)} of the sets counted here carry no load yet because your weight history is still being read. Nothing is missing from your record.`
                 : `${num(e.unpricedSets)} of the sets counted here carry no load because your weight history could not be read just now. That is this screen rather than a gap in your record.`}
             </Text>
           ) : null}
@@ -553,7 +553,7 @@ export default function Muscles() {
       <SectionHead title="Recovery Map" note={rests.length ? `${num(rests.length)} muscles` : undefined} />
       {rests.length === 0 ? (
         <Text style={{ ...ty.body, color: t.ink2 }}>
-          There is nothing to map yet — no set in this window could be filed to a muscle, and the
+          There is nothing to map yet. No set in this window could be filed to a muscle, and the
           exercise catalogue is what would otherwise list the muscles you have not trained.
         </Text>
       ) : rests.map((r, i) => (

@@ -464,7 +464,7 @@ export default function Library() {
    case 'platform': return `From the ${BRAND.label} library`;
    // Never the library's. There is no row behind this clip, nobody but this
    // device can see it, and no coach put it here for this member.
-   case 'local': return 'Saved on this device only — not from the library, and not your coach’s';
+   case 'local': return 'Saved on this device only, not from the library, and not your coach’s';
   }
  };
  const source = (v: VideoItem) => clipCaption(clipOwner({ id: v.id, trainerId: v.trainerId ?? null }, coachId));
@@ -530,7 +530,7 @@ export default function Library() {
   const trailing = readLift(kg, wu);
   if (!trailing.ok) { Alert.alert('Check That Load', trailing.reason); return; }
   const pending = (parseInt(reps, 10) || 0) > 0 ? [...banked, [parseInt(reps, 10), trailing.kg ?? 0, trailing.kg == null] as [number, number, boolean]] : banked;
-  if (!pending.length) { Alert.alert('Nothing to Log', 'Add a set first — reps, and the weight if there was one.'); return; }
+  if (!pending.length) { Alert.alert('Nothing to Log', 'Add a set first: reps, and the weight if there was one.'); return; }
   setSaving(true);
   // No `kcal`. Train derives an energy estimate across a whole session's work;
   // one set logged on its own has no session around it to derive from, and the
@@ -549,7 +549,7 @@ export default function Library() {
    // Kept rather than lost, so the sheet closes and the banked sets are
    // cleared exactly as they are on a real save — leaving them in the form as
    // well is how one set becomes two.
-   Alert.alert('Saved on This Phone', `${open.name} has not reached your training log yet — there is no connection. Nothing is lost: it is saved on this phone and goes up on its own next time you have signal.`);
+   Alert.alert('Saved on This Phone', `${open.name} has not reached your training log yet because there is no connection. Nothing is lost: it is saved on this phone and goes up on its own next time you have signal.`);
    setBanked([]); setReps(''); setKg('');
    close();
    return;
@@ -641,7 +641,7 @@ export default function Library() {
         <IconPlate icon="video" tone="neutral" />
         <Text style={{ ...ty.label, color: t.ink3, flex: 1 }}>
          {videos.length === 0
-          ? 'No clips yet — they appear here as your coach uploads them.'
+          ? 'No clips yet. They appear here as your coach uploads them.'
           : term && group !== 'All' ? `No clip in ${group} matches “${q.trim()}”.`
           : term ? `No clip matches “${q.trim()}”.`
           : `No clips filed under ${group}. Every ${group} movement we know is listed further down.`}
@@ -743,7 +743,7 @@ export default function Library() {
      ) : cat.status === 'error' ? (
       // Not "no exercises". We have 917 of them; we could not read them.
       <Notice tone={t.warn} kicker="Catalogue" title="The exercise list could not be read"
-       note="This is our end, not yours — the movements are still there. Try again once you have signal." />
+       note="This is our end, not yours. The movements are still there. Try again once you have signal." />
      ) : cat.signedOut ? (
       // The read POLICY is `to authenticated`, so a session that has not been
       // restored yet is handed zero rows with no error at all and the hook
@@ -753,7 +753,7 @@ export default function Library() {
       // movements. app/(client)/exercise.tsx has said this correctly for as
       // long as the flag has existed; this is the same sentence.
       <Notice tone={t.warn} kicker="Catalogue" title="Sign in to see the exercise list"
-       note="The library is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed — all 900-odd movements are still there." />
+       note="The library is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed; all 900-odd movements are still there." />
      ) : catList.length === 0 ? (
       <View>
        <Text style={{ ...ty.label, color: t.ink3 }}>

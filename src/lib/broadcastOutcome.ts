@@ -128,7 +128,7 @@ export function outcomeLines(o: SendOutcome): string[] {
   if (o.delivered == null) {
     lines.push(o.written === 0
       ? 'Nothing was handed to a phone, because nothing was written.'
-      : 'How many of those reached a phone is unknown — not none. Repple can see the row it wrote; '
+      : 'How many of those reached a phone is unknown, not none. Repple can see the row it wrote; '
         + 'it is never told whether a handset was on, whether the banner appeared, or whether anybody read it.');
   } else {
     lines.push(`${num(o.delivered)} of those are recorded as having reached a phone.`);
@@ -169,6 +169,6 @@ export function outcomeTitle(o: SendOutcome): string {
  * discover it when they go looking for a list of their broadcasts.
  */
 export const WHERE_THE_RECORD_IS =
-  'Each one is an ordinary message in that client’s own thread — open a thread and it is there, and '
+  'Each one is an ordinary message in that client’s own thread. Open a thread and it is there, and '
   + 'they can reply to it. Nothing records them as a single broadcast, so this summary stays until '
   + 'you leave the screen and is not kept anywhere afterwards.';

@@ -106,7 +106,7 @@ export default function CoachReferrals() {
         {status === 'error' ? (
           <Section>
             <Notice tone={t.crit} kicker="Not Read" title="We Couldn’t Check Who Has Been Referring"
-              note="Nobody is listed below because the read did not come back. This is not a book on which nobody has referred anybody — pull down to try again.">
+              note="Nobody is listed below because the read did not come back. This is not a book on which nobody has referred anybody. Pull down to try again.">
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={() => { void reload(); }} /></View>
             </Notice>
           </Section>
@@ -132,7 +132,7 @@ export default function CoachReferrals() {
             // under 'error', and the branch above is what keeps it out.
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nobody on your book has brought somebody in with their code yet. Their code is on their
-              own Invite screen — most clients have never opened it, and asking is free.
+              own Invite screen. Most clients have never opened it, and asking is free.
             </Text>
           ) : (
             rows.map((row, i) => {

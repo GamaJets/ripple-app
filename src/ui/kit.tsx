@@ -1189,8 +1189,8 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel={labels
-          ? `Trend line, ${axisLabel(labels[drawn[0].i])} to ${axisLabel(labels[last.i])} — touch to read a point`
-          : 'Trend line — touch to read a point'}
+          ? `Trend line, ${axisLabel(labels[drawn[0].i])} to ${axisLabel(labels[last.i])}. Touch to read a point`
+          : 'Trend line. Touch to read a point'}
         // "adjustable" makes VoiceOver offer swipe-up and swipe-down, and until
         // now nothing was listening: the gesture was advertised and did nothing,
         // which is worse than not advertising it. These step through the points
@@ -1288,7 +1288,7 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
           series really does have a hole the chart says which kind of hole. */}
       {gapped ? (
         <Text style={{ ...ty.micro, letterSpacing: 0.4, color: t.ink3, marginTop: 2 }}>
-          A break in the line is a period with no reading — not a reading of zero.
+          A break in the line is a period with no reading, not a reading of zero.
         </Text>
       ) : null}
     </View>

@@ -235,7 +235,7 @@ export function unplacedNote(
   if (zoneUnread) {
     return `This gym’s timezone could not be read, so ${cls} could not be placed on the gym’s clock `
       + 'and none of them are counted below. That is a read that did not come back, not a gym with no '
-      + 'timezone set — nothing about the timetable has changed.';
+      + 'timezone set. Nothing about the timetable has changed.';
   }
   if (!zone) {
     return `This gym has not set a timezone, so ${cls} could not be placed on the gym’s clock and none `

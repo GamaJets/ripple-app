@@ -146,12 +146,12 @@ export function OwnConsistencyPanel({ log, status, nowMs }: {
           {!known
             ? (status === 'loading'
               ? 'Reading your training log…'
-              : 'Not a broken streak — an unread one. Nothing has been reset.')
+              : 'Not a broken streak, an unread one. Nothing has been reset.')
             : !countable
               ? 'You have logged more than this can read in one go, so the three all-time figures are left blank rather than added up short. The streak and the grid are drawn from your most recent weeks and are real.'
               : freezes > 0
                 ? `${num(freezes)} rest ${freezes === 1 ? 'day' : 'days'} in reserve before a gap breaks the run.`
-                : 'No rest days in reserve yet — those are earned by training.'}
+                : 'No rest days in reserve yet. Those are earned by training.'}
         </Text>
       </Section>
 

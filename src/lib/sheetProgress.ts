@@ -223,7 +223,7 @@ export function topRepsNote(d: SheetDelta): string | null {
   if (d.topLoadKg == null) return null;
   return d.topLoadKg === 0
     ? null
-    : 'The top set was at a different weight, so reps are not compared — the estimated 1RM is the figure that carries across a change of load.';
+    : 'The top set was at a different weight, so reps are not compared. The estimated 1RM is the figure that carries across a change of load.';
 }
 
 /**

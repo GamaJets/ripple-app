@@ -258,7 +258,7 @@ export default function ThisWeek() {
                 note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as it lands.`} />
             ) : (
               <Notice tone={t.warn} kicker="This Week" title="We Couldn’t Check for a Coach Plan"
-                note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it — open this screen again when you have signal.`} />
+                note={`The week below is ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it. Open this screen again when you have signal.`} />
             )}
           </View>
         ) : null}
@@ -269,7 +269,7 @@ export default function ThisWeek() {
         {logStatus === 'error' ? (
           <View style={{ marginTop: sp.lg }}>
             <Notice tone={t.warn} kicker="This Week" title="We Couldn’t Read Your Training Log"
-              note="Days you have already trained may not be marked below. Nothing has been lost — this screen just can't see it right now." />
+              note="Days you have already trained may not be marked below. Nothing has been lost. This screen just can't see it right now." />
           </View>
         ) : logStatus === 'partial' ? (
           /* The other status that produces the same unmarked week, and the one
@@ -342,7 +342,7 @@ export default function ThisWeek() {
             const sets = workout ? workout.exercises.reduce((n, e) => n + setCount(e), 0) : 0;
             const sub = workout
               ? `${workout.exercises.length} exercise${workout.exercises.length === 1 ? '' : 's'} · ${sets === 1 ? '1 set' : `${sets} sets`}${workout.cardio ? ` · ${workout.cardio}` : ''}`
-              : 'Nothing scheduled — train anyway if you want to';
+              : 'Nothing scheduled. Train anyway if you want to';
             // What THIS day trains, off its own exercise rows and never off its
             // name — a day called "Push" with a row in it shows Back. Every
             // part of the row describes the one day; the program's name is

@@ -92,13 +92,13 @@ export function readRestSeconds(text: string | null | undefined): RestRead {
     // Said, not accepted. A coach who means "no rest" and a coach who has not
     // decided both end up with the same program, and only one of them would
     // recognise it later.
-    return { ok: false, reason: 'Leave the rest empty rather than setting it to 0 — an empty rest uses the app default of 90 seconds.' };
+    return { ok: false, reason: 'Leave the rest empty rather than setting it to 0. An empty rest uses the app default of 90 seconds.' };
   }
   if (n < MIN_REST_SEC) {
     return { ok: false, reason: `A rest under ${MIN_REST_SEC} seconds is not long enough to time. Leave it empty if you do not want a rest timer.` };
   }
   if (n > MAX_REST_SEC) {
-    return { ok: false, reason: `That is over ${Math.round(MAX_REST_SEC / 60)} minutes. Check the number — the box is in seconds, so three minutes is 180.` };
+    return { ok: false, reason: `That is over ${Math.round(MAX_REST_SEC / 60)} minutes. Check the number: the box is in seconds, so three minutes is 180.` };
   }
   return { ok: true, seconds: n };
 }

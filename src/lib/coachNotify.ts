@@ -83,7 +83,7 @@ export const CHANNEL_QUIET_COST_MONEY =
  * thing that tells a coach their own money is sitting still.
  */
 export const CHANNEL_QUIET_COST_BOOK =
-  'The sessions waiting on an outcome are counted as neither delivered nor missed, so your statement and your revenue figure stay short until you mark them — and nothing else in the app will tell you. With this off you find out when you next open Mark What Happened.';
+  'The sessions waiting on an outcome are counted as neither delivered nor missed, so your statement and your revenue figure stay short until you mark them, and nothing else in the app will tell you. With this off you find out when you next open Mark What Happened.';
 
 /**
  * The channels a coach can mute independently.
@@ -217,7 +217,7 @@ export const COACH_CHANNELS: readonly CoachChannelDef[] = [
     // control on a screen whose whole problem was that one control was too
     // blunt, and it would have left `clients` naming two rare events.
     key: 'clients', title: 'Your Clients', quietCost: null, local: false,
-    note: 'Somebody asking to be coached by you, somebody ending their coaching, and what a client does in between — a goal reached, a personal best, a progress photo sent.',
+    note: 'Somebody asking to be coached by you, somebody ending their coaching, and what a client does in between: a goal reached, a personal best, a progress photo sent.',
   },
   {
     // 'a credential running out' was added to the note when part 900 gave this
@@ -322,7 +322,7 @@ export function channelsNote(status: LoadStatus): string | null {
   if (status === 'loading') return 'Reading which of these you have turned off…';
   if (status === 'partial') return 'Only part of your notification settings came back, so none of these switches is showing a confirmed position. Turning one now would save over whatever is actually stored.';
   if (status === 'error') {
-    return 'Your notification settings could not be read, so these switches are not showing your answers — they are showing nothing. That is a read that failed rather than everything being on. Turning one now would save over what is stored, so open this again once you have signal.';
+    return 'Your notification settings could not be read, so these switches are not showing your answers. They are showing nothing. That is a read that failed rather than everything being on. Turning one now would save over what is stored, so open this again once you have signal.';
   }
   return null;
 }
@@ -348,7 +348,7 @@ export const CHANNEL_MASTER_NOTE =
  * would otherwise have to discover.
  */
 export const CHANNEL_STILL_RECORDED =
-  'Muting a category stops your phone buzzing about it. Every one of them is still written into your notifications list, so nothing is lost — you find out when you open the app rather than as it happens.';
+  'Muting a category stops your phone buzzing about it. Every one of them is still written into your notifications list, so nothing is lost. You find out when you open the app rather than as it happens.';
 
 /**
  * The money channel's cost, kept under its old name.

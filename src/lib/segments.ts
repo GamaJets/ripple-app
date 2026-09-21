@@ -101,7 +101,7 @@ export const COMPUTED_SEGMENTS: readonly SegmentDef[] = [
   {
     key: 'no-record', source: 'drift', object: 'who has nothing on record',
     title: 'Nothing Recorded',
-    note: 'No pattern to judge — nothing read of theirs in the window. That is not the same as fine, and it is not the same as gone; it is a thing to find out.',
+    note: 'No pattern to judge: nothing read of theirs in the window. That is not the same as fine, and it is not the same as gone; it is a thing to find out.',
   },
   {
     key: 'pack-run-out', source: 'packs', object: 'whose pack has run out',
@@ -116,7 +116,7 @@ export const COMPUTED_SEGMENTS: readonly SegmentDef[] = [
   {
     key: 'never-checked-in', source: 'roster', object: 'who has never checked in',
     title: 'Never Checked In',
-    note: 'Nobody has a check-in on record for them, so there is no adherence figure to read. New clients are in here too — it is who to ask, not who to worry about.',
+    note: 'Nobody has a check-in on record for them, so there is no adherence figure to read. New clients are in here too. It is who to ask, not who to worry about.',
   },
 ];
 
@@ -223,7 +223,7 @@ export function unassessedNote(def: SegmentDef, count: number, sourceWhole: bool
   if (count <= 0) return null;
   return `${count} ${count === 1 ? 'client is' : 'clients are'} not in this list and could not be: they were added by you `
     + 'by hand and have no account, so nothing of theirs can be read and there is no thread to write into. '
-    + `They are not being counted as ${def.key === 'no-record' ? 'having nothing recorded' : 'outside the segment'} — they were never asked about.`;
+    + `They are not being counted as ${def.key === 'no-record' ? 'having nothing recorded' : 'outside the segment'}. They were never asked about.`;
 }
 
 /**

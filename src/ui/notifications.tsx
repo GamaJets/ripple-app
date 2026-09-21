@@ -586,7 +586,7 @@ export function useNotifications(group: AppVariant): InboxValue {
     if (!row) return { ok: false, why: 'That notification is no longer on this list, so nothing was deleted.' };
     const me = await signedInAs(uid.current, 'notifications.remove');
     if (me === 'no') {
-      return { ok: false, why: 'Nothing was deleted — you are not signed in on this device any more. Sign in and try again.' };
+      return { ok: false, why: 'Nothing was deleted. You are not signed in on this device any more. Sign in and try again.' };
     }
     if (me === 'unknown') {
       // Not a sign-out. The delete is not sent, so `authGateMessage`'s "nothing
@@ -606,7 +606,7 @@ export function useNotifications(group: AppVariant): InboxValue {
       setItems(listRef.current.filter((i) => i.id !== id), uid.current);
       return { ok: true, why: null };
     } catch {
-      return { ok: false, why: 'Nothing was deleted — the server did not answer.' };
+      return { ok: false, why: 'Nothing was deleted. The server did not answer.' };
     }
   }, []);
 
@@ -644,7 +644,7 @@ export function useNotifications(group: AppVariant): InboxValue {
       return {
         ok: false,
         changed: 0,
-        why: 'Nothing was deleted — you are not signed in on this device any more. Sign in and try again.',
+        why: 'Nothing was deleted. You are not signed in on this device any more. Sign in and try again.',
       };
     }
     if (still === 'unknown') {
@@ -894,7 +894,7 @@ export function NotificationInbox(f: InboxFraming) {
       // The bell said "1,204 unread" and this line said "Marked 1204 as read"
       // about the same rows — src/lib/notifyInbox.ts names this exact case.
       setNote(!res.ok
-        ? 'Could not mark them read — the server did not answer. Nothing has changed.'
+        ? 'Could not mark them read. The server did not answer. Nothing has changed.'
         : res.changed === 0
           ? 'Nothing was unread.'
           : res.changed === 1
@@ -981,7 +981,7 @@ export function NotificationInbox(f: InboxFraming) {
       const res = await markUnread(item.id);
       setNote(res.ok && res.changed
         ? null
-        : 'That notification was not marked unread — the server did not confirm it, so it still reads as read.');
+        : 'That notification was not marked unread. The server did not confirm it, so it still reads as read.');
     } finally { setBusy(false); }
   };
 
@@ -1014,8 +1014,8 @@ export function NotificationInbox(f: InboxFraming) {
               ? res.why
               : res.ok && res.changed === 0 && readCount > 0
               ? (readCount === 1
-                ? 'Nothing was deleted. The read notification is still in your inbox — the server did not remove it.'
-                : `Nothing was deleted. Those ${num(readCount)} read notifications are still in your inbox — the server did not remove them.`)
+                ? 'Nothing was deleted. The read notification is still in your inbox. The server did not remove it.'
+                : `Nothing was deleted. Those ${num(readCount)} read notifications are still in your inbox. The server did not remove them.`)
               : clearedNote(res.ok, res.changed));
           } finally { setBusy(false); }
         } },
@@ -1066,7 +1066,7 @@ export function NotificationInbox(f: InboxFraming) {
             title={items.length ? 'This is the last copy on this phone' : 'Your notifications could not be read'}
             note={items.length
               ? 'The server did not answer, so anything sent since you were last connected is not on this list.'
-              : 'The server did not answer. This is not the same as having none — pull down to try again once you have a connection.'}
+              : 'The server did not answer. This is not the same as having none. Pull down to try again once you have a connection.'}
           />
         ) : null}
 

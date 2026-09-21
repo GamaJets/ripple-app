@@ -256,7 +256,7 @@ function header(i: StatementInput): StatementSection {
  * answer that gets a month closed twice.
  */
 function filingWord(i: StatementInput): string {
-  if (!i.filingRead) return 'UNKNOWN — the record of closed months could not be read';
+  if (!i.filingRead) return 'UNKNOWN: the record of closed months could not be read';
   return i.filing ? 'CLOSED' : 'NOT CLOSED';
 }
 
@@ -352,7 +352,7 @@ function movement(i: StatementInput): StatementSection {
   }
   s.prose.push(
     'These figures read differently today from the way they were filed. A difference is not by itself '
-    + 'an error — a refund recorded in a later month, or a payment re-attributed to the right '
+    + 'an error. A refund recorded in a later month, or a payment re-attributed to the right '
     + 'member, correctly changes what this month’s ledger says. It is reported and it is not '
     + 'corrected: the filed figure stands.',
   );
@@ -376,7 +376,7 @@ function receipts(i: StatementInput): StatementSection {
   const s: StatementSection = { title: 'RECEIPTS FOR THE PERIOD, BY CURRENCY', prose: [], columns: null, rows: [] };
   if (!i.receiptsWhole) {
     s.prose.push(
-      'NOT STATED — the payments for this month did not come back whole, so no subtotal can be '
+      'NOT STATED: the payments for this month did not come back whole, so no subtotal can be '
       + 'given for any currency. This is unknown, not nil: do not read the absence of a line as a '
       + 'month in which nothing was taken.',
     );

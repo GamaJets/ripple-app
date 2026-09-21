@@ -393,7 +393,7 @@ export default function TrainerClasses() {
     // that changes where members have to be and when. Everything else changes
     // what the row says about a class they are already coming to.
     const done = patch.startsAt
-      ? `${patch.title} now starts ${dayShort(patch.startsAt)} at ${timeLabel(patch.startsAt)}. Everyone who booked it keeps their place — tell them, because moving a class does not notify anybody.`
+      ? `${patch.title} now starts ${dayShort(patch.startsAt)} at ${timeLabel(patch.startsAt)}. Everyone who booked it keeps their place. Tell them, because moving a class does not notify anybody.`
       : `${patch.title} was changed.`;
     void runWrite('Class Updated', done, () => updateClass(supabase, c.id, patch));
   };
@@ -500,7 +500,7 @@ export default function TrainerClasses() {
    */
   const removeClass = (c: GymClass) => {
     Alert.alert('Remove This Class?',
-      `${c.title} is deleted outright. Use Call Off instead for a class that was on the timetable and did not happen — that keeps the row and the record.`, [
+      `${c.title} is deleted outright. Use Call Off instead for a class that was on the timetable and did not happen. That keeps the row and the record.`, [
       { text: 'Keep It', style: 'cancel' },
       {
         text: 'Remove',
@@ -657,10 +657,10 @@ export default function TrainerClasses() {
           : `${nm} · ${br} · ${when}`);
       } else if (saved === 0) {
         Alert.alert('Not on the Timetable', weeks > 1
-          ? `None of the ${weeks} ${nm} classes reached the server, so they are on this phone only and nobody can book them. They will be gone when you reopen the app — try again once you have signal.`
-          : `${nm} did not reach the server, so it is on this phone only and nobody can book it. It will be gone when you reopen the app — try again once you have signal.`);
+          ? `None of the ${weeks} ${nm} classes reached the server, so they are on this phone only and nobody can book them. They will be gone when you reopen the app. Try again once you have signal.`
+          : `${nm} did not reach the server, so it is on this phone only and nobody can book it. It will be gone when you reopen the app. Try again once you have signal.`);
       } else {
-        Alert.alert('Partly Added', `${saved} of ${weeks} ${nm} classes reached the server. The other ${weeks - saved} are on this phone only and cannot be booked — add them again once you have signal.`);
+        Alert.alert('Partly Added', `${saved} of ${weeks} ${nm} classes reached the server. The other ${weeks - saved} are on this phone only and cannot be booked. Add them again once you have signal.`);
       }
     } finally { setBusy(false); }
   };
@@ -811,7 +811,7 @@ export default function TrainerClasses() {
                     {status === 'loading' ? 'Reading your timetable…'
                       : status === 'error' ? 'Your timetable could not be read, so nothing is counted.'
                         : status === 'partial' ? 'Only part of your timetable loaded, so nothing is counted.'
-                          : !countsKnown ? 'How many have booked could not be read — this is not a count of none.'
+                          : !countsKnown ? 'How many have booked could not be read. This is not a count of none.'
                             : places === 0 ? 'No classes scheduled yet.'
                               : `Across ${live.length} ${live.length === 1 ? 'class' : 'classes'}`}
                   </Text>
@@ -835,7 +835,7 @@ export default function TrainerClasses() {
             </View>
           ) : (<>
 
-          <TextInput value={title} onChangeText={setTitle} placeholder="Class title — e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={inp}
+          <TextInput value={title} onChangeText={setTitle} placeholder="Class title, e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={inp}
             accessibilityLabel="Class Title" />
 
           <Text style={[lbl, { marginTop: sp.md }]}>Type</Text>
@@ -844,7 +844,7 @@ export default function TrainerClasses() {
           </ScrollView>
 
           <Text style={[lbl, { marginTop: sp.md }]}>Branch</Text>
-          <TextInput value={branch} onChangeText={setBranch} placeholder="Branch or location — e.g. your main studio" placeholderTextColor={t.ink3} style={inp} />
+          <TextInput value={branch} onChangeText={setBranch} placeholder="Branch or location, e.g. your main studio" placeholderTextColor={t.ink3} style={inp} />
           {knownBranches.length > 0 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2, marginTop: sp.sm }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
               {knownBranches.map((b) => chip(b, branch === b, () => setBranch(b)))}
@@ -924,7 +924,7 @@ export default function TrainerClasses() {
           </Text>
           {Date.parse(startIso()) <= Date.now() ? (
             <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
-              That is behind you. Members cannot book a class in the past, so it would be on nobody's timetable — pick a later day or hour.
+              That is behind you. Members cannot book a class in the past, so it would be on nobody's timetable. Pick a later day or hour.
             </Flag>
           ) : null}
 
@@ -967,7 +967,7 @@ export default function TrainerClasses() {
               the words "No classes yet", and they plan their week around it. */}
           {status === 'error' ? (
             <Notice tone={t.warn} kicker="Timetable" title="Your Schedule Could Not Be Read"
-              note="Nothing is listed below because the classes did not come back — it does not mean nothing is scheduled. Anything you add here may duplicate a class that is already on the timetable, so check again once you have signal.">
+              note="Nothing is listed below because the classes did not come back. It does not mean nothing is scheduled. Anything you add here may duplicate a class that is already on the timetable, so check again once you have signal.">
               <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={refresh} /></View>
             </Notice>
           ) : status === 'partial' ? (
@@ -1070,7 +1070,7 @@ export default function TrainerClasses() {
               'error' the Notice above has already said we do not know, and under
               'loading' nobody has been asked yet. */}
           {upcoming.length === 0 && status === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>No classes yet — add your first above.</Text>
+            <Text style={{ ...ty.label, color: t.ink3 }}>No classes yet. Add your first above.</Text>
           ) : upcoming.length === 0 && status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your timetable…</Text>
           ) : null}
@@ -1164,7 +1164,7 @@ export default function TrainerClasses() {
                         evening. */}
                     {mSeries && manage.seriesId ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
-                        The start time is not offered for a whole series. Every occurrence would be set to the same instant, which stacks the term on one evening — move one class at a time, with This Class selected.
+                        The start time is not offered for a whole series. Every occurrence would be set to the same instant, which stacks the term on one evening. Move one class at a time, with This Class selected.
                       </Text>
                     ) : (
                       <>
@@ -1215,7 +1215,7 @@ export default function TrainerClasses() {
                             </Text>
                           ) : (
                             <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
-                              Moves from {dayShort(manage.startsAt)} {timeLabel(manage.startsAt)} to {dayShort(movedStart(manage) as string)} {timeLabel(movedStart(manage) as string)}. Bookings, check-ins and the waiting list all move with it, and nobody is notified — tell them yourself.
+                              Moves from {dayShort(manage.startsAt)} {timeLabel(manage.startsAt)} to {dayShort(movedStart(manage) as string)} {timeLabel(movedStart(manage) as string)}. Bookings, check-ins and the waiting list all move with it, and nobody is notified. Tell them yourself.
                             </Text>
                           )
                         ) : (

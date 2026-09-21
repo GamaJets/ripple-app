@@ -201,10 +201,10 @@ export function waitlistLine(position: number, waiting: number | null): string {
   if (waiting == null) {
     if (position <= 0) {
       return 'No waitlist count came back for this slot, so we cannot say whether anybody is already in line for it. '
-        + 'Joining still puts you in the queue in the order you joined — open this screen again if you want the count first.';
+        + 'Joining still puts you in the queue in the order you joined. Open this screen again if you want the count first.';
     }
     if (position === 1) {
-      return 'You’re next in line — if it frees up it’s yours. No waitlist count came back with that, so we cannot say how many '
+      return 'You’re next in line. If it frees up it’s yours. No waitlist count came back with that, so we cannot say how many '
         + 'are behind you, which changes nothing about your own place. Open this screen again if you want the count.';
     }
     return `You’re ${ordinal(position)} in line, and the slot goes to whoever is in front of you. No waitlist count came back `

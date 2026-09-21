@@ -240,7 +240,7 @@ export function reviewFor(
     return {
       own: false,
       coachName,
-      line: `You queried this${on}. ${whose} can see it. Nothing has been deleted — the record still says what they wrote.`,
+      line: `You queried this${on}. ${whose} can see it. Nothing has been deleted. The record still says what they wrote.`,
       actions: { query: false, withdraw: true, amend: true },
     };
   }
@@ -251,7 +251,7 @@ export function reviewFor(
     // The second sentence is the item. A member who reads this and does nothing
     // has now chosen to do nothing, which is a different thing from never
     // having been shown the row.
-    line: `${whose} recorded this for you. If it is not what happened, say so — not saying anything is not agreeing.`,
+    line: `${whose} recorded this for you. If it is not what happened, say so: not saying anything is not agreeing.`,
     actions: { query: true, withdraw: false, amend: true },
   };
 }

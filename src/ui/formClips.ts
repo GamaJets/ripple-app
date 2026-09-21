@@ -274,7 +274,7 @@ export async function deleteFormClip(clip: FormClip): Promise<{ ok: boolean; err
     // PostgREST answers a delete that matched nothing as a success. Saying
     // "deleted" over that is how somebody believes a video is gone when it is
     // not — which for this content is the worst thing this file could do.
-    return { ok: false, error: 'That clip was not deleted — it may already be gone, or it is not yours to remove. Pull down to see what is actually there.' };
+    return { ok: false, error: 'That clip was not deleted. It may already be gone, or it is not yours to remove. Pull down to see what is actually there.' };
   }
   void supabase.storage.from(FORM_CLIP_BUCKET).remove([clip.path]).catch((e) => {
     reportError('formClips.delete-object', e, { path: clip.path });

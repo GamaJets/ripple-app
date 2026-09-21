@@ -119,7 +119,7 @@ type MetricKey = 'kcal' | 'hr' | 'hrv' | 'steps' | 'source';
  */
 const importNote = (what: string, out: WriteOutcome, many: boolean): string =>
   out === 'unsent'
-    ? `${what} ${many ? 'have' : 'has'} not reached your log yet — there is no connection. Nothing is lost: ${many ? 'they are' : 'it is'} saved on this phone and ${many ? 'go' : 'goes'} up on ${many ? 'their' : 'its'} own next time you have signal.`
+    ? `${what} ${many ? 'have' : 'has'} not reached your log yet because there is no connection. Nothing is lost: ${many ? 'they are' : 'it is'} saved on this phone and ${many ? 'go' : 'goes'} up on ${many ? 'their' : 'its'} own next time you have signal.`
     : `${what} ${many ? 'were' : 'was'} rejected by your log, so nothing was imported and nothing is waiting to send. Your watch still has ${many ? 'them' : 'it'}.`;
 
 function ago(ts?: number): string {
@@ -743,7 +743,7 @@ export default function Devices() {
   * figure, and the row is empty under it anyway.
   */
  const staleNote = w.todayStatus === 'error'
-  ? `These are the last figures we had, not a current reading — ${connected.length === 1 ? 'your device' : 'one of your devices'} could not be reached just now. Pull down to try again.`
+  ? `These are the last figures we had, not a current reading: ${connected.length === 1 ? 'your device' : 'one of your devices'} could not be reached just now. Pull down to try again.`
   : null;
  // Active where a device gives it, whole-day otherwise, and never one label on
  // the other's number.
@@ -765,15 +765,15 @@ export default function Devices() {
   blurb: energy.kcal == null
    ? `No connected device has reported today's energy yet.`
    : energy.kind === 'total'
-    ? `Your whole day's energy from ${energy.from}, resting metabolism included — which is most of it. Your calorie target already accounts for an ordinary day, so this is not extra food to eat.`
-    : `Energy above resting from ${energy.from} — the part that is actually exercise. Your calorie target already accounts for an ordinary day's movement.`,
+    ? `Your whole day's energy from ${energy.from}, resting metabolism included, which is most of it. Your calorie target already accounts for an ordinary day, so this is not extra food to eat.`
+    : `Energy above resting from ${energy.from}: the part that is actually exercise. Your calorie target already accounts for an ordinary day's movement.`,
  },
  // "from your watch", singular and named, because that is now what it is. The
  // roll-up used to average this field across every connected device and this
  // blurb described the result as "the mean of today's samples" — of two
  // devices' means, which is a number neither watch recorded and neither
  // vendor's app will agree with.
- hr: { ico: 'heart', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: `The mean of today’s heart-rate samples from ${named('heartRateAvg')}. Where two devices both measured today, this is the fuller of the two readings and not an average of them — no device recorded an average. During a workout, live heart rate is written into that session.` },
+ hr: { ico: 'heart', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: `The mean of today’s heart-rate samples from ${named('heartRateAvg')}. Where two devices both measured today, this is the fuller of the two readings and not an average of them, since no device recorded an average. During a workout, live heart rate is written into that session.` },
  hrv: {
   ico: 'heart',
   title: 'Heart Rate Variability',
@@ -786,9 +786,9 @@ export default function Devices() {
      ? hrvTrendLine(hrv.trend)
      : hrv.status === 'error'
       ? 'Your earlier nights could not be read just now, so there is nothing to compare tonight with.'
-      : hrvBuildingLine(hrv.nightsKept)}\n\nHRV is not comparable between people — 40 ms is an excellent night for one person and a warning for another — so ${BRAND.label} only ever shows yours against your own nights. Measured by ${hrv.tonight.sourceName}, as RMSSD in milliseconds, which is what your vendor's own app shows.`,
+      : hrvBuildingLine(hrv.nightsKept)}\n\nHRV is not comparable between people (40 ms is an excellent night for one person and a warning for another), so ${BRAND.label} only ever shows yours against your own nights. Measured by ${hrv.tonight.sourceName}, as RMSSD in milliseconds, which is what your vendor's own app shows.`,
  },
- steps: { ico: 'trending', title: 'Steps', value: num(w.today.steps), blurb: `Today's steps from ${named('steps')} — the device that counted the most of them, not the sum of two devices counting the same walk twice. A simple daily-movement signal that complements your training.` },
+ steps: { ico: 'trending', title: 'Steps', value: num(w.today.steps), blurb: `Today's steps from ${named('steps')}, the device that counted the most of them, not the sum of two devices counting the same walk twice. A simple daily-movement signal that complements your training.` },
  source: { ico: 'clock', title: 'Connected Sources', value: `${connected.length} ${connected.length === 1 ? 'device' : 'devices'}`, blurb: connected.map((p) => `• ${p.meta.name}`).join('\n') || 'No devices connected yet.' },
  };
 
@@ -908,9 +908,9 @@ export default function Devices() {
       {w.todayStatus === 'error'
      ? (energy.kcal == null
       ? `We couldn’t read today’s energy from your ${connected.length} connected ${devicesWord}, so there is no figure here yet. That is our read, not a day you did not move.`
-      : `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`)
+      : `Last figure we had from ${energy.from}. It has not synced since, so it is not today's total yet.`)
      : energy.kcal == null
-      ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
+      ? `Wear your watch. Energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
       : energy.kind === 'total'
        ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
        : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
@@ -1105,8 +1105,8 @@ export default function Devices() {
          if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>{
           unreadable ? 'Nothing has been read from this device on this phone.'
            : st === 'loading' ? 'Connected. Reading today from this device…'
-           : st === 'error' ? 'Connected, but today could not be read from this device. That is our read failing rather than a day with nothing in it — try Sync again in a moment.'
-           : 'Connected. Tap Sync — no data for today yet.'}</Text>;
+           : st === 'error' ? 'Connected, but today could not be read from this device. That is our read failing rather than a day with nothing in it. Try Sync again in a moment.'
+           : 'Connected. Tap Sync; no data for today yet.'}</Text>;
          // A read that answered with every field empty rendered as an EMPTY ROW
          // — no figures, no message, and a "Synced just now" beside it. That is
          // the same silence the flag above exists to break, arriving by the
@@ -1184,7 +1184,7 @@ export default function Devices() {
    <View style={{ marginTop: sp.md }}>
     <Expandable title="How Each App Connects">
      <Text style={{ ...ty.caption, color: t.ink3, }}>
-      Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs — sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
+      Apple Health reads your paired Apple Watch through HealthKit, and Google Fit / Health Connect reads what your Android phone and watch write into it. WHOOP and Oura connect through their own APIs: sign in once and the day syncs on its own. Fitbit and Garmin are not connectable in this version; on an iPhone, both write into Apple Health, so connecting that picks their days up.
      </Text>
     </Expandable>
    </View>
@@ -1239,7 +1239,7 @@ export default function Devices() {
    <Section>
     <SectionHead title="Import Workouts" note={importLabel} />
     <Text style={{ ...ty.label, color: t.ink2 }}>
-     Pull sessions from your connected devices — runs, cycling, lifting, Pilates — straight into your training log. No manual entry.
+     Pull sessions from your connected devices (runs, cycling, lifting, Pilates) straight into your training log. No manual entry.
     </Text>
     {/* How far back to look. Changing it clears the current list so the shown
         results always match the selected window. */}
@@ -1363,7 +1363,7 @@ export default function Devices() {
   <Section>
    <SectionHead title="Your Coach" note={wellnessShare.shared === true ? 'sharing' : undefined} />
    <Text style={{ ...ty.label, color: t.ink2 }}>
-    The sleep and water you type in yourself are yours. Off by default — nothing of it reaches your coach until you say so here.
+    The sleep and water you type in yourself are yours. Off by default: nothing of it reaches your coach until you say so here.
    </Text>
    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
     <View style={{ flex: 1 }}>
@@ -1406,7 +1406,7 @@ export default function Devices() {
    <Section>
     <SectionHead title="Sleep Sources" note={`last night`} />
     <Text style={{ ...ty.label, color: t.ink2 }}>
-     Sleep is read from every device you have connected, not from one of them. Where two disagree, Recovery shows the figure one device actually reported and names it — it never averages them into a number no device recorded.
+     Sleep is read from every device you have connected, not from one of them. Where two disagree, Recovery shows the figure one device actually reported and names it. It never averages them into a number no device recorded.
     </Text>
     {sleepReads == null ? (
      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Checking your devices…</Text>
@@ -1415,7 +1415,7 @@ export default function Devices() {
      // screen saying that none of the devices above answered, which is a
      // statement about them made out of a failure of ours.
      <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
-      Your devices could not be asked about sleep just now, so nothing is listed here — that is this app failing to ask rather than your {devicesWord} having nothing to say. Pull down to try again.
+      Your devices could not be asked about sleep just now, so nothing is listed here. That is this app failing to ask rather than your {devicesWord} having nothing to say. Pull down to try again.
      </Flag>
     ) : (
      <View style={{ marginTop: sp.lg }}>
@@ -1439,7 +1439,7 @@ export default function Devices() {
            </Text>
           )
          ) : lastNight.length === 0 ? (<>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Readable — nothing recorded for last night.</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Readable, but nothing recorded for last night.</Text>
           {/* And when it last DID record one, which is the difference between
               a night off the wrist and a link that has quietly stopped. See
               `lastRecorded`. Neither sentence is a diagnosis: the first says
@@ -1450,11 +1450,11 @@ export default function Devices() {
            const seen = lastRecorded(r);
            return seen ? (
             <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
-             Last night it recorded was {fmtDay(seen.night)} — {formatSleepHours(seen.minutesAsleep)} from {seen.sourceName}.
+             Last night it recorded was {fmtDay(seen.night)}: {formatSleepHours(seen.minutesAsleep)} from {seen.sourceName}.
             </Text>
            ) : (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-             Nothing from it in the last seven nights either. It is still connected, so this is a device that has stopped sending nights rather than one that has been unlinked — check it is syncing in its own app.
+             Nothing from it in the last seven nights either. It is still connected, so this is a device that has stopped sending nights rather than one that has been unlinked. Check it is syncing in its own app.
             </Text>
            );
           })()}
@@ -1494,7 +1494,7 @@ export default function Devices() {
       <Notice
        kicker="Permission"
        title={`Health is not letting ${BRAND.label} add workouts`}
-       note={`You said no, and that stands — nothing has been written. To change it: Health ▸ Sharing ▸ Apps ▸ ${BRAND.label} ▸ turn on Workouts.`}
+       note={`You said no, and that stands. Nothing has been written. To change it: Health ▸ Sharing ▸ Apps ▸ ${BRAND.label} ▸ turn on Workouts.`}
       />
      </View>
     ) : null}
@@ -1554,7 +1554,7 @@ export default function Devices() {
      {/* Blocked — stated plainly, with the one thing that would unblock it. */}
      {hkPlan.skipped.length ? (
       <View style={{ marginTop: sp.xl }}>
-       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>No Length Recorded — Not Written</Text>
+       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>No Length Recorded · Not Written</Text>
        {hkPlan.skipped.map((sk, i) => (
         <View key={sk.key} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
          <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{sk.exercises[0] || 'Session'}{sk.exercises.length > 1 ? ` +${sk.exercises.length - 1}` : ''}</Text>
@@ -1612,7 +1612,7 @@ export default function Devices() {
         <View style={{ marginTop: sp.sm }}>
          {hkResult.failed.map((f) => (
           <Text key={f.key} style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
-           • {f.activityLabel}, {sessionWhen(f.t)} — {f.reason}
+           • {f.activityLabel}, {sessionWhen(f.t)}: {f.reason}
           </Text>
          ))}
         </View>

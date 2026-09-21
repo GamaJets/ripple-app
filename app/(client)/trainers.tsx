@@ -540,7 +540,7 @@ export default function FindTrainer() {
     if (!ok) {
       Alert.alert(
         'Not Connected Yet',
-        'We could not link you to ' + (coachName || 'your coach') + '. Your invitation is still here — try accepting it again in a moment.',
+        'We could not link you to ' + (coachName || 'your coach') + '. Your invitation is still here. Try accepting it again in a moment.',
       );
       return;
     }
@@ -843,7 +843,7 @@ export default function FindTrainer() {
         notifySuccess();
         Alert.alert(
           'Already Asked',
-          `You have already asked ${coach.name} to coach you and they have not answered yet. Asking again does not move you up any list — they still have the first one.`,
+          `You have already asked ${coach.name} to coach you and they have not answered yet. Asking again does not move you up any list; they still have the first one.`,
           [{ text: 'Got It' }],
         );
         return;
@@ -854,7 +854,7 @@ export default function FindTrainer() {
         reportError('findTrainer.request', new Error('coach_requests insert returned no row'));
         Alert.alert(
           'Not Sent',
-          `Your request to ${coach.name} was not stored, so they have not been asked. Nothing has been sent anywhere — try again in a moment.`,
+          `Your request to ${coach.name} was not stored, so they have not been asked. Nothing has been sent anywhere. Try again in a moment.`,
           [{ text: 'OK' }],
         );
         return;
@@ -896,8 +896,8 @@ export default function FindTrainer() {
         [coach.id],
         'New coaching request',
         who
-          ? `${who} has asked you to coach them — ${COACHED_MODE_SHORT[mode].toLowerCase()}.`
-          : `Somebody has asked you to coach them — ${COACHED_MODE_SHORT[mode].toLowerCase()}.`,
+          ? `${who} has asked you to coach them: ${COACHED_MODE_SHORT[mode].toLowerCase()}.`
+          : `Somebody has asked you to coach them: ${COACHED_MODE_SHORT[mode].toLowerCase()}.`,
         { route: '/(trainer)/dashboard' },
         'clients',
       );
@@ -908,8 +908,8 @@ export default function FindTrainer() {
       Alert.alert(
         'Request Sent',
         push.ok
-          ? `${coach.name} has been notified on their phone. You'll be connected once they accept — nothing changes on your app until then.`
-          : `${coach.name} will see your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request the next time they open their app — we couldn't reach their phone just now. You'll be connected once they accept.`,
+          ? `${coach.name} has been notified on their phone. You'll be connected once they accept. Nothing changes on your app until then.`
+          : `${coach.name} will see your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request the next time they open their app. We couldn't reach their phone just now. You'll be connected once they accept.`,
         [{ text: 'Got It' }]
       );
     } catch (e) {
@@ -931,7 +931,7 @@ export default function FindTrainer() {
       Alert.alert(
         stored ? 'Request Sent, but Not Notified' : 'Could Not Send Request',
         stored
-          ? `${coach.name} has your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request and will see it the next time they open their app — we couldn't reach their phone just now. Do not ask again: it is already with them.`
+          ? `${coach.name} has your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request and will see it the next time they open their app. We couldn't reach their phone just now. Do not ask again: it is already with them.`
           : `${coach.name} has not been asked and nothing has been sent anywhere. ${retryLine(reach)}`,
       );
     }
@@ -1121,7 +1121,7 @@ export default function FindTrainer() {
               <Notice key={iv.id} tone={t.brand}
                 kicker="Coaching Invitation"
                 title={`${iv.coachName || 'A Coach'} Invited You`}
-                note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect — their program, feedback and messaging turn on for you.`}>
+                note={`${COACHED_MODE_SHORT[iv.mode]} coaching. ${COACHING_MODE_NOTE[iv.mode]} Accept to connect, and their program, feedback and messaging turn on for you.`}>
                 <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                   <View style={{ flex: 1 }}><Ghost label="Decline" onPress={() => declineInvite(iv.id)} /></View>
                   <View style={{ flex: 2 }}><Cta label="Accept Invitation" wide onPress={() => acceptCoach(iv.id, iv.coachName, iv.mode)} /></View>
@@ -1165,7 +1165,7 @@ export default function FindTrainer() {
         {gym.status === 'error' ? (
           <View style={{ marginTop: sp.lg }}>
             <Notice tone={t.warn} kicker="Your Gym" title="We Couldn’t Check for a Gym Invitation"
-              note="This is our end, not an answer about you. If a gym has invited you it is still waiting — this screen simply could not read it.">
+              note="This is our end, not an answer about you. If a gym has invited you, it is still waiting. This screen simply could not read it.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={gym.reload} />
               </View>
@@ -1303,8 +1303,8 @@ export default function FindTrainer() {
             whole sentence moves and the separator goes with it. */}
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
             {fromLink
-              ? 'Your coach’s code came in with the link you tapped, so it is already filled in below. Send it when you are ready — they see the request and add you once they accept.'
-              : 'Ask them for their coaching code — it’s six characters, in their app under Clients › Add a client. This works even if they aren’t listed in the directory below.'}
+              ? 'Your coach’s code came in with the link you tapped, so it is already filled in below. Send it when you are ready. They see the request and add you once they accept.'
+              : 'Ask them for their coaching code. It’s six characters, in their app under Clients › Add a client. This works even if they aren’t listed in the directory below.'}
           </Text>
           <View style={{ flexDirection: 'row', gap: sp.sm }}>
             <TextInput
@@ -1531,7 +1531,7 @@ export default function FindTrainer() {
                 </Text>
               ) : credsFor(sel.id)!.length === 0 ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
-                  {sel.name} hasn’t listed any. Ask them before you book — it is a normal thing to ask.
+                  {sel.name} hasn’t listed any. Ask them before you book. It is a normal thing to ask.
                 </Text>
               ) : (
                 <View style={{ marginBottom: sp.xl }}>
@@ -1588,7 +1588,7 @@ export default function FindTrainer() {
                      reputation that nothing here has any basis for. */
                   return (
                     <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>
-                      We couldn’t load the reviews. This is our end — it does not mean there are none.
+                      We couldn’t load the reviews. This is our end. It does not mean there are none.
                     </Text>
                   );
                 }

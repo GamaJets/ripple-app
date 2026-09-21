@@ -86,7 +86,7 @@ export function parseSessionFee(
   // value-per-client and the revenue hero all read a confident 0 that nobody
   // could tell from a gym that delivered nothing. Clearing is the empty field.
   if (fee === 0) return { kind: 'bad', reason: 'A fee of 0 would value every delivered session at nothing. Clear the field instead if you have not set one.' };
-  if (fee > MAX_SESSION_FEE) return { kind: 'bad', reason: 'That is more than Repple will record as a session fee — check the zeros.' };
+  if (fee > MAX_SESSION_FEE) return { kind: 'bad', reason: 'That is more than Repple will record as a session fee. Check the zeros.' };
   return { kind: 'fee', fee };
 }
 
@@ -152,7 +152,7 @@ export function parseGymName(input: string | null | undefined): NameInput {
   if (/'s space$/.test(name)) {
     return { kind: 'bad', reason: 'That is the placeholder name Repple gave the gym when the account was made. Type what the gym is actually called.' };
   }
-  if (name.length > 80) return { kind: 'bad', reason: 'That is longer than a gym name — 80 characters at most.' };
+  if (name.length > 80) return { kind: 'bad', reason: 'That is longer than a gym name: 80 characters at most.' };
   return { kind: 'name', name };
 }
 

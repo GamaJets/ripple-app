@@ -333,7 +333,7 @@ export async function createPackage(p: { name: string; price_cents: number; sess
     // Part 97 refuses this combination in the database; refusing it here too
     // turns a constraint violation into a sentence. A recurring pack would
     // charge again every month for credits that are granted once.
-    if (interval && p.sessions != null) return { ok: false, error: 'A recurring package cannot also be a session pack — sessions are granted once and nothing renews them.' };
+    if (interval && p.sessions != null) return { ok: false, error: 'A recurring package cannot also be a session pack. Sessions are granted once and nothing renews them.' };
     // How long the buyer has to use the sessions, or null for a pack that does
     // not expire — which is every package this app has ever sold, and stays the
     // answer for anybody who leaves the field empty. No fallback and no
@@ -1007,7 +1007,7 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
     const { data, error } = await supabase.rpc('redeem_pack_session', { p_trainer: trainerId });
     if (error) {
       reportError('connect.redeemSession', error);
-      return { ok: false, error: 'the server did not confirm it — this is not the same as having none left' };
+      return { ok: false, error: 'the server did not confirm it, which is not the same as having none left' };
     }
     // Zero rows back is not a redemption. `readDraw` is the row count this
     // function never had: [] and [row, row] and a word from a newer schema are
@@ -1018,7 +1018,7 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
     return why ? { ok: false, error: why } : { ok: false };
   } catch (e) {
     reportError('connect.redeemSession', e);
-    return { ok: false, error: 'the server did not confirm it — this is not the same as having none left' };
+    return { ok: false, error: 'the server did not confirm it, which is not the same as having none left' };
   }
 }
 
@@ -1270,7 +1270,7 @@ async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?
       // because the sentence it appends to a clean refusal is the exact
       // opposite of what is true here.
       unconfirmed: true,
-      error: 'The refund was not confirmed. Check your Stripe dashboard before trying it again — a second attempt could give the money back twice.',
+      error: 'The refund was not confirmed. Check your Stripe dashboard before trying it again. A second attempt could give the money back twice.',
     };
   }
 }

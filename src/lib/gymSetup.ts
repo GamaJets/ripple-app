@@ -223,7 +223,7 @@ function stated(v: string | null): string | null {
 }
 
 const UNREAD_GYM =
-  'The gym record could not be read, so this could not be checked — it is not known to be either way.';
+  'The gym record could not be read, so this could not be checked. It is not known to be either way.';
 
 /**
  * The six, in order, each with its state and its consequence.
@@ -304,8 +304,8 @@ export function assessGymSetup(f: SetupFacts): SetupItem[] {
       f.members,
       'Get the members in',
       'Every screen in this console is a view of the roster, so with nothing on it they are all '
-      + 'correctly empty. Members are invited rather than typed in — a membership needs a real '
-      + 'account behind it — and a spreadsheet from the old system can issue the invitations in '
+      + 'correctly empty. Members are invited rather than typed in (a membership needs a real '
+      + 'account behind it), and a spreadsheet from the old system can issue the invitations in '
       + 'one go.',
       null,
       'The roster did not come back whole, so this could not be checked.',

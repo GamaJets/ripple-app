@@ -94,7 +94,7 @@ const unknown = (status: LoadStatus, loading: boolean): MemberChurnValue => ({
     pct: null,
     label: null,
     note: status === 'error'
-      ? 'your memberships could not be read — this is not a gym nobody left'
+      ? 'your memberships could not be read, so this is not a gym nobody left'
       : 'reading your memberships…',
   },
   spans: null,

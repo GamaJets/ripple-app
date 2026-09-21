@@ -180,11 +180,11 @@ export function checkinTrend(
 export function trendLine(status: LoadStatus, trend: CheckinTrend): string {
   if (status === 'loading') return 'Reading your earlier check-ins…';
   if (trend.state === 'unreadable') {
-    return 'Your earlier check-ins couldn’t be read. That is not the same as never having sent any — anything you have filed is still on your record.';
+    return 'Your earlier check-ins couldn’t be read. That is not the same as never having sent any. Anything you have filed is still on your record.';
   }
   if (trend.state === 'none') return 'Nothing charted yet. Your first check-in starts the record.';
   if (trend.state === 'one') {
-    return 'One check-in so far. A second one is what makes a line — until then there is nothing to compare it against.';
+    return 'One check-in so far. A second one is what makes a line. Until then there is nothing to compare it against.';
   }
   if (trend.charted == null) {
     return 'Your check-ins came back at the row limit, so how many there are cannot be counted from here. Every week charted is real.';

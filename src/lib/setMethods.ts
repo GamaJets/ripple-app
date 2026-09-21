@@ -166,7 +166,7 @@ export function otherMethodsHint(currentId: string | null | undefined, show = 3)
   const tail = rest > 0 ? `${named.join(', ')} and ${rest} more` : named.length > 1
     ? `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`
     : named[0];
-  return `Tap to change — ${tail}.`;
+  return `Tap to change: ${tail}.`;
 }
 
 /** Whether a set recorded under this method counts toward training volume. */

@@ -86,7 +86,7 @@ ok(many.ok && many.card.footer === 'Warehouse Gym', 'the footer is the tenant, n
 // stat labels are not Title Case in the middle of a line.
 const week = weekCard({ brand: 'Warehouse Gym', spanLabel: 'Last 7 days', sessions: 18, minutes: 1080, clients: 11 });
 if (week.ok) {
-  eq(week.card.caption, '18 sessions coached — last 7 days.\n18 hrs coached · 11 clients',
+  eq(week.card.caption, '18 sessions coached, last 7 days.\n18 hrs coached · 11 clients',
     'the caption reads as prose, with the headline figure not restated');
 } else { errors.push('a full week should build a card'); }
 

@@ -161,7 +161,7 @@ export function retentionWarning(rec: RetentionRecord): string | null {
     ? names[0]
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   const costs = broken.map((b) => b.cost).join('; ');
-  return `Could not read ${list}. ${broken.length === 1 ? 'That is' : 'Those are'} missing from every figure below, not counted as nil — ${costs} ${broken.length === 1 ? 'is' : 'are'} unknown here.`;
+  return `Could not read ${list}. ${broken.length === 1 ? 'That is' : 'Those are'} missing from every figure below, not counted as nil. ${costs} ${broken.length === 1 ? 'is' : 'are'} unknown here.`;
 }
 
 /* ── trap 1: a gym with no door log cannot be told who has lapsed ──────────── */
@@ -775,7 +775,7 @@ export const ENDING_SOON_DAYS = 14;
  * been read as a crisis.
  */
 export const ROLLING_TERM_NOTE =
-  'An end date here is the day the membership is currently recorded to run to. Nothing moves it by itself — it only moves when a renewal is actually paid for — so a member on a rolling monthly plan appears here every month in the fortnight before their next payment. Read this list as “has not renewed yet”, not as “is leaving”.';
+  'An end date here is the day the membership is currently recorded to run to. Nothing moves it by itself (it only moves when a renewal is actually paid for), so a member on a rolling monthly plan appears here every month in the fortnight before their next payment. Read this list as “has not renewed yet”, not as “is leaving”.';
 
 /**
  * Where a member stands against their own contract's end date.
@@ -1062,7 +1062,7 @@ export function termLine(t: MemberTerm | null): string | null {
   if (!t) return null;
   switch (t.state) {
     case 'not-on-books':
-      return 'No live membership — they have already gone.';
+      return 'No live membership. They have already gone.';
     case 'open-ended':
       return 'Open-ended: no end date recorded, so nothing is due to run out.';
     case 'unreadable':
@@ -1102,7 +1102,7 @@ export function termHeadline(g: GymRetention): string | null {
   }
   if (!bits.length) {
     return t.openEnded && t.openEnded > 0
-      ? `Nothing ends in the next ${t.soonDays} days. ${t.openEnded} membership${t.openEnded === 1 ? ' is' : 's are'} open-ended, which is not the same as nothing being at risk — the pattern column beside it is the one that says that.`
+      ? `Nothing ends in the next ${t.soonDays} days. ${t.openEnded} membership${t.openEnded === 1 ? ' is' : 's are'} open-ended, which is not the same as nothing being at risk. The pattern column beside it is the one that says that.`
       : `Nothing ends in the next ${t.soonDays} days.`;
   }
   return `${bits.join(', and ')}. This is a different kind of evidence from the bands above: it is what the record states, not what attendance suggests, so a member can be steady here and certain to leave.`;
@@ -1117,7 +1117,7 @@ function buildSpine(
   const feasibility = cohortFeasibility(rows);
   const undated = rows.filter((r) => r.cohort == null).length;
 
-  const floorNote = `Cohorts under ${o.minCohort} members show counts only. At ${o.minCohort} joiners one member is worth ${fmtPoints(100 / o.minCohort)} points of the percentage; below that a single person moving swings it further than anything an owner would act on, so the rate would be measuring the cohort's size. A cohort is also left without a rate until ${COHORT_MATURITY_DAYS} days after its month ended — nobody who joined this month has had the chance to leave yet.`;
+  const floorNote = `Cohorts under ${o.minCohort} members show counts only. At ${o.minCohort} joiners one member is worth ${fmtPoints(100 / o.minCohort)} points of the percentage; below that a single person moving swings it further than anything an owner would act on, so the rate would be measuring the cohort's size. A cohort is also left without a rate until ${COHORT_MATURITY_DAYS} days after its month ended, since nobody who joined this month has had the chance to leave yet.`;
 
   if (!feasibility.usable) {
     return { cohorts: [], earlier: null, undated, feasibility, reportable: 0, floorNote };
@@ -1239,7 +1239,7 @@ export function suppressionNote(c: Cohort, floor: number = MIN_COHORT_FOR_RATE):
     const p = pointsPerMember(c.joined);
     return c.joined === 0
       ? 'Nobody joined this month, so there is no rate to report.'
-      : `${c.joined} member${c.joined === 1 ? '' : 's'} — one of them is worth ${fmtPoints(p!)} points, so no percentage is shown. The floor is ${floor}.`;
+      : `${c.joined} member${c.joined === 1 ? '' : 's'}. One of them is worth ${fmtPoints(p!)} points, so no percentage is shown. The floor is ${floor}.`;
   }
   if (c.suppressed === 'too-young') {
     return `Too recent to judge: this cohort gets a rate ${COHORT_MATURITY_DAYS} days after its month ends, once its members have had the chance to leave.`;
@@ -1252,7 +1252,7 @@ export function headline(g: GymRetention): string | null {
   const s = g.summary;
   if (s.roster == null) return null;
   if (s.bands == null) {
-    return `${s.roster} on the roster, ${s.onBooks} still holding a membership. Nothing that records attendance could be read, so how many of them are still training is unknown — not zero.`;
+    return `${s.roster} on the roster, ${s.onBooks} still holding a membership. Nothing that records attendance could be read, so how many of them are still training is unknown, not zero.`;
   }
   const parts: string[] = [
     `${s.bands.steady} of ${s.roster} holding their own pattern`,
@@ -1262,7 +1262,7 @@ export function headline(g: GymRetention): string | null {
   if (s.bands.unknown) parts.push(`${s.bands.unknown} the record cannot judge`);
   let out = `${parts.join(', ')}.`;
   if (s.offTimetable) {
-    out += ` ${s.offTimetable} stopped booking classes but ${s.offTimetable === 1 ? 'is' : 'are'} still coming through the door — a class-only report would have written ${s.offTimetable === 1 ? 'them' : 'them all'} off.`;
+    out += ` ${s.offTimetable} stopped booking classes but ${s.offTimetable === 1 ? 'is' : 'are'} still coming through the door. A class-only report would have written ${s.offTimetable === 1 ? 'them' : 'them all'} off.`;
   }
   if (s.quiet != null && s.quiet > 0) {
     out += ` ${s.quiet} not through the door once while the log was recording others.`;

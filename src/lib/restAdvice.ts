@@ -206,7 +206,7 @@ export function restReadinessRead(i: RestReadinessInput): RestReadinessRead {
     return {
       state: 'unread',
       score: null,
-      note: i.absence ?? 'We could not read the signals behind your readiness, so there is no figure to show — it does not mean you slept well.',
+      note: i.absence ?? 'We could not read the signals behind your readiness, so there is no figure to show. It does not mean you slept well.',
       mayBeMissing: true,
     };
   }
@@ -318,10 +318,10 @@ export function restAdvice(i: RestAdviceInput): RestAdvice {
       : i.logStatus === 'partial' ? 'More training than this screen can read at once'
       : 'We couldn’t read your training log';
     const body = i.logStatus === 'loading'
-      ? 'This screen works from what you have logged and what your devices have measured, and it is still coming back. Nothing here is a judgement about your recovery yet — read it as blank, not as a green light to train.'
+      ? 'This screen works from what you have logged and what your devices have measured, and it is still coming back. Nothing here is a judgement about your recovery yet. Read it as blank, not as a green light to train.'
       : i.logStatus === 'partial'
       ? 'This screen works from what you have logged, and you have logged more than it can read in one go. Counting consecutive hard weeks against a history that stops part-way through would put a wall where your training carried on, so it says nothing rather than the wrong thing.'
-      : 'This screen works from what you have logged, and we could not read it. Nothing here is a judgement about your recovery — read it as blank, not as a green light to train.';
+      : 'This screen works from what you have logged, and we could not read it. Nothing here is a judgement about your recovery. Read it as blank, not as a green light to train.';
     return { call: 'unknown', because: null, headline, body };
   }
 
@@ -350,7 +350,7 @@ export function restAdvice(i: RestAdviceInput): RestAdvice {
       ? `You've trained ${i.weekDays} of the last 7 days, and your readiness score is ${r.score} out of 100. Both point the same way: a rest day now protects your progress and lowers injury risk.`
       : because === 'load'
       ? `You've trained ${i.weekDays} of the last 7 days. A rest day now protects your progress and lowers injury risk.${readinessClause(r)}`
-      : `Your readiness score is ${r.score} out of 100. Your training log alone would have said you had room — ${dayCount(i.weekDays)} in the last 7 — but the score is built from what was actually measured, and it is the one with a night behind it.`;
+      : `Your readiness score is ${r.score} out of 100. Your training log alone would have said you had room (${dayCount(i.weekDays)} in the last 7), but the score is built from what was actually measured, and it is the one with a night behind it.`;
     return { call: 'rest', because, headline: 'Take a rest day', body };
   }
 
@@ -359,11 +359,11 @@ export function restAdvice(i: RestAdviceInput): RestAdvice {
   // say. `readinessScore`'s own tip in this band is "Great day to push"; it is
   // not printed here, because a screen whose job is to say stop should not be
   // the one telling somebody to go harder.
-  const light = `${dayCount(i.weekDays)} in the last 7 — that is light by volume alone.`;
+  const light = `${dayCount(i.weekDays)} in the last 7. That is light by volume alone.`;
   const tail = r.state === 'scored' && r.score != null
     ? ` Your readiness score is ${r.score} out of 100, and it is a measurement rather than a promise about how today will feel.`
     : r.state === 'unread'
-    ? ' Your readiness score could not be read, and a figure we could not see can only ever have argued for more rest, not less — so treat this as your training log and nothing more.'
+    ? ' Your readiness score could not be read, and a figure we could not see can only ever have argued for more rest, not less, so treat this as your training log and nothing more.'
     : r.state === 'reading'
     ? ' Your readiness score is still being read, so this is your training log and nothing else so far.'
     : r.state === 'awaiting'

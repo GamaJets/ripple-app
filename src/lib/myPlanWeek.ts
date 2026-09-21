@@ -129,7 +129,7 @@ export function myPlanWeek(pva: PlanVsActual, windowDays: number): MyPlanWeek {
   if (pva.state === 'unreadable') {
     return {
       kind: 'unreadable',
-      note: 'Your program or your training log could not be read, so nothing here compares them. That is a read that did not land — it is not a week with nothing in it.',
+      note: 'Your program or your training log could not be read, so nothing here compares them. That is a read that did not land. It is not a week with nothing in it.',
     };
   }
   if (pva.state === 'no-program') {
@@ -176,10 +176,10 @@ export function myPlanWeek(pva: PlanVsActual, windowDays: number): MyPlanWeek {
       : null,
     unanswered,
     unansweredNote: unknownM.length
-      ? `${unknownM.length} more cannot be answered for — your history did not come back far enough to cover the window: ${phrase(unanswered)}.`
+      ? `${unknownM.length} more cannot be answered for. Your history did not come back far enough to cover the window: ${phrase(unanswered)}.`
       : null,
     offPlanNote: pva.offPlan.length
-      ? `You also logged ${pva.offPlan.length} movement${s(pva.offPlan.length)} this program does not name: ${pva.offPlan.slice(0, MAX_NAMED).join(', ')}${pva.offPlan.length > MAX_NAMED ? ` and ${pva.offPlan.length - MAX_NAMED} more` : ''}. That is worth telling your coach — it is the half of your week their screen cannot explain.`
+      ? `You also logged ${pva.offPlan.length} movement${s(pva.offPlan.length)} this program does not name: ${pva.offPlan.slice(0, MAX_NAMED).join(', ')}${pva.offPlan.length > MAX_NAMED ? ` and ${pva.offPlan.length - MAX_NAMED} more` : ''}. That is worth telling your coach. It is the half of your week their screen cannot explain.`
       : null,
     caveat: CAVEAT,
   };
@@ -196,7 +196,7 @@ export function myPlanWeek(pva: PlanVsActual, windowDays: number): MyPlanWeek {
  * which is that nothing on this line is calling any particular day a miss.
  */
 export const CAVEAT =
-  'This counts movements over a window of days, never against a named weekday, and it never says a session was missed — an unlogged session and a session that did not happen look the same from here.';
+  'This counts movements over a window of days, never against a named weekday, and it never says a session was missed. An unlogged session and a session that did not happen look the same from here.';
 
 /**
  * The one line the good state gets.

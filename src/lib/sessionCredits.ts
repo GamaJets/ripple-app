@@ -922,7 +922,7 @@ export function passesElsewhereLine(b: Bookable): string | null {
  */
 export function creditsEmptyLine(b: Bookable): string | null {
   if (b.route === 'unknown' || b.left == null) {
-    return 'We could not read what pays for your sessions. This is our end, and it is not a statement that you have none — anything you have paid for is still yours.';
+    return 'We could not read what pays for your sessions. This is our end, and it is not a statement that you have none. Anything you have paid for is still yours.';
   }
   if (b.route === 'none') {
     // Holding a live PT pass from another gym IS holding a gym PT pass, so the
@@ -941,7 +941,7 @@ export function creditsEmptyLine(b: Bookable): string | null {
   }
   if (b.left === 0) {
     if (b.route === 'gym_pass') {
-      return 'You have no PT credits left on your gym pass. Your next session with your coach is not covered by one — ask your gym about another pass, or arrange it with your coach directly.';
+      return 'You have no PT credits left on your gym pass. Your next session with your coach is not covered by one. Ask your gym about another pass, or arrange it with your coach directly.';
     }
     // Ran out of TIME, not out of sessions, and those are two different things
     // to say to somebody who paid for credits they never used. Sessions with
@@ -949,9 +949,9 @@ export function creditsEmptyLine(b: Bookable): string | null {
     // its window has closed — so the sentence has to explain a nought that a
     // gym pass beside it will not fill.
     if (b.lines != null && b.lines.length > 0 && b.lines.every((l) => l.expired)) {
-      return 'Your pack ran out of time. Sessions with this coach still come off that pack, so the next one is not covered by anything — ask them about the credits you did not use, buy another pack, or arrange it with them directly.';
+      return 'Your pack ran out of time. Sessions with this coach still come off that pack, so the next one is not covered by anything. Ask them about the credits you did not use, buy another pack, or arrange it with them directly.';
     }
-    return 'You have no sessions left on your pack. Your next session with your coach is not covered by one — buy another from them, or arrange it with them directly.';
+    return 'You have no sessions left on your pack. Your next session with your coach is not covered by one. Buy another from them, or arrange it with them directly.';
   }
   return null;
 }

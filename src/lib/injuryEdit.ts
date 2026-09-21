@@ -247,7 +247,7 @@ export function injuryStanding(
   return {
     days,
     line: recheck
-      ? `You disclosed this ${since} and nothing has changed on it since. Your coach and your plan are still training around it — if it has healed, mark it recovered.`
+      ? `You disclosed this ${since} and nothing has changed on it since. Your coach and your plan are still training around it. If it has healed, mark it recovered.`
       : `Disclosed ${since}.`,
     recheck,
   };

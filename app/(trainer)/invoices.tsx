@@ -380,10 +380,10 @@ export default function Invoices() {
     // document: `coach_invoices` is readable by this coach alone, so the copy
     // in their inbox tells them to expect it from you.
     const told = res.notified === true
-      ? 'They have a notification about it — not the document, which still comes from you.'
+      ? 'They have a notification about it, not the document, which still comes from you.'
       : res.notified === false
         ? 'They could not be notified about it, so the first they will hear of it is when you send it.'
-        : 'This one is not tied to an account, so nobody was notified — it goes to them when you send it.';
+        : 'This one is not tied to an account, so nobody was notified. It goes to them when you send it.';
     Alert.alert(
       `Invoice ${invoiceNumber(issued.seq)} Issued`,
       `${money(issued) ?? DASH} to ${issued.billTo}. It is in your list now. ${told}`,
@@ -446,7 +446,7 @@ export default function Invoices() {
       note
       + '\n\n'
       + (caveat ? caveat + '\n\n' : '')
-      + 'It goes through your phone’s share sheet, so it reaches them however you already talk to them. Nothing is sent from this app and nothing is recorded against these invoices — “Chase it” on an invoice is what records one.',
+      + 'It goes through your phone’s share sheet, so it reaches them however you already talk to them. Nothing is sent from this app and nothing is recorded against these invoices. “Chase it” on an invoice is what records one.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Send It', onPress: () => { void shareText(note, `Outstanding invoices for ${g.billTo}`); } },
@@ -497,7 +497,7 @@ export default function Invoices() {
     const told = res.notified === true
       ? 'They have a notification about it. It names the number so they can match it to the document you already sent, and it is not a second invoice.'
       : res.notified === false
-        ? 'They could not be notified, so nothing reached them. The chase is recorded on your side only — send it to them the way you sent it the first time.'
+        ? 'They could not be notified, so nothing reached them. The chase is recorded on your side only. Send it to them the way you sent it the first time.'
         : 'This one is not tied to an account, so nobody was notified.';
     Alert.alert(`Chased Invoice ${invoiceNumber(inv.seq)}`, told);
   };
@@ -761,7 +761,7 @@ export default function Invoices() {
     ? curGap === 'unset'
       ? ccy.gap && ccy.gap !== 'gym-unset'
         ? myCurrencyLine(ccy.gap, 'nothing can be issued')
-        : 'No currency has been set for you. Repple is white-labelled, so there is no default that would be right for every gym — and an invoice with the wrong currency on it is worse than no invoice. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
+        : 'No currency has been set for you. Repple is white-labelled, so there is no default that would be right for every gym, and an invoice with the wrong currency on it is worse than no invoice. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.'
       : currencyGapLine(curGap, 'nothing can be issued')
     : null;
 
@@ -928,7 +928,7 @@ export default function Invoices() {
                     only place it is said anywhere. */}
                 {book.totals.unlabelled > 0 ? (
                   <Flag style={{ marginTop: sp.sm }}>
-                    {book.totals.unlabelled} invoice{book.totals.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so {book.totals.unlabelled === 1 ? 'it is' : 'they are'} not in {book.totals.pots.length ? 'any figure above' : 'any figure at all — which is why there is none here'}.
+                    {book.totals.unlabelled} invoice{book.totals.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so {book.totals.unlabelled === 1 ? 'it is' : 'they are'} not in {book.totals.pots.length ? 'any figure above' : 'any figure at all, which is why there is none here'}.
                   </Flag>
                 ) : null}
                 {book.voided > 0 ? (
@@ -965,7 +965,7 @@ export default function Invoices() {
             so the screen opens on the figure. */}
         <Expandable title="What These Are" note="A record of a charge you made, in your own sequence">
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Numbered in your own sequence inside this app. It states no tax and it is not a payment receipt — both are printed on the document itself, so nobody has to take your word for what it is.
+            Numbered in your own sequence inside this app. It states no tax and it is not a payment receipt. Both are printed on the document itself, so nobody has to take your word for what it is.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{AGEING_IS_YOUR_OWN_RECORD}</Text>
         </Expandable>
@@ -1038,7 +1038,7 @@ export default function Invoices() {
                         // person owes, and under a short read it is a claim
                         // about a prefix of it. Both branches say so.
                         ? `At least ${g.overdue} past a date you stated, and the oldest of the ones that came back is ${g.worstDays} day${g.worstDays === 1 ? '' : 's'} late. There are more than one read returns.`
-                        : 'None of what came back is past a date the client was ever shown — but there are more than one read returns, so that is not all of it.')}
+                        : 'None of what came back is past a date the client was ever shown, but there are more than one read returns, so that is not all of it.')}
                   </Text>
                   {g.clientId ? null : (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -1069,7 +1069,7 @@ export default function Invoices() {
                 </View>
               ))}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                The note is built from what you recorded: your own numbers, the amounts you typed and the dates you stated. It says those are your records and asks — nothing here has been checked against a bank, and a client who paid you on Friday must not be told they did not.
+                The note is built from what you recorded: your own numbers, the amounts you typed and the dates you stated. It says those are your records and asks. Nothing here has been checked against a bank, and a client who paid you on Friday must not be told they did not.
               </Text>
             </Section>
           </>
@@ -1126,7 +1126,7 @@ export default function Invoices() {
           {status === 'error' ? (
             <Flag style={{ marginTop: sp.sm }}>
               Your invoices could not be read just now, so this is not a list of none. Nothing has
-              happened to them — the numbers you have issued are still on record.
+              happened to them. The numbers you have issued are still on record.
             </Flag>
           ) : status === 'partial' ? (
             <PartialRead what="your invoices" onPress={() => { void load(); }} />
@@ -1153,7 +1153,7 @@ export default function Invoices() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{invoiceAge(inv, today).line}</Text>
                 {inv.voidedAt ? (
                   <Flag style={{ marginTop: sp.sm }}>
-                    Voided{inv.voidReason ? ` — ${inv.voidReason}` : ''}. Its number is not reused.
+                    Voided{inv.voidReason ? `: ${inv.voidReason}` : ''}. Its number is not reused.
                   </Flag>
                 ) : null}
                 {!amount ? (
@@ -1231,7 +1231,7 @@ export default function Invoices() {
               to the same coach. */}
           {!rows.length && status === 'ready' ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              Nothing here yet, so the first invoice you issue is number 0001. An invoice you issue stays in this list for good — it can be voided, never edited and never deleted, because the copy your client is holding does not change.
+              Nothing here yet, so the first invoice you issue is number 0001. An invoice you issue stays in this list for good. It can be voided, never edited and never deleted, because the copy your client is holding does not change.
             </Text>
           ) : null}
         </Section>
@@ -1341,7 +1341,7 @@ export default function Invoices() {
                   </Text>
                   <Icon name="calendar" size={18} color={t.ink2} />
                 </Pressable>
-                {dueText ? <Ghost label="Clear" a11yLabel="Clear the due date — the document then states none" onPress={() => setDueText('')} /> : null}
+                {dueText ? <Ghost label="Clear" a11yLabel="Clear the due date. The document then states none" onPress={() => setDueText('')} /> : null}
               </View>
               {/* ── the terms, named as terms ──────────────────────────────
                   Was an inline `[label, days]` array reading 'On the day', 'In
@@ -1455,7 +1455,7 @@ export default function Invoices() {
               Void Invoice {voidTarget ? invoiceNumber(voidTarget.seq) : ''}?
             </Text>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
-              It stays in your list, marked voided, and its number is never reused — a missing number in a sequence is a question you would have to answer later, and a reused one is worse. It cannot be un-voided.
+              It stays in your list, marked voided, and its number is never reused. A missing number in a sequence is a question you would have to answer later, and a reused one is worse. It cannot be un-voided.
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Why (Required)</Text>
             <TextInput value={voidReason} onChangeText={setVoidReason}
@@ -1511,7 +1511,7 @@ export default function Invoices() {
                 </Text>
               ) : null}
               <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
-                This records your own statement that the money arrived. Nothing about the document changes — it still says what it said when you issued it — and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day. It cannot be undone, and a settled invoice cannot be voided either.
+                This records your own statement that the money arrived. Nothing about the document changes (it still says what it said when you issued it), and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day. It cannot be undone, and a settled invoice cannot be voided either.
               </Text>
               {/* ── who hears about it, said BEFORE the tap ──────────────────
                   This settlement now writes the client an inbox row, and a
@@ -1531,7 +1531,7 @@ export default function Invoices() {
               {settleTarget ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                   {settleNoticeBlocker({ ...settleTarget, settledOn: settleDay.trim() || today })
-                    ?? `${settleTarget.billTo} gets an inbox row saying you have recorded this one as paid, with the amount and the day you give below. It is worded as your own record rather than as a receipt, because that is what it is, and it carries no link — they still cannot read the document here, so send it to them if they want a copy.`}
+                    ?? `${settleTarget.billTo} gets an inbox row saying you have recorded this one as paid, with the amount and the day you give below. It is worded as your own record rather than as a receipt, because that is what it is, and it carries no link. They still cannot read the document here, so send it to them if they want a copy.`}
                 </Text>
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The Day It Arrived</Text>
@@ -1629,7 +1629,7 @@ export default function Invoices() {
                 accessibilityState={{ disabled: busy, busy }}
                 style={{ paddingVertical: sp.md, alignItems: 'center' }}>
                 <Text style={{ ...ty.label, ...font('500'), color: busy ? t.ink3 : t.ink2 }}>
-                  Clear It — Put This One Back on the Undated List
+                  Clear It and Put This One Back on the Undated List
                 </Text>
               </Pressable>
             ) : null}

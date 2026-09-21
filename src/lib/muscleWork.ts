@@ -561,7 +561,7 @@ export function gapNote(board: MuscleWorkBoard): string | null {
     const n = board.unmatchedSets;
     const named = board.unmatched.slice(0, 3).join(', ');
     const more = board.unmatched.length > 3 ? `, and ${board.unmatched.length - 3} more` : '';
-    out.push(`${n} set${n === 1 ? '' : 's'} are not counted here — ${named}${more} `
+    out.push(`${n} set${n === 1 ? '' : 's'} are not counted here: ${named}${more} `
       + `${board.unmatched.length === 1 ? 'is' : 'are'} not in the exercise catalogue, so we `
       + `cannot say which muscles ${board.unmatched.length === 1 ? 'it' : 'they'} worked.`);
   }
@@ -569,7 +569,7 @@ export function gapNote(board: MuscleWorkBoard): string | null {
     const n = board.unattributedSets;
     const named = board.unattributed.slice(0, 3).join(', ');
     const more = board.unattributed.length > 3 ? `, and ${board.unattributed.length - 3} more` : '';
-    out.push(`Another ${n} set${n === 1 ? '' : 's'} are not counted either — our catalogue has `
+    out.push(`Another ${n} set${n === 1 ? '' : 's'} are not counted either. Our catalogue has `
       + `${named}${more} but records no muscles for `
       + `${board.unattributed.length === 1 ? 'it' : 'them'} yet.`);
   }

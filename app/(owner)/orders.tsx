@@ -105,11 +105,11 @@ function unspellableReasons(u: UnspellablePaid): string {
   const parts: string[] = [];
   if (u.unstated > 0) {
     parts.push(`${u.unstated} ${u.unstated === 1 ? 'records' : 'record'} no currency at all, which no checkout `
-      + `this product runs can produce — those were imported or entered by hand`);
+      + `this product runs can produce (those were imported or entered by hand)`);
   }
   if (u.notACode > 0) {
     parts.push(`${u.notACode} ${u.notACode === 1 ? 'names' : 'name'} something that is not a three-letter `
-      + `currency code, such as “pounds” — that spelling is copied from the plan or pass type at checkout, `
+      + `currency code, such as “pounds”. That spelling is copied from the plan or pass type at checkout, `
       + `so it is the price book that fixes it`);
   }
   if (u.notAnAmount > 0) {
@@ -294,8 +294,8 @@ export default function OwnerOrders() {
         {loaded && needsAPerson > 0 ? (
           <Flag tone={t.crit}>
             Stripe took this money and the membership or pass was never written. Nothing on this
-            screen can grant it — every write to the order book is made by the checkout and
-            webhook functions, never by an app — so open Stripe, confirm the charge, and add the
+            screen can grant it (every write to the order book is made by the checkout and
+            webhook functions, never by an app), so open Stripe, confirm the charge, and add the
             membership or pass by hand on Members.
           </Flag>
         ) : null}
@@ -334,12 +334,12 @@ export default function OwnerOrders() {
           <Flag tone={t.warn}>
             {unspellable.orders} paid {unspellable.orders === 1 ? 'order is' : 'orders are'} not in
             any figure on this screen. The money arrived and the{' '}
-            {unspellable.orders === 1 ? 'member has' : 'members have'} what they bought — what
+            {unspellable.orders === 1 ? 'member has' : 'members have'} what they bought. What
             cannot be done is add {unspellable.orders === 1 ? 'it' : 'them'} up:{' '}
             {unspellableReasons(unspellable)}. So this is a count and never a total: an amount in a
             money this app cannot name cannot be added to another one, or to a figure that names its
             own. {unspellable.orders === 1 ? 'It is' : 'All of them are'} still in the order book,
-            marked Paid. Nothing on this screen rewrites an order — every write to the order book is
+            marked Paid. Nothing on this screen rewrites an order. Every write to the order book is
             made by the checkout and webhook functions.
           </Flag>
         ) : null}
@@ -351,7 +351,7 @@ export default function OwnerOrders() {
           {!loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {state === 'failed'
-                ? 'Not known — the order book could not be read. This is not a quarter in which nothing sold.'
+                ? 'Not known. The order book could not be read. This is not a quarter in which nothing sold.'
                 : 'Reading…'}
             </Text>
           ) : pots.length === 0 ? (
@@ -377,9 +377,9 @@ export default function OwnerOrders() {
                 : unspellable.orders === 0
                 ? 'Nothing has been paid for online in this window.'
                 : `${unspellable.orders} paid order${unspellable.orders === 1 ? '' : 's'} in this window, and not `
-                  + `one states both an amount and the currency it was taken in — so there is no figure to `
+                  + `one states both an amount and the currency it was taken in, so there is no figure to `
                   + 'write here. They are counted above, never guessed at.'}
-              {' '}That is not the same as no income — payments taken at the desk are on Members.
+              {' '}That is not the same as no income. Payments taken at the desk are on Members.
             </Text>
           ) : pots.map((p) => (
             // One line per currency. They are never added: a gym that changed

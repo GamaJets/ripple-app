@@ -150,10 +150,10 @@ export function invoiceNotification(inv: CoachInvoice): Notification {
   // could not be put in a currency. Never a bare number, and never a dash that
   // could be read as "nothing charged".
   const line = amount
-    ? `Invoice ${n} for ${amount}${what ? ` — ${what}` : ''}.`
-    : `Invoice ${n}${what ? ` — ${what}` : ''}. The amount could not be stated in a currency, so none is shown here.`;
+    ? `Invoice ${n} for ${amount}${what ? `, ${what}` : ''}.`
+    : `Invoice ${n}${what ? `, ${what}` : ''}. The amount could not be stated in a currency, so none is shown here.`;
   const claim = inv.kind === 'received'
-    ? 'Your coach states this amount has been received. That is their own statement — it has not been checked against a bank or a card processor and it is not a payment receipt.'
+    ? 'Your coach states this amount has been received. That is their own statement. It has not been checked against a bank or a card processor and it is not a payment receipt.'
     : 'Your coach states this amount is being requested. It is their own record, not a bill this app has checked, and no tax is calculated on it.';
   return {
     title: inv.kind === 'received' ? 'Your coach recorded a payment' : 'An invoice from your coach',
@@ -191,14 +191,14 @@ export function invoiceReminderNotification(inv: CoachInvoice): Notification {
   const amount = money(inv);
   const what = clip(inv.description || '', 120);
   const line = amount
-    ? `Invoice ${n} for ${amount}${what ? ` — ${what}` : ''}.`
-    : `Invoice ${n}${what ? ` — ${what}` : ''}. The amount could not be stated in a currency, so none is shown here.`;
+    ? `Invoice ${n} for ${amount}${what ? `, ${what}` : ''}.`
+    : `Invoice ${n}${what ? `, ${what}` : ''}. The amount could not be stated in a currency, so none is shown here.`;
   const due = String(inv.dueOn ?? '').slice(0, 10);
   const when = /^\d{4}-\d{2}-\d{2}$/.test(due) ? ` They stated it was due on ${invoiceDayLabel(due)}.` : '';
   return {
     title: 'A reminder from your coach',
     body: clip(
-      `${line} Their record still shows this one as outstanding.${when} If you have already settled it, tell them — this app is not told when a payment reaches them. Ask them for a copy of the document.`,
+      `${line} Their record still shows this one as outstanding.${when} If you have already settled it, tell them. This app is not told when a payment reaches them. Ask them for a copy of the document.`,
       NOTICE_BODY_MAX,
     ),
   };
@@ -315,7 +315,7 @@ export function deliverySummary(r: DeliveryReport): string {
     // recorded" and "there is nobody to notify" are different facts and only
     // one of them is worth acting on. This branch is reachable only from a read
     // that SUCCEEDED and found nobody — a failed read arrives as null.
-    parts.push('It is posted, and there is nobody to notify yet — no accounts were found to address it to.');
+    parts.push('It is posted, and there is nobody to notify yet: no accounts were found to address it to.');
   } else if (r.recorded == null) {
     // The notice itself is on the server either way — that write is what this
     // sentence is appended to — so the honest report is that the notifications
@@ -333,7 +333,7 @@ export function deliverySummary(r: DeliveryReport): string {
     // two thousand rather than to the ones that were missed. Telling an author
     // to repeat it would be offering a remedy that does not remedy anything.
     // The notice itself is on the server and everybody can still read it there.
-    parts.push(`It is posted, and at least ${num(r.recorded)} people have it in their notifications. There are more people on this notice than can be written to in one go, so some of them do not — they will see it when they open their notices.`);
+    parts.push(`It is posted, and at least ${num(r.recorded)} people have it in their notifications. There are more people on this notice than can be written to in one go, so some of them do not. They will see it when they open their notices.`);
   } else if (r.recipientsTruncated) {
     // `recipients` is a floor here, so it is not stated as a total and the two
     // numbers are not compared: "3 of 1001" over a capped read invites the
@@ -358,7 +358,7 @@ export function deliverySummary(r: DeliveryReport): string {
     // stop making — and a caller that could not see the flag went on making it.
     parts.push(`A push was queued as well. ${PUSH_PARTIAL_NOTE} Everyone above still has it in their notifications.`);
   } else if (r.push === 'queued') {
-    parts.push('A push was queued as well — only people on a push-enabled build with notifications turned on will get one.');
+    parts.push('A push was queued as well. Only people on a push-enabled build with notifications turned on will get one.');
   } else if (r.push === 'failed') {
     parts.push(`The push did not go out: ${(r.pushError || '').trim() || 'the server did not say why'}.`);
   } else {
@@ -388,7 +388,7 @@ export function pushConsequence(kind: NoticeKind, recipients: number | null): st
   const audience = recipients == null
     ? `every ${who}`
     : `${num(recipients)} ${who}${recipients === 1 ? '' : 's'}`;
-  return `Sends a push to ${audience} straight away, at whatever time it is where they are. Without it the notice still reaches their notices and their notifications — quietly.`;
+  return `Sends a push to ${audience} straight away, at whatever time it is where they are. Without it the notice still reaches their notices and their notifications, quietly.`;
 }
 
 /* ── a class seat that expires ─────────────────────────────────────────────
@@ -565,8 +565,8 @@ export function coachAnswerConfirmation(
     return `${lead} We couldn’t reach their phone, so they will see it in their notifications the next time they open the app.`;
   }
   return accepted
-    ? `${lead} We couldn’t tell them at all — nothing reached their phone and nothing was written to their notifications, so they will find out by opening the app and noticing you there.`
-    : `${lead} We couldn’t tell them at all — nothing reached their phone and nothing was written to their notifications, so as far as their app is concerned they are still waiting on you.`;
+    ? `${lead} We couldn’t tell them at all. Nothing reached their phone and nothing was written to their notifications, so they will find out by opening the app and noticing you there.`
+    : `${lead} We couldn’t tell them at all. Nothing reached their phone and nothing was written to their notifications, so as far as their app is concerned they are still waiting on you.`;
 }
 
 /* ── a class that was called off ───────────────────────────────────────────
@@ -629,8 +629,8 @@ export function classOffNotification(
     title: many ? CLASS_OFF_TITLE_MANY : CLASS_OFF_TITLE,
     body: clip(
       many
-        ? `${num(Math.floor(classes))} of your “${name}” classes have been called off${why}. Your bookings are kept on the record and there is nothing for you to do — your Classes screen has the rest of the timetable.`
-        : `“${name}” has been called off${why}. Your booking is kept on the record and there is nothing for you to do — your Classes screen has the rest of the timetable.`,
+        ? `${num(Math.floor(classes))} of your “${name}” classes have been called off${why}. Your bookings are kept on the record and there is nothing for you to do. Your Classes screen has the rest of the timetable.`
+        : `“${name}” has been called off${why}. Your booking is kept on the record and there is nothing for you to do. Your Classes screen has the rest of the timetable.`,
       NOTICE_BODY_MAX,
     ),
     route: CLASS_OFF_ROUTE,
@@ -723,12 +723,12 @@ export function classOffConfirmation(
   const n = Math.max(0, Math.floor(Number.isFinite(cancelled) ? cancelled : 0));
   const lead = `${num(n)} ${n === 1 ? 'class was' : 'classes were'} called off. Every booking, every check-in and every waiting list is kept.`;
   if (people == null) {
-    return `${lead} We couldn’t read who had booked, so nobody has been told — tell them yourself.`;
+    return `${lead} We couldn’t read who had booked, so nobody has been told. Tell them yourself.`;
   }
   if (people === 0) return `${lead} Nobody had booked or was waiting, so there was nobody to tell.`;
   const who = `${num(people)} ${people === 1 ? 'person had' : 'people had'} booked or ${people === 1 ? 'was' : 'were'} waiting`;
   if (pushed == null || pushed === 0) {
-    return `${lead} ${who}, and we couldn’t reach any of their phones just now — tell them yourself if the class is soon.`;
+    return `${lead} ${who}, and we couldn’t reach any of their phones just now. Tell them yourself if the class is soon.`;
   }
   if (pushed < people) {
     // "We couldn't reach the rest" names a set — the people-minus-pushed who

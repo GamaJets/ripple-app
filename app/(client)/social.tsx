@@ -102,7 +102,7 @@ export default function Social() {
  deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}% body fat` : null,
  ].filter(Boolean);
  const msg = measured && bits.length
- ? `My ${BRAND.label} progress — ${bits.join(' and ')} so far. Every rep ripples out.`
+ ? `My ${BRAND.label} progress: ${bits.join(' and ')} so far. Every rep ripples out.`
  : `I train with ${BRAND.label}. Every rep ripples out.`;
  // Closing the sheet without posting rejects on iOS, and it is the commonest
  // way this call ends: a member opens the sheet, reads the sentence back, and
@@ -143,7 +143,7 @@ export default function Social() {
    title={cd.scansStatus === 'error' ? 'We Couldn’t Read Your Scans' : 'Not All of Your Scans Could Be Read'}
    note={cd.scansStatus === 'error'
     ? 'There is nothing to share from this screen right now, and that is a fault here rather than an absence in your record. Your scans are safe.'
-    : 'You have more scans on record than can be read in one go, and "since your first scan" means the first one — which may not be among them. A figure that would go into a post has to be the right one, so none is offered.'} />
+    : 'You have more scans on record than can be read in one go, and "since your first scan" means the first one, which may not be among them. A figure that would go into a post has to be the right one, so none is offered.'} />
  </View>
  ) : (
  <HeroCard eyebrow="Your Progress"
@@ -176,7 +176,7 @@ export default function Social() {
  <Section>
  <Expandable title="How Sharing Works">
  <Text style={{ ...ty.caption, color: t.ink3 }}>
- Sharing opens your phone's own share sheet, so it goes wherever you send it — a story, a post, a message to one person. {BRAND.label} has no posting access to any account: nothing is ever posted automatically, and you approve every share.
+ Sharing opens your phone's own share sheet, so it goes wherever you send it: a story, a post, a message to one person. {BRAND.label} has no posting access to any account: nothing is ever posted automatically, and you approve every share.
  </Text>
  </Expandable>
  </Section>

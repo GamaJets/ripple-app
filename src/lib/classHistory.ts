@@ -187,5 +187,5 @@ export function missingClassesLine(missing: number, truncated: boolean): string 
   const count = truncated
     ? `at least ${n} more ${n === 1 ? 'class' : 'classes'}`
     : `${n} more ${n === 1 ? 'class' : 'classes'}`;
-  return `Your gym record holds ${count} that this list does not show — the read did not bring back all of it. Pull down to try again; nothing here is missing from your record itself.`;
+  return `Your gym record holds ${count} that this list does not show. The read did not bring back all of it. Pull down to try again; nothing here is missing from your record itself.`;
 }

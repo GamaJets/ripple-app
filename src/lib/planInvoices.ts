@@ -78,7 +78,7 @@ export function invoiceListNote(state: InvoiceListState): string | null {
     case 'loading':
       return 'Reading your invoices.';
     case 'unread':
-      return 'Your invoices could not be read just now. An empty space here is not a clear account — nothing has '
+      return 'Your invoices could not be read just now. An empty space here is not a clear account. Nothing has '
         + 'been paid or unpaid by this screen failing to load.';
     case 'none':
       return 'Nothing has been billed to you yet. Each time your plan renews, Stripe raises an invoice and it appears here.';
@@ -86,7 +86,7 @@ export function invoiceListNote(state: InvoiceListState): string | null {
       // Never a count. The rows shown are real; how many there are is not a
       // thing this read can say, and an accountant working from a short list
       // is the reason it says so out loud.
-      return 'These are the most recent — there are more than fitted in one read, so this is not your whole history.';
+      return 'These are the most recent. There are more than fitted in one read, so this is not your whole history.';
     case 'some':
       return null;
   }
@@ -105,15 +105,15 @@ export function invoiceStatusLine(inv: Pick<PlanInvoice, 'status' | 'attempt_cou
   const s = (inv.status ?? '').trim().toLowerCase();
   if (!s) return 'Whether this was paid was not recorded';
   if (s === 'paid') return 'Paid';
-  if (s === 'void') return 'Cancelled by Stripe — nothing is owed on it';
+  if (s === 'void') return 'Cancelled by Stripe. Nothing is owed on it';
   if (s === 'draft') return 'Not issued yet';
-  if (s === 'uncollectible') return 'Written off as uncollectible — this one did not go through';
+  if (s === 'uncollectible') return 'Written off as uncollectible. This one did not go through';
   if (s === 'open') {
     // `attempt_count` is nullable too, and `?? 0` on it would print "no
     // attempts" for a card Stripe has tried four times. Absent is absent.
     const n = inv.attempt_count;
     if (typeof n === 'number' && Number.isFinite(n) && n > 1) {
-      return `Not paid — your card has been tried ${n} times`;
+      return `Not paid. Your card has been tried ${n} times`;
     }
     return 'Not paid yet';
   }
@@ -136,7 +136,7 @@ export function invoiceNeedsMark(inv: Pick<PlanInvoice, 'status'>): boolean {
  * true. Stripe is the ledger; this is a copy of it kept by a webhook.
  */
 export const INVOICES_ARE_NOT_TOTALLED =
-  'Each amount is in the currency Stripe billed it in, and they are not added up here — two currencies do not '
+  'Each amount is in the currency Stripe billed it in, and they are not added up here. Two currencies do not '
   + 'make a total. Stripe’s own copy is the one to give an accountant; open an invoice to get it.';
 
 /** Whether a row can be opened at all. A Stripe-hosted page needs a url, and a

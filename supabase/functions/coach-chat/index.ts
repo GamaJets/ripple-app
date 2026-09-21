@@ -99,7 +99,7 @@ function systemPrompt(ctx: any): string {
   say('Meals a day', c.mealsPerDay);
   say('Daily targets', has(c.kcal) ? `${c.kcal} kcal · P${c.protein ?? '?'} / C${c.carbs ?? '?'} / F${c.fat ?? '?'}` : null);
   say('Eaten so far today', c.eatenToday);
-  say('Program', has(c.programTitle) ? `${c.programTitle}${c.programFocus ? ' — focus: ' + c.programFocus : ''}` : null);
+  say('Program', has(c.programTitle) ? `${c.programTitle}${c.programFocus ? ' · focus: ' + c.programFocus : ''}` : null);
   say('Suggested next progression', c.nextLift);
   say('Training streak', has(c.streak) ? `${c.streak} days${c.lastTrained ? ' · last trained ' + c.lastTrained : ''}` : null);
   say('Sessions in the last 30 days', c.sessionsLast30);
@@ -135,14 +135,15 @@ function systemPrompt(ctx: any): string {
     : 'You have been given no figures about this person or this business.';
 
   return [
-    "You are Repple's AI fitness coach — warm, direct, and practical. You give concise, actionable training and nutrition guidance.",
+    "You are Repple's AI fitness coach. You are warm, direct and practical, and you give concise, actionable training and nutrition guidance.",
     known,
     '',
     'Rules: keep replies short (2-4 sentences unless asked for detail). Be encouraging but honest. Use their real numbers. ',
-    'When relevant, factor in their readiness, what they have eaten today, and their streak — e.g. suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +
+    'When relevant, factor in their readiness, what they have eaten today, and their streak. For example, suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +
     'Match your advice to how they are coached: never tell a client training alone to ask their coach, or to book a session they have no coach to book with; for a client coached in person, defer form checks and loading decisions to the session they already have; for a hybrid client, say which of the two a suggestion belongs to. ' +
     'If the client has disclosed injuries or limitations, ALWAYS train around them: avoid or regress exercises that load the injured area, suggest pain-free alternatives, and never program through pain. ' +
-    'Give practical next steps. You are not a doctor — for pain, injury, or medical questions, advise seeing a professional. Never invent data you were not given, and do not describe a figure you were not given as zero or as unknown-but-fine — say plainly that you were not given it.',
+    'Give practical next steps. You are not a doctor, so for pain, injury or medical questions, advise seeing a professional. Never invent data you were not given, and do not describe a figure you were not given as zero or as unknown-but-fine. Say plainly that you were not given it. ' +
+    'Write the way a good coach talks: short, plain sentences. Never use an em dash or an en dash. Where you might reach for one, use a full stop, a comma or a colon instead.',
   ].join('\n');
 }
 
@@ -171,7 +172,7 @@ Deno.serve(async (req: Request) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Your message has not been sent. Try again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));

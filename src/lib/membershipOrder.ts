@@ -252,7 +252,7 @@ export function orderStatusLine(o: Pick<MemberOrder, 'status'>): string {
     case 'abandoned':
       return 'This checkout was not completed, and nobody was charged for it.';
     case 'failed':
-      return 'Your gym’s record shows this payment did not complete the way it should have. Nothing here is a charge you need to action — take it to reception and they can look it up by date.';
+      return 'Your gym’s record shows this payment did not complete the way it should have. Nothing here is a charge you need to action. Take it to reception and they can look it up by date.';
   }
 }
 
@@ -272,5 +272,5 @@ export function orderStatusLine(o: Pick<MemberOrder, 'status'>): string {
 export function orderAbsence(read: boolean): string {
   return read
     ? 'No online purchase is attached to this membership, so your gym recorded it at the desk. Payments your gym has taken are under Payments.'
-    : 'We couldn’t read your purchases just now, so nothing is shown here. That is a read that failed — not a membership nobody paid for.';
+    : 'We couldn’t read your purchases just now, so nothing is shown here. That is a read that failed, not a membership nobody paid for.';
 }

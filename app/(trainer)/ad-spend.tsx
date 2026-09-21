@@ -383,7 +383,7 @@ export default function TrainerAdSpend() {
                         <View style={{ marginTop: sp.md }}>
                           <Flag tone={t.crit}>
                             This spend is in {m.currency} and the clients off this code paid in {rev!.currency}. Repple will
-                            not divide one by the other, so there is no return shown for it — record this code’s spend in{' '}
+                            not divide one by the other, so there is no return shown for it. Record this code’s spend in{' '}
                             {rev!.currency} yourself if you want the comparison.
                           </Flag>
                         </View>
@@ -411,7 +411,7 @@ export default function TrainerAdSpend() {
           <Text style={{ ...ty.label, color: t.ink3 }}>
           {anyChannelSetUp
             ? 'Connect Meta, Google Ads or TikTok and Repple reads what each campaign cost, matching ads to your join codes by the link they point at. Set a join link as the ad’s destination and there is nothing else to set up.'
-            : 'Collecting ad spend automatically needs an ad account to sign in to, and none of Meta, Google Ads or TikTok is set up here — each card below says what is missing and who has to supply it. Typing what you spent into a code’s spend field works exactly as it always has, and every figure on this screen is built from those.'}
+            : 'Collecting ad spend automatically needs an ad account to sign in to, and none of Meta, Google Ads or TikTok is set up here. Each card below says what is missing and who has to supply it. Typing what you spent into a code’s spend field works exactly as it always has, and every figure on this screen is built from those.'}
           </Text>
         </Expandable>
 
@@ -486,7 +486,7 @@ export default function TrainerAdSpend() {
                 : `This ${channelLabel(choices.channel)} login found one, and it was not saved`} />
             {choices.accounts.length === 1 ? (
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-                Nothing is wrong with the connection — the account below simply was not stored when you
+                Nothing is wrong with the connection. The account below simply was not stored when you
                 connected, and spend cannot be collected until it is. This is the tap that fixes it;
                 connecting again will not.
               </Text>
@@ -536,7 +536,7 @@ export default function TrainerAdSpend() {
                   <View style={{ marginTop: sp.md }}>
                     <Flag tone={t.warn}>
                       Too many ads went unmatched to list them all here. The most expensive of them are below, and the
-                      figures above cover every one — what is short is the list, not the money.
+                      figures above cover every one. What is short is the list, not the money.
                     </Flag>
                   </View>
                 ) : null}
@@ -587,12 +587,12 @@ export default function TrainerAdSpend() {
           <SectionHead title="Entering It Yourself" />
           <Text style={{ ...ty.body, color: t.ink2 }}>
             Every code’s spend field is on the Clients screen, beside the figures it feeds, and it works whether or not an ad
-            account is connected. A figure you type there is never replaced by a collected one — it wins, and this screen
+            account is connected. A figure you type there is never replaced by a collected one. It wins, and this screen
             shows you when the two disagree. Clearing the field hands that code back to the checks.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             Ads are not the only thing a code costs you. A code you read out in a class or put in a caption will never appear
-            in an ad account, and its absence here says nothing about what it cost — no ad spend is unknown, not free.
+            in an ad account, and its absence here says nothing about what it cost. No ad spend is unknown, not free.
           </Text>
         </Section>
 
@@ -829,7 +829,7 @@ function ChannelCard({ state, busy, onConnect, onSync, onDisconnect }: {
             <View>
               <Flag tone={t.crit}>{run.failure || `${label} did not say why the check on ${when(run.startedAt)} failed.`}</Flag>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                Nothing was recorded from it — a failed check knows no figures, so it writes none. While this channel is
+                Nothing was recorded from it. A failed check knows no figures, so it writes none. While this channel is
                 unread there is no combined figure at all, because one that left it out would be a smaller number that looks
                 like a real one.
               </Text>
@@ -842,14 +842,14 @@ function ChannelCard({ state, busy, onConnect, onSync, onDisconnect }: {
               </Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {run.windowFrom && run.windowTo
-                  ? `Covering ${when(run.windowFrom)} to ${when(run.windowTo)} — the whole life of the account, so it lines up with the lifetime revenue your codes are measured on.`
+                  ? `Covering ${when(run.windowFrom)} to ${when(run.windowTo)}: the whole life of the account, so it lines up with the lifetime revenue your codes are measured on.`
                   : 'This covers the whole life of the account, which is what the lifetime revenue your codes are measured on needs. The exact days were not reported.'}
               </Text>
               {run.adsSeen === 0 ? (
                 <View style={{ marginTop: sp.sm }}>
                   <Flag tone={t.ink3}>
                     The check worked and this ad account has no ads in it. Codes you promote organically will never appear
-                    here at all — a code with no ad spend is unknown, not free.
+                    here at all. A code with no ad spend is unknown, not free.
                   </Flag>
                 </View>
               ) : null}
@@ -872,7 +872,7 @@ function ChannelCard({ state, busy, onConnect, onSync, onDisconnect }: {
         />
       </View>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-        Disconnecting stops future checks on {label}. What has already been recorded stays — what a campaign cost last month
+        Disconnecting stops future checks on {label}. What has already been recorded stays. What a campaign cost last month
         did not stop being true.
       </Text>
     </View>

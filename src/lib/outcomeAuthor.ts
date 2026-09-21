@@ -192,10 +192,10 @@ export function markedByLine(
   }
   if (!entry || !entry.markedOnServer) return null;
   if (entry.by == null) {
-    return 'Nobody is recorded as having marked this — it was recorded before this app started keeping that.';
+    return 'Nobody is recorded as having marked this. It was recorded before this app started keeping that.';
   }
   if (viewerId && entry.by === viewerId) return 'You marked this.';
   const name = names.get(entry.by);
   if (name) return `Marked by ${name}.`;
-  return 'Marked by somebody else — their name isn’t one this app can read for you.';
+  return 'Marked by somebody else. Their name isn’t one this app can read for you.';
 }

@@ -293,7 +293,7 @@ export default function Consistency() {
    * so the unit was lost on exactly one of the two paths through one
    * sentence. */
   const streakNote = !known
-    ? (logStatus === 'loading' ? 'Reading your training log…' : 'Not a broken streak — an unread one.')
+    ? (logStatus === 'loading' ? 'Reading your training log…' : 'Not a broken streak, just an unread one.')
     : claim.bounded
     ? BOUNDED_STREAK_NOTE
     : !countable
@@ -321,7 +321,7 @@ export default function Consistency() {
         {failed ? (
           <View style={{ marginTop: sp.lg }}>
             <Notice tone={t.warn} kicker="Consistency" title="We couldn’t read your training log"
-              note="Your streak and your history are intact — this screen just can't see them right now. The blank weeks below are ours, not yours.">
+              note="Your streak and your history are intact. This screen just can't see them right now. The blank weeks below are ours, not yours.">
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Try Again" wide onPress={reload} />
               </View>
@@ -397,7 +397,7 @@ export default function Consistency() {
             {gridCoverage === 'covered'
               ? 'The grid below is your recent weeks and is complete.'
               : gridCompleteFrom
-                ? `The grid below is complete from ${fmtFullDay(gridCompleteFrom.toISOString())} onwards — the weeks before that are older than this screen could read, so their empty squares are not days you missed.`
+                ? `The grid below is complete from ${fmtFullDay(gridCompleteFrom.toISOString())} onwards. The weeks before that are older than this screen could read, so their empty squares are not days you missed.`
                 : 'The grid below may not reach all twelve weeks, so an empty square in the earliest ones is not necessarily a day you missed.'}
           </Text>
         ) : null}

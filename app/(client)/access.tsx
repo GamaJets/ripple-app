@@ -105,7 +105,7 @@ export default function Access() {
             <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.md }}>
               {c.profileStatus === 'loading'
                 ? 'Your ID is built from your account, so the card appears once that has been read.'
-                : 'Your ID is built from your account, and without it this card would show a number that is not yours — so it is not shown. Nothing is wrong with your membership. Try again, or give reception your name at the desk.'}
+                : 'Your ID is built from your account, and without it this card would show a number that is not yours, so it is not shown. Nothing is wrong with your membership. Try again, or give reception your name at the desk.'}
             </Text>
             {c.profileStatus !== 'loading' ? (
               <Pressable onPress={() => c.reload()} accessibilityRole="button" accessibilityLabel="Try reading your account again"
@@ -143,7 +143,7 @@ export default function Access() {
             worth a pull to check. */}
         {canShow && !nameKnown ? (
           <Text style={{ ...ty.caption, color: '#8a8a8a', textAlign: 'center', marginTop: sp.lg }}>
-            Your name could not be read just now, so it is not on the card. The ID below it is built from your account and is yours — reception can look you up on it.
+            Your name could not be read just now, so it is not on the card. The ID below it is built from your account and is yours. Reception can look you up on it.
           </Text>
         ) : !confirmed ? (
           <Text style={{ ...ty.caption, color: '#8a8a8a', textAlign: 'center', marginTop: sp.lg }}>
@@ -151,7 +151,7 @@ export default function Access() {
           </Text>
         ) : null}
 
-        <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.xxl }}>This is your {appName} ID, not a membership number your gym issued.{'\n'}Give it to reception once and they can link it to your account — after that the entrance scanner will read it.{'\n'}Turn your screen brightness up for a clean read.</Text>
+        <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.xxl }}>This is your {appName} ID, not a membership number your gym issued.{'\n'}Give it to reception once and they can link it to your account. After that, the entrance scanner will read it.{'\n'}Turn your screen brightness up for a clean read.</Text>
         {/* The number widened and therefore changed. This is the screen the
             instruction above is on, so it is the screen that owes somebody who
             followed that instruction an explanation. */}

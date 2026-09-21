@@ -271,7 +271,7 @@ const warn = pushConsequence('gym', 240);
 ok(warn.includes('240 members'), 'the author is told how many phones this is');
 ok(/straight away/i.test(warn) && /what ?ever time it is where they are/i.test(warn.replace('whatever', 'what ever')),
   'and that it happens now, wherever they are — there is no scheduler and no timezone on record');
-eq(pushConsequence('coach', 1), 'Sends a push to 1 client straight away, at whatever time it is where they are. Without it the notice still reaches their notices and their notifications — quietly.',
+eq(pushConsequence('coach', 1), 'Sends a push to 1 client straight away, at whatever time it is where they are. Without it the notice still reaches their notices and their notifications, quietly.',
   'one client is a client');
 ok(/every member/.test(pushConsequence('gym', null)),
   'an uncounted audience is "every member", never a figure nobody counted');
@@ -476,7 +476,7 @@ eq(classStartsIn(Infinity, T0), '', 'infinity is not a start time');
     'a roster that could not be read is never reported as nobody');
   ok(!/\bnobody had booked\b/i.test(unread), 'and is not collapsed into the empty case');
   ok(classOffConfirmation(1, 0, 0).includes('Nobody had booked'), 'an empty class had nobody to tell');
-  ok(classOffConfirmation(1, 4, 0).includes('tell them yourself'),
+  ok(classOffConfirmation(1, 4, 0).toLowerCase().includes('tell them yourself'),
     'four people and no push reached is four people the coach has to tell');
   ok(classOffConfirmation(1, 4, 2).includes('2 of them'), 'a partial fan-out says which part');
   ok(classOffConfirmation(1, 4, 4).includes('all of them'), 'and a whole one says so');

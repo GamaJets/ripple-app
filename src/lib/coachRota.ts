@@ -57,7 +57,7 @@ import { isWhole, type LoadStatus } from '../ui/loadStatus';
 /** A read that did not land. Never rendered as a fortnight off. */
 export const ROTA_UNREAD_NOTE =
   'Your gym’s rota could not be read, so this is not a list of the shifts you have. ' +
-  'It is not a statement that you have none — check with the gym before you plan around it.';
+  'It is not a statement that you have none. Check with the gym before you plan around it.';
 
 /**
  * A whole read that found nothing.
@@ -66,13 +66,13 @@ export const ROTA_UNREAD_NOTE =
  * a claim about all of time and this is a claim about a fortnight.
  */
 export function rotaEmptyNote(days: number): string {
-  return `Your gym has you on no shifts in the next ${days} days. That is the rota as it stands now — ` +
-    'it is written on the gym’s side and can change without this screen being opened.';
+  return `Your gym has you on no shifts in the next ${days} days. That is the rota as it stands now. ` +
+    'It is written on the gym’s side and can change without this screen being opened.';
 }
 
 /** Why there is nothing to press. See the header. */
 export const ROTA_READ_ONLY_NOTE =
-  'The rota is written by your gym. This is their copy of it, not a second one — if a shift here is wrong, it is wrong on theirs too.';
+  'The rota is written by your gym. This is their copy of it, not a second one. If a shift here is wrong, it is wrong on theirs too.';
 
 /**
  * What a figure against a shift is and is not.

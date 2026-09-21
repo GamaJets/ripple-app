@@ -283,7 +283,7 @@ export async function setMembershipFreeze(
     .eq('id', membershipId);
   if (r.error) throw r.error;
   if ((r.count ?? 0) === 0) {
-    throw new Error('That membership was not updated — it may no longer exist, or it is not yours to change.');
+    throw new Error('That membership was not updated. It may no longer exist, or it is not yours to change.');
   }
 }
 
@@ -676,7 +676,7 @@ export function reversalBlocker(
   amountCents: number,
 ): string | null {
   if (original.kind !== 'payment') {
-    return 'That row is itself a correction. Correcting a correction leaves two rows nobody can read as a pair — reverse the original payment instead.';
+    return 'That row is itself a correction. Correcting a correction leaves two rows nobody can read as a pair. Reverse the original payment instead.';
   }
   if (!Number.isFinite(amountCents) || amountCents <= 0) {
     return 'Enter what is being taken back, as a positive amount. Repple applies the minus.';
@@ -693,7 +693,7 @@ export function reversalBlocker(
     // it cannot name. A bare "6300.00" is read in whatever currency the reader
     // happens to be thinking in.
     return left && whole
-      ? `That is more than is left on this payment — ${left} of ${whole} is still outstanding against it.`
+      ? `That is more than is left on this payment: ${left} of ${whole} is still outstanding against it.`
       : 'That is more than is left on this payment.';
   }
   return null;
@@ -868,7 +868,7 @@ export async function reattributePayment(
   const changed = r.count ?? 0;
   if (changed !== ids.length) {
     throw new Error(
-      `${changed} of ${ids.length} rows were re-attributed. A payment and the corrections against it have to move together, and this one did not — the register now has them filed against different people. Reload this screen and check the payment and every correction under it before doing anything else.`,
+      `${changed} of ${ids.length} rows were re-attributed. A payment and the corrections against it have to move together, and this one did not. The register now has them filed against different people. Reload this screen and check the payment and every correction under it before doing anything else.`,
     );
   }
   return changed;

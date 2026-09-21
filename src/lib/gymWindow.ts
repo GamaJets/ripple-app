@@ -83,7 +83,7 @@ export function cutAtGym<T extends DayBounded>(w: T, zone: string | null | undef
     return {
       window: w,
       basis: 'device',
-      note: `${w.label}, ${w.firstDay} to ${w.lastDay}. ${NO_ZONE_NOTE}, so this period is cut on your own device’s clock — money taken in the first hours of it may fall on the other side of the boundary for somebody reading in another country.`,
+      note: `${w.label}, ${w.firstDay} to ${w.lastDay}. ${NO_ZONE_NOTE}, so this period is cut on your own device’s clock. Money taken in the first hours of it may fall on the other side of the boundary for somebody reading in another country.`,
     };
   }
   return {

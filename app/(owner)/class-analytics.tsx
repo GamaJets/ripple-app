@@ -187,7 +187,7 @@ function RateRow({ t, existing, busy, cur, onSave, onCancel }: {
       {otherMoney ? (
         <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
           {`This coach's rate is recorded in ${existing!.currency}, and this gym now works in ${cur}. `
-           + `The old amount is not shown here because it is not an amount of ${cur} — typing a new one `
+           + `The old amount is not shown here because it is not an amount of ${cur}. Typing a new one `
            + `replaces the ${existing!.currency} rate with a ${cur} one, and leaving this alone changes nothing.`}
         </Flag>
       ) : null}
@@ -223,7 +223,7 @@ function RateRow({ t, existing, busy, cur, onSave, onCancel }: {
       </View>
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, maxWidth: 380 }}>
         {CLASS_PAY_LABEL[kind || 'per_class']}. Clearing the rate means this gym does not pay this
-        coach for teaching &mdash; which is a different thing from paying them nothing, and is why
+        coach for teaching. That is a different thing from paying them nothing, and it is why
         an empty field clears rather than storing a zero.
       </Text>
       <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
@@ -834,7 +834,7 @@ export default function OwnerClassAnalytics() {
             <Text style={{ ...ty.head, color: t.ink }}>No classes in this range.</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
               Attendance, fill rates and trainer payroll appear here once classes run and trainers check members in.
-              Nothing is estimated — payroll is check-ins × your per-attendee rate.
+              Nothing is estimated: payroll is check-ins × your per-attendee rate.
             </Text>
           </Section>
         ) : (<>
@@ -889,8 +889,8 @@ export default function OwnerClassAnalytics() {
           {queued ? (
             <Flag tone={t.warn}>
               {queued.cents != null && queued.currency
-                ? `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll — ${money(queued.cents, queued.currency)} — and none of it has left the account. A payroll run in the console is what hands it over.`
-                : `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll, in more than one currency, so there is no one total to state. None of it has left the account — a payroll run in the console is what hands it over.`}
+                ? `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll (${money(queued.cents, queued.currency)}), and none of it has left the account. A payroll run in the console is what hands it over.`
+                : `${queued.count} class${queued.count === 1 ? '' : 'es'} on payroll, in more than one currency, so there is no one total to state. None of it has left the account. A payroll run in the console is what hands it over.`}
             </Flag>
           ) : null}
 
@@ -1004,7 +1004,7 @@ export default function OwnerClassAnalytics() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               Each coach&rsquo;s own rate, applied to the classes they actually taught, and nothing
               else. Nothing here is estimated. Adding a class to payroll below writes the line the
-              next payroll run picks up &mdash; the money itself still leaves the account from
+              next payroll run picks up. The money itself still leaves the account from
               Payroll in the console, which is the one screen that hands anything over.
             </Text>
           </Section>
@@ -1108,7 +1108,7 @@ export default function OwnerClassAnalytics() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                     {slots.noPresent} class{slots.noPresent === 1 ? '' : 'es'} in this range had
                     bookings and nobody marked present. That is either a class nobody turned up to
-                    or a register nobody took, and this screen cannot tell which &mdash; both are
+                    or a register nobody took, and this screen cannot tell which. Both are
                     worth a word with whoever taught them.
                   </Text>
                 ) : null}

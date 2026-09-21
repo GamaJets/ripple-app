@@ -76,10 +76,10 @@ import type { NotifyPrefs } from './notifyPrefs';
  * difference is the whole of what somebody would otherwise get wrong.
  */
 export const QUIET_LOCAL_EFFECT =
-  'Reminders this app sets — hydration, supplements, weigh-ins, streaks — wait and arrive when your quiet hours end. Nothing is dropped.';
+  'Reminders this app sets (hydration, supplements, weigh-ins, streaks) wait and arrive when your quiet hours end. Nothing is dropped.';
 
 export const QUIET_REMOTE_EFFECT =
-  'Anything sent to you — a message from your coach, a class change, a payment problem — does not buzz at all inside these hours. It is still written into your notifications, so you find it when you open the app.';
+  'Anything sent to you (a message from your coach, a class change, a payment problem) does not buzz at all inside these hours. It is still written into your notifications, so you find it when you open the app.';
 
 /**
  * What setting quiet hours costs, named before the member chooses.
@@ -92,7 +92,7 @@ export const QUIET_REMOTE_EFFECT =
  * server suppresses on the hour and knows nothing about when the session is.
  */
 export const QUIET_COST =
-  'Your own session and class reminders still come through, whatever the hour — you asked for those at a time you chose. A change your coach or gym makes late at night does not: if they call off a 6am class at eleven, you will find it in your notifications rather than being told. If your sessions are early, that is worth weighing.';
+  'Your own session and class reminders still come through, whatever the hour: you asked for those at a time you chose. A change your coach or gym makes late at night does not: if they call off a 6am class at eleven, you will find it in your notifications rather than being told. If your sessions are early, that is worth weighing.';
 
 /**
  * That the zone is the one stored, not the one the phone is in.
@@ -134,8 +134,8 @@ export function quietSaveNote(t: QuietTargets): { saved: boolean; note: string }
     return {
       saved: false,
       note:
-        'Only half of this saved. Reminders this app sets will wait for the morning, but anything sent to you — '
-        + 'your coach, your gym, a payment — has not been told to stay quiet, because that part is stored on your '
+        'Only half of this saved. Reminders this app sets will wait for the morning, but anything sent to you ('
+        + 'your coach, your gym, a payment) has not been told to stay quiet, because that part is stored on your '
         + 'account and the server did not answer. Try again once you have signal.',
     };
   }

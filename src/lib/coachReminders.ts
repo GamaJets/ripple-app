@@ -343,7 +343,7 @@ export function backlogDue(
  */
 export function backlogBody(n: number): string {
   return `${n} session${n === 1 ? '' : 's'} ${n === 1 ? 'is' : 'are'} waiting on an outcome. `
-    + `Until ${n === 1 ? 'it is' : 'they are'} marked ${n === 1 ? 'it counts' : 'they count'} nowhere — `
+    + `Until ${n === 1 ? 'it is' : 'they are'} marked ${n === 1 ? 'it counts' : 'they count'} nowhere: `
     + 'not in your statement, not in your revenue, and not in anybody’s pay.';
 }
 
@@ -355,7 +355,7 @@ export function backlogBody(n: number): string {
  */
 export function backlogNote(n: number | null, failed: boolean): string | null {
   if (failed) {
-    return 'Whether anything is waiting on an outcome could not be checked, so this is not a clear queue — it is an unknown one.';
+    return 'Whether anything is waiting on an outcome could not be checked, so this is not a clear queue. It is an unknown one.';
   }
   if (n == null || n === 0) return null;
   return backlogBody(n);

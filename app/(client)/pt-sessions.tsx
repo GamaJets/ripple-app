@@ -455,7 +455,7 @@ export default function PtSessions() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
-        <PageHead title="Personal Training" subtitle="Sessions your trainer delivered — approve them, or say what is wrong" />
+        <PageHead title="Personal Training" subtitle="Sessions your trainer delivered: approve them, or say what is wrong" />
 
         {/* ── what is left, and where it comes from ───────────────────────
             Loading, unread, empty and a real figure are four states and four
@@ -656,7 +656,7 @@ export default function PtSessions() {
             "Ask for a Time" sitting under a list of credits is otherwise read
             as another way to spend one. */}
           <ListRow icon="clock" tone="teal" title="Ask for a Time"
-            note="Ask your coach for an hour they haven’t opened. It asks — it doesn’t book"
+            note="Ask your coach for an hour they haven’t opened. It asks; it doesn’t book"
             onPress={() => router.push('/(client)/request-session')} />
         </Section>
 
@@ -941,7 +941,7 @@ export default function PtSessions() {
             note={cancelsWhole && cancels.actions.length > 0 ? String(cancels.actions.length) : undefined} />
 
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-            Personal-training hours you had booked that were cancelled — by you, by your coach, or by
+            Personal-training hours you had booked that were cancelled, whether by you, by your coach, or by
             your gym. {NOT_A_VERDICT_NOTE}
           </Text>
 

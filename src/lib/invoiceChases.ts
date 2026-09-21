@@ -116,7 +116,7 @@ export const CHASE_VIA_LABEL: Record<ChaseVia, string> = {
  *  opens. An owner recording "by email" has to know, at the moment they record
  *  it, that this product did not send one. */
 export const CHASE_IS_A_RECORD_NOT_A_SEND =
-  'Recording a chase sends nothing. Repple does not email, message or telephone anybody here — '
+  'Recording a chase sends nothing. Repple does not email, message or telephone anybody here. '
   + 'this is the gym’s own note that it asked for the money, by whatever means it used. Nobody is '
   + 'contacted by writing it down, and the member is not shown it.';
 
@@ -169,15 +169,15 @@ export function chaseBlocker(
     return 'Say how the gym asked. “Some other way” is on the list for anything that is not one of the five, and is a real answer.';
   }
   if (!isoDay(d.chasedOn)) {
-    return 'The day this happened has to be a real date — YYYY-MM-DD.';
+    return 'The day this happened has to be a real date: YYYY-MM-DD.';
   }
   // Bare-day string compares throughout. See the header: parsing either side
   // here would move the boundary by a day for most of the world's readers.
   if (isoDay(today) && d.chasedOn > today) {
-    return 'That day has not happened yet. A chase is a record of something somebody did, so it cannot be dated into the future — record it when it has been done.';
+    return 'That day has not happened yet. A chase is a record of something somebody did, so it cannot be dated into the future. Record it when it has been done.';
   }
   if (issuedOn && isoDay(issuedOn) && d.chasedOn < issuedOn) {
-    return `This invoice was not issued until ${issuedOn}, so nobody can have chased it on ${d.chasedOn}. Check the date — it is easy to type last month by accident.`;
+    return `This invoice was not issued until ${issuedOn}, so nobody can have chased it on ${d.chasedOn}. Check the date. It is easy to type last month by accident.`;
   }
   const note = (d.note ?? '').trim();
   if (note.length > MAX_CHASE_NOTE_CHARS) {
@@ -431,7 +431,7 @@ export async function recordChase(
   const row = data as any;
   if (!row?.id || row.chased_on !== d.chasedOn || row.via !== d.via) {
     throw new Error(
-      'That chase was NOT recorded the way it was meant to be — the row did not come back matching '
+      'That chase was NOT recorded the way it was meant to be. The row did not come back matching '
       + 'what was sent. Reload this page and read the invoice’s history before entering it again; '
       + 'nothing was sent to anybody either way.',
     );

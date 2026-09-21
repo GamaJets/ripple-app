@@ -87,7 +87,7 @@ export default function Onboarding() {
     // has not landed keeps the owner here with their typing intact.
     if (!tenant) {
       if (tenantStatus === 'loading') {
-        Alert.alert('One Moment', 'Your gym is still being set up. Nothing has been lost — tap Open Studio again in a second.');
+        Alert.alert('One Moment', 'Your gym is still being set up. Nothing has been lost. Tap Open Studio again in a second.');
         return;
       }
       Alert.alert('Not Saved', 'We could not reach your gym record, so nothing was saved and nothing was lost. The name and colour are under Brand; the session fee is under Ops.');
@@ -142,7 +142,7 @@ export default function Onboarding() {
             <TextInput
               value={fee}
               onChangeText={setFee}
-              placeholder="Optional — leave blank if it varies"
+              placeholder="Optional. Leave blank if it varies"
               placeholderTextColor={t.ink3}
               keyboardType="decimal-pad"
               returnKeyType="done"

@@ -395,7 +395,7 @@ const SAY = {
   you: 'That is a lot of searches in a short while. Give it a moment and try again.',
   quota: 'The recipe library has reached its limit for today. It opens again tomorrow; your planned meals are unaffected.',
   busy: 'The recipe library is busy just now. Try again in a moment.',
-  unreachable: 'Repple could not reach the recipe library. Nothing was searched — check your connection and try again.',
+  unreachable: 'Repple could not reach the recipe library. Nothing was searched. Check your connection and try again.',
   unreadable: 'The recipe library answered, but not in a way Repple could read. Nothing has been listed.',
   signedOut: 'Sign in to Repple to search recipes.',
   refused: 'Repple could not run that search. Nothing has been listed.',

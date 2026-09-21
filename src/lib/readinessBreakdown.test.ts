@@ -186,7 +186,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   const untracked = br({ hydrationGoal: false, hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 1 }) });
   const h = lineFor(untracked, 'hydration');
   eq(h.state, 'not-tracked', 'no goal set is not a failure');
-  eq(h.detail, 'not in the scale — you have not set a daily water goal',
+  eq(h.detail, 'not in the scale: you have not set a daily water goal',
     'and it says the signal LEFT the scale, because a member reading a lower number will assume they were docked for it');
   eq(untracked.status, 'ready', 'an untracked signal does not make the read incomplete');
   eq(untracked.caveats.length, 0, 'nor does it warrant a warning');
@@ -195,7 +195,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   const unread = br({ hydrationStatus: 'error', hydrationPct: null, readiness: readinessScore({ avgSleepHours: 7.5, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 1 }) });
   const h = lineFor(unread, 'hydration');
   eq(h.state, 'unread', 'a goal that exists and a count that could not be read is a FAILED read, not an untracked one');
-  eq(h.detail, "not in the scale — today's count could not be read", 'said as what it is');
+  eq(h.detail, "not in the scale: today's count could not be read", 'said as what it is');
   eq(unread.status, 'partial', 'and it makes the score partial');
   eq(unread.caveats[0], "Today's water count could not be read, so hydration is not in the scale.",
     'with a sentence, because 0 cups over a goal they DID set is thirty points for a network blip');
@@ -238,7 +238,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 
   // The training log first, because it is the only absence that is never theirs.
   const log = br({ ...noScore, workoutsLast2Days: null, sleep: sleepOf(3, 0), readiness: null });
-  eq(log.absence, 'We could not read your training log, so there is no readiness to show — it does not mean you are rested.',
+  eq(log.absence, 'We could not read your training log, so there is no readiness to show. It does not mean you are rested.',
     'an unread log outranks every other reason, even with three good nights on file');
   eq(log.status, 'error', 'and the absence is ours, so it is an error rather than an empty answer');
   eq(lineFor(log, 'load').state, 'unread', 'the row says so too');
@@ -251,7 +251,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(typedLoading.absence, 'Reading the nights you have logged…', 'and so does the typed half');
 
   const devErr = br({ ...noScore, sources: [{ name: 'WHOOP', status: 'error', nights: 0 }], readiness: null });
-  eq(devErr.absence, 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.',
+  eq(devErr.absence, 'We could not read your devices just now, so there is no readiness to show. It does not mean you slept badly.',
     'a device that did not answer is not a bad night');
   eq(devErr.status, 'error', 'and no score plus a failed read is an error');
 
@@ -259,7 +259,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   // empty cache used to reach the home screen as "log a night of sleep" — a
   // claim about what the member has done, built out of a read that failed.
   const typedErr = br({ ...noScore, typedStatus: 'error', sources: [], readiness: null });
-  eq(typedErr.absence, 'We could not read your sleep log just now, so there is no readiness to show — it does not mean you have not logged a night.',
+  eq(typedErr.absence, 'We could not read your sleep log just now, so there is no readiness to show. It does not mean you have not logged a night.',
     'an unread sleep log must never be reported as an unlogged one');
   eq(typedErr.status, 'error', 'it is our read that failed, not their week');
   eq(lineFor(typedErr, 'sleep').state, 'unread', 'and the sleep row says unread, not no-record');
@@ -297,12 +297,12 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   const noScore = { readiness: null, sleep: stale } as Partial<ReadinessBreakdownInput>;
 
   const withWatch = br({ ...noScore, readiness: null });
-  eq(withWatch.absence, 'Nothing on record for the last 3 nights — the most recent night you have is older than that.',
+  eq(withWatch.absence, 'Nothing on record for the last 3 nights. The most recent night you have is older than that.',
     'A LOG THAT STOPPED IS NAMED AS ONE, not as a log that is empty');
   eq(withWatch.status, 'ready',
     'and nothing failed, so it is a complete answer — "stale" must never be dressed up as a broken read');
   eq(lineFor(withWatch, 'sleep').state, 'no-record', 'there is no record IN THE WINDOW, which is the only span this row speaks about');
-  eq(lineFor(withWatch, 'sleep').detail, 'nothing recorded for the last 3 nights — the most recent night you have is older than that',
+  eq(lineFor(withWatch, 'sleep').detail, 'nothing recorded for the last 3 nights; the most recent night you have is older than that',
     'and the row says which, rather than implying nothing was ever logged');
 
   const noWatch = br({ ...noScore, sources: [], readiness: null });
@@ -313,7 +313,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   // holding last night, and "your log has stopped" would be a claim we cannot
   // make while we have not managed to look.
   const devErr = br({ ...noScore, sources: [{ name: 'WHOOP', status: 'error', nights: 0 }], readiness: null });
-  eq(devErr.absence, 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.',
+  eq(devErr.absence, 'We could not read your devices just now, so there is no readiness to show. It does not mean you slept badly.',
     'an unreachable device outranks a stale log, because it may be holding the night that would have refuted it');
   eq(lineFor(devErr, 'sleep').state, 'unread', 'and the row is unread rather than no-record');
 }
@@ -329,7 +329,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(lineFor(b, 'sleep').state, 'unread', 'AN UNDRAWABLE WINDOW IS UNREAD, NOT NO-RECORD');
   eq(lineFor(b, 'sleep').detail, 'we could not work out which nights to read, so we cannot say what you have recorded',
     'and says whose failure it was');
-  eq(b.absence, 'We could not work out which nights to read just now, so there is no readiness to show — it does not mean you slept badly.',
+  eq(b.absence, 'We could not work out which nights to read just now, so there is no readiness to show. It does not mean you slept badly.',
     'the absence refuses to blame the member');
   eq(b.status, 'error', 'and it is an error, because the absence is ours');
 }
@@ -412,7 +412,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   const nan = br({ workoutsLast2Days: NaN, readiness: null });
   eq(lineFor(nan, 'load').state, 'unread', 'NaN sessions is an unread log, not a count');
   eq(lineFor(nan, 'load').detail, 'we could not read your training log', 'and reads as one');
-  eq(nan.absence, 'We could not read your training log, so there is no readiness to show — it does not mean you are rested.',
+  eq(nan.absence, 'We could not read your training log, so there is no readiness to show. It does not mean you are rested.',
     'the absence names it as the read it is');
   eq(nan.status, 'error', 'and it is our error, not their empty week');
 }

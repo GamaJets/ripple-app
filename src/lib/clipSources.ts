@@ -234,7 +234,7 @@ function shownLine(s: ClipSources): string | null {
     // above is real and it is the coach's own, and it never reached the server
     // — so it plays on this handset and on no other, and the client falls
     // through to whatever the catalogue holds, or to nothing.
-    case 'local': return 'This clip is saved on this phone only and never reached the server, so your client cannot see it — add it again from your clip library when you have a connection.';
+    case 'local': return 'This clip is saved on this phone only and never reached the server, so your client cannot see it. Add it again from your clip library when you have a connection.';
     case 'animation': return 'Your client sees the catalogue animation, not a filmed clip.';
     case 'frames': return 'Your client sees the catalogue reference stills, not a filmed clip.';
     // Nothing is on screen. The screen's own "No Demonstration Yet" notice is

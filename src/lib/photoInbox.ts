@@ -169,7 +169,7 @@ export function stillShared(photoId: string, inbox: Inbox | null): boolean {
 /** What to say when a photo disappears out from under an open viewer. It does
  *  not claim to know which of the two happened, because it cannot. */
 export function withdrawnNote(): string {
-  return 'That photo is no longer shared with you — they either took it back or deleted it. It has gone from the list.';
+  return 'That photo is no longer shared with you. They either took it back or deleted it. It has gone from the list.';
 }
 
 /**

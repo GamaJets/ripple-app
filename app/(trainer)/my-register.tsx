@@ -273,7 +273,7 @@ export default function MyRegister() {
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                     {countable
                       ? 'Booked people marked present · walk-ins are counted beside it, never in it'
-                      : 'No figures while the read is incomplete — a rate over part of a term may not be yours.'}
+                      : 'No figures while the read is incomplete. A rate over part of a term may not be yours.'}
                   </Text>
                 </View>
               </View>
@@ -409,7 +409,7 @@ export default function MyRegister() {
           ) : !countable ? null : rows.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               No classes are recorded against you in this window. If you taught one, it was either set
-              up without your name on it or you were covering — see the note at the bottom.
+              up without your name on it or you were covering (see the note at the bottom).
             </Text>
           ) : (
             rows.map((c, i) => {
@@ -462,7 +462,7 @@ export default function MyRegister() {
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{TAUGHT_SCOPE_NOTE}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            No amounts here — what your gym pays you is set on their side, in their currency.
+            No amounts here. What your gym pays you is set on their side, in their currency.
           </Text>
           <View style={{ marginTop: sp.lg }}>
             <Ghost label="Take a Register" onPress={() => router.push('/(trainer)/classes')} />

@@ -59,7 +59,7 @@ export function startsInLine(startsAt: string, now: number = Date.now()): string
  * there is none.
  */
 export const CLASS_POLICY_UNKNOWN_NOTE =
-  'Your gym decides whether a late cancellation or a missed class is charged. This app does not hold that policy, so it cannot tell you what this will cost — ask the gym if you are not sure.';
+  'Your gym decides whether a late cancellation or a missed class is charged. This app does not hold that policy, so it cannot tell you what this will cost. Ask the gym if you are not sure.';
 
 /**
  * What a gym has said about late cancellations, as the server hands it over.
@@ -123,7 +123,7 @@ export function classChargeLine(
   }
   const window = `Cancelling now is inside your gym\u2019s ${policy.notice}-hour notice.`;
   if (policy.fee == null) {
-    return `${window} Your gym decides what a late cancellation costs and has not told this app the amount \u2014 ask them if you are not sure.`;
+    return `${window} Your gym decides what a late cancellation costs and has not told this app the amount. Ask them if you are not sure.`;
   }
   if (policy.fee === 0) {
     return `${window} Your gym has recorded no charge for one, so this is free.`;
@@ -139,7 +139,7 @@ export function classChargeLine(
   if (!policy.currency || !amount) {
     // The gym has a figure and no unit this build can render. Naming the figure
     // without it would be the app choosing a currency on a gym's behalf.
-    return `${window} Your gym charges a late cancellation fee, and there is no currency on their record here, so this app cannot state the amount \u2014 ask them what it is.`;
+    return `${window} Your gym charges a late cancellation fee, and there is no currency on their record here, so this app cannot state the amount. Ask them what it is.`;
   }
   return `${window} Your gym charges ${amount} for one.`;
 }

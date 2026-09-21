@@ -1305,7 +1305,7 @@ export default function LogSession() {
       // sets they have just typed. `auth.loading` is the difference between the
       // two, and this screen used to fold them into one sentence.
       setFailure(auth.loading
-        ? 'Still checking your sign-in — nothing has been saved yet. Try again in a moment.'
+        ? 'Still checking your sign-in. Nothing has been saved yet. Try again in a moment.'
         : 'You are not signed in, so this cannot reach your client.');
       return;
     }
@@ -1453,7 +1453,7 @@ export default function LogSession() {
         'This session',
         notMine
           ? `${pickedName || 'That person'} is not on your roster, and a session can only be logged for somebody on your book. Add them as a client first, then log this again.`
-          : 'The usual cause is that the person is not on your roster — a session can only be logged for somebody on your book. If they are on it, open their record before typing this in again: part of it may have reached them.',
+          : 'The usual cause is that the person is not on your roster. A session can only be logged for somebody on your book. If they are on it, open their record before typing this in again: part of it may have reached them.',
       ));
       return;
     }
@@ -1525,8 +1525,8 @@ export default function LogSession() {
           <PageHead title="Log a Session" subtitle={pickedName || undefined}
             trailing={
               <Cta label={busy ? 'Saving…' : 'Finish'} disabled={!ready || busy} onPress={save}
-                a11yLabel={!picked ? 'Finish — pick a client first'
-                  : !clientLoggable ? `Finish — ${first} has no Repple account for this to be logged to`
+                a11yLabel={!picked ? 'Finish. Pick a client first'
+                  : !clientLoggable ? `Finish. ${first} has no Repple account for this to be logged to`
                   : `Finish and log this session to ${first}'s record`} />
             } />
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
@@ -1570,7 +1570,7 @@ export default function LogSession() {
                 )}
                 <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: 2 }}>
                   {clockFrom != null
-                    ? 'On this phone only — not written to their record.'
+                    ? 'On this phone only, not written to their record.'
                     : timersOff
                       ? 'The rest timer stopped with it. Start brings both back.'
                       : 'Starts here, or with the first set you tick.'}
@@ -1644,7 +1644,7 @@ export default function LogSession() {
             <View style={{ marginBottom: sp.lg }}>
               <Flag tone={t.warn}>
                 {pickedName || 'This client'} was added by hand and has no Repple account, so there is no record
-                for a session to go into and Finish is withheld. Nothing you type here is lost — it stays on this
+                for a session to go into and Finish is withheld. Nothing you type here is lost. It stays on this
                 sheet. Send them your coaching code from their own screen, and this can be saved once they are on
                 the app.
               </Flag>
@@ -1665,7 +1665,7 @@ export default function LogSession() {
           {!queue.queueRead ? (
             <View style={{ marginBottom: sp.lg }}>
               <Flag tone={t.warn}>
-                What this phone is still carrying could not be read, so whether anything is waiting to go up is not known. Nothing has been lost — it is not being written over either.
+                What this phone is still carrying could not be read, so whether anything is waiting to go up is not known. Nothing has been lost, and it is not being written over either.
               </Flag>
             </View>
           ) : floorPendingNote(queue.unsent) ? (
@@ -1712,7 +1712,7 @@ export default function LogSession() {
             {r.status === 'error' ? (
               <View style={{ marginBottom: sp.md }}>
                 <Flag tone={t.warn}>
-                  Your clients could not be read, so this is not an empty book — nobody is listed
+                  Your clients could not be read, so this is not an empty book. Nobody is listed
                   because the list did not come back. {picked
                     ? 'The person you came here for is still selected and can still be logged against.'
                     : 'Open this from a client’s own screen, or try again once you are connected.'}
@@ -1972,7 +1972,7 @@ export default function LogSession() {
             <SectionHead title="Exercises" note={rows.length ? `${rows.length}` : undefined} />
             {rows.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>
-                Nothing added yet. Add what {first} actually did — only sets with a rep count are saved.
+                Nothing added yet. Add what {first} actually did. Only sets with a rep count are saved.
               </Text>
             ) : null}
 
@@ -2056,7 +2056,7 @@ export default function LogSession() {
                   </Text>
                 ) : (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
-                    No earlier {movement(r.name)} in the sessions that could be read — their record goes back
+                    No earlier {movement(r.name)} in the sessions that could be read. Their record goes back
                     further than this, so this may not be the first time.
                   </Text>
                 )}
@@ -2280,7 +2280,7 @@ export default function LogSession() {
                       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 3 }}>
                         <View style={{ width: 46 }} />
                         <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
-                          Unticked, so this set will not be saved. The figures stay here — tap the tick to count it again.
+                          Unticked, so this set will not be saved. The figures stay here. Tap the tick to count it again.
                         </Text>
                       </View>
                     ) : null}
@@ -2441,7 +2441,7 @@ export default function LogSession() {
               // picker missing names with nothing to say why — and retyped one
               // they had already saved.
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>
-                Your saved exercises came back short — there are more of them than are listed here.
+                Your saved exercises came back short. There are more of them than are listed here.
               </Text>
             ) : null}
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">

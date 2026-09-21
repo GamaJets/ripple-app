@@ -323,7 +323,7 @@ export function partialWarning(rec: MemberRecord): string | null {
     ? names[0]
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   const costs = broken.map((b) => b.cost).join('; ');
-  return `Could not read ${list}. ${plural(broken.length, 'That section is', 'Those sections are')} missing from this page, not empty — ${costs} ${plural(broken.length, 'is', 'are')} unknown here.`;
+  return `Could not read ${list}. ${plural(broken.length, 'That section is', 'Those sections are')} missing from this page, not empty, so ${costs} ${plural(broken.length, 'is', 'are')} unknown here.`;
 }
 
 /**
@@ -344,7 +344,7 @@ export function truncationWarning(rec: MemberRecord): string | null {
     ? names[0]
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   const costs = cut.map((p) => PART_COST[p]).join('; ');
-  return `Read the first rows of ${list} and there are more. ${plural(cut.length, 'That section is', 'Those sections are')} a PREFIX, not the whole record — ${costs} ${plural(cut.length, 'is', 'are')} shown as a dash here rather than as a subtotal.`;
+  return `Read the first rows of ${list} and there are more. ${plural(cut.length, 'That section is', 'Those sections are')} a PREFIX, not the whole record, so ${costs} ${plural(cut.length, 'is', 'are')} shown as a dash here rather than as a subtotal.`;
 }
 
 /* ── the dossier ───────────────────────────────────────────────────────────── */
@@ -797,7 +797,7 @@ function noteFor(x: {
 }): string | null {
   const d = Math.round(x.halfDays);
   if (x.stillTrainingOffTheTimetable) {
-    return `Stopped booking classes but has not stopped training — ${x.recentVisits} door ${plural(x.recentVisits, 'visit', 'visits')} in the last ${d} days against ${x.earlierClasses} ${plural(x.earlierClasses, 'class', 'classes')} in the ${d} before. A class-only report would read this member as lapsed.`;
+    return `Stopped booking classes but has not stopped training: ${x.recentVisits} door ${plural(x.recentVisits, 'visit', 'visits')} in the last ${d} days against ${x.earlierClasses} ${plural(x.earlierClasses, 'class', 'classes')} in the ${d} before. A class-only report would read this member as lapsed.`;
   }
   if (x.absentFromLiveDoorLog) {
     return x.earlierVisits > 0

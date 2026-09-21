@@ -140,7 +140,7 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // offered as a working option for long enough that somebody who taps it and
     // reads only "not set up" will reasonably wonder whether their Fitbit
     // account is the problem.
-    clientNote: 'Repple has not finished setting Fitbit up, so there is nothing here to sign in to yet — nothing is wrong with your Fitbit. WHOOP and Oura connect today, and an Apple Watch reads through Apple Health.',
+    clientNote: 'Repple has not finished setting Fitbit up, so there is nothing here to sign in to yet. Nothing is wrong with your Fitbit. WHOOP and Oura connect today, and an Apple Watch reads through Apple Health.',
   },
   oura: {
     id: 'oura',
@@ -163,7 +163,7 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // and the feature was withdrawn. The version is never the reason — say the
     // integration is not set up, which is both true and not something the
     // member can act on wrongly.
-    clientNote: 'Repple has not set Oura up, so there is nothing here to sign in to — nothing is wrong with your ring.',
+    clientNote: 'Repple has not set Oura up, so there is nothing here to sign in to. Nothing is wrong with your ring.',
   },
   whoop: {
     id: 'whoop',
@@ -202,7 +202,7 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // including why this no longer says "not available in this version of
     // Repple" — that blamed the build for a missing client id and sent people
     // looking for an update that could not carry the fix.
-    clientNote: 'Repple has not set WHOOP up, so there is nothing here to sign in to — nothing is wrong with your strap.',
+    clientNote: 'Repple has not set WHOOP up, so there is nothing here to sign in to. Nothing is wrong with your strap.',
   },
   garmin: {
     id: 'garmin',
@@ -218,7 +218,7 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // writes into HealthKit, so an iPhone owner gets their Garmin days by
     // connecting Apple Health — and sleepMerge already treats a Garmin night
     // arriving that way as a Garmin night (family 'garmin'), not a watch night.
-    clientNote: 'Garmin has to approve Repple before it will hand over your data, and it has not yet — so this is not something you can sign in to. On an iPhone, your Garmin already writes into Apple Health: connect that above and these days come through.',
+    clientNote: 'Garmin has to approve Repple before it will hand over your data, and it has not yet, so this is not something you can sign in to. On an iPhone, your Garmin already writes into Apple Health: connect that above and these days come through.',
   },
 };
 

@@ -77,7 +77,7 @@ export const APP_ACCOUNT_MEANS: Record<AppAccount, string> = {
   'on-the-app':
     'Holds a membership, which this database cannot record without a Repple account behind it. A notice posted from this screen lands in their inbox.',
   invited:
-    'The gym typed them in and the invitation is still open. There is no account yet, so nothing sent from this console reaches them — only the email address on the invitation does.',
+    'The gym typed them in and the invitation is still open. There is no account yet, so nothing sent from this console reaches them. Only the email address on the invitation does.',
   'invite-lapsed':
     'The invitation ran out or was withdrawn, and it was never claimed. Send another one, or this person stays outside the app.',
   'account-erased':
@@ -86,7 +86,7 @@ export const APP_ACCOUNT_MEANS: Record<AppAccount, string> = {
 
 /** Why the two counts are never added. On the screen, under them. */
 export const COUNTS_ARE_NOT_A_TOTAL =
-  'These count two different records — a membership and an invitation — and this app cannot tell when they are the same person: the address on an invitation cannot be compared against the address on an account, which no policy in this database lets the console read. Somebody invited in March and signed up at the desk in April is in both columns, so adding them up would overstate the roster by exactly the people who were chased twice.';
+  'These count two different records (a membership and an invitation), and this app cannot tell when they are the same person: the address on an invitation cannot be compared against the address on an account, which no policy in this database lets the console read. Somebody invited in March and signed up at the desk in April is in both columns, so adding them up would overstate the roster by exactly the people who were chased twice.';
 
 /** Somebody on the gym's roster that nothing in the app can reach. */
 export interface OffAppPerson {

@@ -383,7 +383,7 @@ export default function CoachChecklists() {
     const label = draft.trim();
     if (!label) { Alert.alert('Nothing to Add', 'Type the line you want on their list.'); return; }
     if (label.length > LABEL_MAX) {
-      Alert.alert('Too Long', `That is ${label.length} characters. A checklist line has to fit on one row of a phone — ${LABEL_MAX} at most.`);
+      Alert.alert('Too Long', `That is ${label.length} characters. A checklist line has to fit on one row of a phone: ${LABEL_MAX} at most.`);
       return;
     }
     /* Appending needs the WHOLE list, and until now this took `items ?? []`.
@@ -402,7 +402,7 @@ export default function CoachChecklists() {
       Alert.alert(
         'Not Added Yet',
         status === 'error'
-          ? `Their list could not be read, so there is no way to tell what a new line should sit after — it would go to the top of ${who}'s morning instead of the end. Pull down to read it again, then add the line.`
+          ? `Their list could not be read, so there is no way to tell what a new line should sit after. It would go to the top of ${who}'s morning instead of the end. Pull down to read it again, then add the line.`
           : `Their list came back at the row limit, so this screen has not seen the end of it and a new line would land in the middle rather than at the bottom. Pull down to read it again, then add the line.`,
       );
       return;
@@ -620,7 +620,7 @@ export default function CoachChecklists() {
               outcomes.push({ clientId: tp.clientId, name: tp.name, ok: false,
                 why: error?.message
                   ? String(error.message)
-                  : 'the server took the request and wrote nothing — they may no longer be your client.' });
+                  : 'the server took the request and wrote nothing. They may no longer be your client.' });
             } else if (wrote < rows.length) {
               outcomes.push({ clientId: tp.clientId, name: tp.name, ok: false,
                 why: `only ${wrote} of ${rows.length} lines were written, so their list is part of what you sent.` });
@@ -667,7 +667,7 @@ export default function CoachChecklists() {
         {r.status === 'error' ? (
           <Section>
             <Notice tone={t.warn} kicker="Roster" title="Your Clients Could Not Be Read"
-              note="This is not an empty book. Nobody is listed below because the list did not come back — pull back and open this again once you are connected." />
+              note="This is not an empty book. Nobody is listed below because the list did not come back. Pull back and open this again once you are connected." />
           </Section>
         ) : null}
 
@@ -708,7 +708,7 @@ export default function CoachChecklists() {
           <View>
             <Section>
               <Notice kicker="No Account" title={`${client?.name ?? 'This Client'} Has No Repple Account`}
-                note={`You added ${who} to your book by hand. A checklist is a list on somebody's phone and a tick is something they do on it, so there is nothing here to set and nothing to count — and none of that is a read that failed. Invite them from your client list; from the day they accept, this screen works like everybody else's.`} />
+                note={`You added ${who} to your book by hand. A checklist is a list on somebody's phone and a tick is something they do on it, so there is nothing here to set and nothing to count, and none of that is a read that failed. Invite them from your client list; from the day they accept, this screen works like everybody else's.`} />
             </Section>
           </View>
         ) : picked ? (
@@ -730,7 +730,7 @@ export default function CoachChecklists() {
                   second sentence is arguing with it. */}
               {tickStatus === 'error' ? (
                 <Notice tone={t.warn} kicker="Not Loaded" title="Their Ticks Could Not Be Read"
-                  note="Nothing below says how often anything was done, because none of it came back. That is a read that failed, not a record of somebody ticking nothing — and the two are indistinguishable unless somebody says which it was." />
+                  note="Nothing below says how often anything was done, because none of it came back. That is a read that failed, not a record of somebody ticking nothing, and the two are indistinguishable unless somebody says which it was." />
               ) : tickStatus === 'partial' ? (
                 <PartialRead what="ticks in the last four weeks" onPress={() => { if (picked) void loadTicks(picked); }} />
               ) : status === 'partial' ? (
@@ -755,13 +755,13 @@ export default function CoachChecklists() {
                   title={summary.silentDays === 0
                     ? `Something was logged on every one of the last ${summary.window.days} days`
                     : `Nothing at all was logged on ${summary.silentDays} of the last ${summary.window.days} days`}
-                  note={`A line counts from the day you added it and stops the day you take it off, so nothing here is measured over days it was not on their list. ${summary.silentDays === 0 ? 'Every day carries a tick of something, so a line left unticked on one of them is a line they saw and left.' : 'On the quiet days a line they skipped and a day they never opened the app look exactly the same, so those days are set aside and never counted as misses.'} Today is in none of it — it is not over.`}
+                  note={`A line counts from the day you added it and stops the day you take it off, so nothing here is measured over days it was not on their list. ${summary.silentDays === 0 ? 'Every day carries a tick of something, so a line left unticked on one of them is a line they saw and left.' : 'On the quiet days a line they skipped and a day they never opened the app look exactly the same, so those days are set aside and never counted as misses.'} Today is in none of it, because it is not over.`}
                 />
               </>) : null}
 
               {status === 'error' ? (
                 <Notice tone={t.warn} kicker="Not Loaded" title="Their List Could Not Be Read"
-                  note="Nothing is shown below because nothing came back — it does not mean you have set nothing for them." />
+                  note="Nothing is shown below because nothing came back. It does not mean you have set nothing for them." />
               ) : status === 'loading' ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>Reading their list…</Text>
               ) : shown && shown.length === 0 ? (
@@ -881,7 +881,7 @@ export default function CoachChecklists() {
                         </View>
                       ))}
                       <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
-                        You did not set these, and nothing records which days they were on their list — a training
+                        You did not set these, and nothing records which days they were on their list; a training
                         line is only there on training days. So these are counts of ticks and not a share of
                         anything, and one they have never ticked does not appear here at all.
                       </Text>
@@ -960,7 +960,7 @@ export default function CoachChecklists() {
 
                       <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center', marginBottom: sp.md }}>
                         <Ghost label={selectAll.label}
-                          a11yLabel={selectAll.allowed ? selectAll.label : `${selectAll.label} — not available`}
+                          a11yLabel={selectAll.allowed ? selectAll.label : `${selectAll.label}, not available`}
                           onPress={() => { if (selectAll.allowed) setTicked(copyCandidates.map((c) => c.id)); }} />
                         {ticked.length ? (
                           <Ghost label="Untick All" onPress={() => setTicked([])} />

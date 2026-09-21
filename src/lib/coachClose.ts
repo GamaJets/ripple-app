@@ -89,7 +89,7 @@ export const UNMARKED_BLOCKS_THE_CLOSE =
  * they would find out was invented.
  */
 export const REGISTERS_DO_NOT_BLOCK =
-  'These do not hold the month up — a month close reads one-to-ones and money, not class attendance. ' +
+  'These do not hold the month up. A month close reads one-to-ones and money, not class attendance. ' +
   'They do mean your gym’s record of those classes says nobody came.';
 
 /** Nothing outstanding, said rather than drawn as a blank space. */

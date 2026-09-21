@@ -202,9 +202,9 @@ export function rateDecimals(step: number, days: number, maxDp = 2): number {
 export function rateGapNote(gap: RateGap | null, days: number | null): string | null {
   if (gap === 'too-short') {
     const left = Math.max(1, MIN_TREND_DAYS - (days ?? 0));
-    return `Too close together to call a rate — ${left} more day${left === 1 ? '' : 's'} between readings and this says how fast it is moving.`;
+    return `Too close together to call a rate. ${left} more day${left === 1 ? '' : 's'} between readings and this says how fast it is moving.`;
   }
-  if (gap === 'one-reading') return 'One reading, so there is no rate yet — a second one starts it.';
+  if (gap === 'one-reading') return 'One reading, so there is no rate yet. A second one starts it.';
   if (gap === 'undated') return 'These readings cannot be dated, so there is no window to measure a rate over.';
   return null;
 }

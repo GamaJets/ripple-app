@@ -116,7 +116,7 @@ export const NOISE_P = 0.05;
  * business and are not meant to.
  */
 export const LAST_TOUCH_NOTE =
-  'Each client is credited to the last code they actually used. Somebody who saw your Instagram post and later joined off a friend’s code — or with no code at all — counts there and not here, so the channels that start people off look smaller than they are, and this list is only the people who arrived by code.';
+  'Each client is credited to the last code they actually used. Somebody who saw your Instagram post and later joined off a friend’s code (or with no code at all) counts there and not here, so the channels that start people off look smaller than they are, and this list is only the people who arrived by code.';
 
 const count = (v: number | string | null | undefined): number => {
   // PostgREST returns bigint as a STRING — a bigint does not survive
@@ -313,7 +313,7 @@ export function enoughToTell(status: LoadStatus, rows: CodeReturnRow[]): Tell {
     return {
       rankable: false,
       why: 'one-code',
-      note: 'One code cannot be compared with anything. Make a second — one per channel — and both can run at once.',
+      note: 'One code cannot be compared with anything. Make a second, one per channel, and both can run at once.',
       have: named.reduce((n, r) => n + r.clients, 0),
       needed,
     };
@@ -324,7 +324,7 @@ export function enoughToTell(status: LoadStatus, rows: CodeReturnRow[]): Tell {
   const apart = tellApart(best.clients, runnerUp.clients);
   if (!apart.tell) {
     const note = apart.why === 'too-few'
-      ? `Too few to tell. ${num(apart.have)} ${apart.have === 1 ? 'client has' : 'clients have'} come in on your two busiest codes, and below ${num(needed)} no split between them means anything — a run of heads is not a better coin. Keep both running.`
+      ? `Too few to tell. ${num(apart.have)} ${apart.have === 1 ? 'client has' : 'clients have'} come in on your two busiest codes, and below ${num(needed)} no split between them means anything. A run of heads is not a better coin. Keep both running.`
       : `Too close to tell. ${best.label} is ahead of ${runnerUp.label}, but a gap that size turns up about ${oneIn(apart.p)} of the time when two channels are equally good. Keep both running rather than moving money on this.`;
     return { rankable: false, why: apart.why, note, have: apart.have, needed };
   }
@@ -333,7 +333,7 @@ export function enoughToTell(status: LoadStatus, rows: CodeReturnRow[]): Tell {
     best,
     runnerUp,
     p: apart.p,
-    note: `${best.label} is bringing in more than ${runnerUp.label} by more than chance would explain — a gap this size comes up about ${oneIn(apart.p)} of the time between two equally good channels.`,
+    note: `${best.label} is bringing in more than ${runnerUp.label} by more than chance would explain. A gap this size comes up about ${oneIn(apart.p)} of the time between two equally good channels.`,
   };
 }
 
@@ -446,7 +446,7 @@ export function parseSpend(input: string | null | undefined, currency?: string |
   // nothing to say about it.
   const read = readMinorAmount(bare, cur, false);
   if (!read.ok) return { kind: 'bad', reason: read.reason };
-  if (read.minorUnits >= 100000000000) return { kind: 'bad', reason: 'That is more than Repple will record against one code — check the zeros.' };
+  if (read.minorUnits >= 100000000000) return { kind: 'bad', reason: 'That is more than Repple will record against one code. Check the zeros.' };
   return { kind: 'amount', cents: read.minorUnits, currency: cur };
 }
 
@@ -525,5 +525,5 @@ export function stayedLine(status: LoadStatus, row: CodeReturnRow): string {
   if (status === 'partial') return 'Not all of your clients could be read, so nothing here is a total.';
   if (row.clients === 0) return row.isLive ? 'Nobody has come in on it yet.' : 'Nobody came in on it.';
   const stayed = `${num(row.activeNow)} of ${num(row.clients)} still with you`;
-  return row.activeNow === row.clients ? `${stayed} — all of them.` : `${stayed}.`;
+  return row.activeNow === row.clients ? `${stayed}, all of them.` : `${stayed}.`;
 }

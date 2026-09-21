@@ -341,7 +341,7 @@ export function compareBasis(rows: CompareRow[]): string {
     return 'The figures under each photo are the InBody scan recorded on that day.';
   }
   if (!beforeMeasured && !afterMeasured) {
-    return 'Neither of these days has an InBody scan, so there are no figures to put beside the photos — only the photos themselves.';
+    return 'Neither of these days has an InBody scan, so there are no figures to put beside the photos, only the photos themselves.';
   }
   return beforeMeasured
     ? 'Only the earlier day has an InBody scan, so there is nothing to measure the change against.'
@@ -383,7 +383,7 @@ export function compareSummary(
   days: number | null,
   rows: CompareRow[],
 ): string {
-  const head = `Progress comparison — ${beforeLabel} → ${afterLabel} (${spanLabel(days)})`;
+  const head = `Progress comparison: ${beforeLabel} → ${afterLabel} (${spanLabel(days)})`;
   const lines = rows.map(
     (r) => `${r.label}: ${readingText(r.before, r.unit)} → ${readingText(r.after, r.unit)} (${deltaText(r.delta, r.unit)})`,
   );
@@ -394,7 +394,7 @@ export function compareSummary(
     '',
     compareBasis(rows),
     COMPARE_DISCLAIMER,
-    'The photographs themselves are not attached — they stay private to this account.',
+    'The photographs themselves are not attached; they stay private to this account.',
   ].join('\n');
 }
 

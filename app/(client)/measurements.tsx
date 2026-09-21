@@ -116,7 +116,7 @@ function ScanBeside({ t, tapeISO, scans, scansStatus, wu, dense }: {
   : scansStatus === 'error'
   ? 'Your scans could not be read, so we cannot tell you whether one was taken near this.'
   : scansStatus === 'partial'
-  ? 'Only part of your scan history could be read — there may be a scan near this one that is not shown.'
+  ? 'Only part of your scan history could be read. There may be a scan near this one that is not shown.'
   : isWhole(scansStatus)
   ? `No scan within ${PAIR_WINDOW_DAYS} days of this entry.`
   : null;
@@ -281,7 +281,7 @@ export default function Measurements() {
  const latestAgo = latest ? agoLabel(latest.at, today) : null;
  const latestDays = latest ? daysBetween(latest.at, today) : null;
  const stale = latestDays != null && latestDays > STALE_AFTER_DAYS
-  ? `Your last tape entry is ${latestDays} days old — these figures describe the body you had then.`
+  ? `Your last tape entry is ${latestDays} days old. These figures describe the body you had then.`
   : null;
  // The three arms — a movement, no movement, and no earlier entry — are
  // deltaLabel's, so this cannot drift out of step with the same sentence on
@@ -444,13 +444,13 @@ export default function Measurements() {
    {status === 'partial' ? (
     <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
      You have more measurements on record than this screen can read in one go, so this list stops
-     short of your oldest — the entries shown are your most recent ones. The figures above are
+     short of your oldest. The entries shown are your most recent ones. The figures above are
      measured from your two latest entries and are unaffected.
     </Text>
    ) : null}
    {entries.length === 0 ? (
     <Text style={{ ...ty.label, color: t.ink3 }}>{readFailed
-     ? 'Your measurement history could not be read, so nothing is listed here. That is not the same as having none — try again once you have a connection, and it will be exactly as you left it.'
+     ? 'Your measurement history could not be read, so nothing is listed here. That is not the same as having none. Try again once you have a connection, and it will be exactly as you left it.'
      : status === 'loading'
      ? 'Loading your history…'
      // 'partial' may never reach the empty-history sentence. A truncated read
@@ -458,7 +458,7 @@ export default function Measurements() {
      // claim about a member's own record that a short read cannot support.
      : status === 'partial'
      ? 'Nothing came back in the part of your history that could be read. That is not the same as having none.'
-     : 'No measurements logged yet — save your first entry above and the history builds here.'}</Text>
+     : 'No measurements logged yet. Save your first entry above and the history builds here.'}</Text>
    ) : null}
    {entries.map((e: MeasureEntry, i) => (
     <View key={e.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -491,7 +491,7 @@ export default function Measurements() {
      {fixing && fixing.at === e.at ? (
       <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
        <Text style={{ ...ty.caption, color: t.ink3 }}>
-        {fixing.label} on {dayLabel(e.at)} — the date stays as it is, so your trend is not bent around a correction.
+        {fixing.label} on {dayLabel(e.at)}. The date stays as it is, so your trend is not bent around a correction.
        </Text>
        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
         <TextInput value={fixVal} onChangeText={setFixVal} keyboardType="decimal-pad"

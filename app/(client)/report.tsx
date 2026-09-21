@@ -319,14 +319,14 @@ export default function WeeklyReport() {
     // That is the defect scripts/check-ask-prompt.mjs exists for, arriving as
     // prose instead of as a field: "nobody had been assessed and the model was
     // told nobody is at risk". One line establishes the set for all four.
-    trainingWhole ? 'Their training log for these seven days was read in full, so the counts below are complete — a zero among them is a measured zero and not a gap.' : '',
+    trainingWhole ? 'Their training log for these seven days was read in full, so the counts below are complete. A zero among them is a measured zero and not a gap.' : '',
     trainingWhole ? `Trained on ${wk.days} day(s) this week.` : '',
     trainingWhole ? `Volume ${num1(wk.volumeKg / 1000)} tonnes.` : '',
     // Energy, on the same footing as the tonnage beside it and for the same
     // reason. Three arms, because "~0 kcal" over a week that carries no energy
     // figures at all is not a small number, it is the absence of every number.
     trainingWhole && weekEntries.length > 0 && kcalKnownFor === 0
-      ? `Energy burned this week is not known — none of the ${num(weekEntries.length)} exercise(s) logged carries an energy figure. Do not state a calorie figure for their week and do not call it an easy one.`
+      ? `Energy burned this week is not known: none of the ${num(weekEntries.length)} exercise(s) logged carries an energy figure. Do not state a calorie figure for their week and do not call it an easy one.`
       : '',
     trainingWhole && kcalKnownFor > 0 ? `~${num(wk.kcal)} kcal.` : '',
     trainingWhole && kcalKnownFor > 0 && kcalGaps > 0
@@ -366,7 +366,7 @@ export default function WeeklyReport() {
     // somebody nothing has been compared for.
     { kind: 'body', line: hasBody ? [`Weight ${fig(weightLabel(c.weightKg, wu))} (${wChangeKnown
       ? `${deltaLabel(wDeltaShown, { since: null, unit: wu, noChange: 'no change' })} overall`
-      : 'overall change not known — there is one weigh-in on record and nothing to measure a change against, so do not say their weight is steady or that it has moved'})`,
+      : 'overall change not known: there is one weigh-in on record and nothing to measure a change against, so do not say their weight is steady or that it has moved'})`,
       c.bodyFatPct != null ? `body fat ${c.bodyFatPct}%` : null,
       c.muscleKg != null ? `muscle ${fig(weightLabel(c.muscleKg, wu))}` : null].filter(Boolean).join(', ') + '.' : '' },
     { kind: 'waist', line: waistDShown != null && mLatest ? `Waist ${fig(lengthLabel(mLatest.waist, lu))} (${deltaLabel(waistDShown, { since: null, unit: lu, noChange: 'no change' })} since the previous tape reading).` : '' },
@@ -389,7 +389,7 @@ export default function WeeklyReport() {
     // Whoop and Oura both refuse this shape: nothing derived is shown without
     // the window it was derived over. Saying when costs one clause and it is
     // the clause that makes the fact true.
-    { kind: 'checkin', line: ciLanded && checkIn ? `Their most recent check-in, ${fmtDay(checkIn.at)}${checkInInWeek ? ' (this week)' : ' — BEFORE the week above, so do not describe it as this week\u2019s'}: energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '' },
+    { kind: 'checkin', line: ciLanded && checkIn ? `Their most recent check-in, ${fmtDay(checkIn.at)}${checkInInWeek ? ' (this week)' : ' (BEFORE the week above, so do not describe it as this week\u2019s)'}: energy ${checkIn.energy}/5, sleep ${checkIn.sleep}/5, mood ${checkIn.mood}/5, adherence ${checkIn.adherence}/5.` : '' },
     // ── a health read that did not land is SAID, not left as a silence ───
     //
     // The fitness half has told the model in as many words since its own
@@ -413,11 +413,11 @@ export default function WeeklyReport() {
     // These carry the kind they are about, so `REPORT_SHARE_BULLETS` still
     // describes the payload — a line saying a figure could not be read
     // discloses less than the figure, never more.
-    { kind: 'body', line: bodyWhole ? '' : 'not known — their weight, body fat and muscle could not be read this week, so no body figure is among these facts. Do not say they have not been weighed, and do not estimate one.' },
-    { kind: 'body', line: bodyWhole && wSeries.length === 0 ? 'not known — this member has no weigh-in on record at all, so there is no weight, body fat or muscle figure to speak about. Do not estimate one and do not treat it as a lapse.' : '' },
-    { kind: 'waist', line: mWhole ? '' : 'not known — their tape measurements could not be read this week. Do not say they have not measured and do not comment on their waist.' },
-    { kind: 'checkin', line: ciLanded ? '' : 'not known — their check-ins could not be read this week, so no energy, sleep, mood or adherence score is among these facts. Do not say they skipped a check-in.' },
-    { kind: 'composition', line: isWhole(c.scansStatus) ? '' : 'not known — their body-composition scans could not be read this week. Do not say nothing is improving, and do not name anything to watch.' },
+    { kind: 'body', line: bodyWhole ? '' : 'not known: their weight, body fat and muscle could not be read this week, so no body figure is among these facts. Do not say they have not been weighed, and do not estimate one.' },
+    { kind: 'body', line: bodyWhole && wSeries.length === 0 ? 'not known: this member has no weigh-in on record at all, so there is no weight, body fat or muscle figure to speak about. Do not estimate one and do not treat it as a lapse.' : '' },
+    { kind: 'waist', line: mWhole ? '' : 'not known: their tape measurements could not be read this week. Do not say they have not measured and do not comment on their waist.' },
+    { kind: 'checkin', line: ciLanded ? '' : 'not known: their check-ins could not be read this week, so no energy, sleep, mood or adherence score is among these facts. Do not say they skipped a check-in.' },
+    { kind: 'composition', line: isWhole(c.scansStatus) ? '' : 'not known: their body-composition scans could not be read this week. Do not say nothing is improving, and do not name anything to watch.' },
     { kind: 'composition', line: comp.improving.length ? `Body composition improving: ${comp.improving.join(', ')}.` : '' },
     { kind: 'composition', line: comp.watch.length ? `Body composition to watch: ${comp.watch.join(', ')}.` : '' },
     { kind: 'balance', line: comp.balance.length ? comp.balance.join(' ') : '' },
@@ -445,8 +445,8 @@ export default function WeeklyReport() {
     else if (wk.days > 0) bits.push(volNote
       ? `You trained on ${wk.days} day${wk.days === 1 ? '' : 's'} this week.`
       : `You trained on ${wk.days} day${wk.days === 1 ? '' : 's'} this week, moving ${num1(wk.volumeKg / 1000)} tonnes of volume.`);
-    else bits.push('No logged workouts this week — a fresh chance to get one on the board.');
-    if (trainingWhole && streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
+    else bits.push('No logged workouts this week. A fresh chance to get one on the board.');
+    if (trainingWhole && streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'}. Keep it alive.`);
     // Gated on the CONVERTED change: a fifth of a kilogram is under half a
     // pound, and "your weight is down 0 lb" is worse than saying nothing.
     // ", trending your way" was appended to every downward move. It is the one
@@ -458,7 +458,7 @@ export default function WeeklyReport() {
     if (bodyWhole && deltaMoved(wDeltaShown)) bits.push(`Weight is ${wDeltaShown > 0 ? 'up' : 'down'} ${Math.abs(wDeltaShown)} ${wu} overall${movementIsProgress(wDeltaShown, c.goal, 'weight') ? ', trending your way' : ''}.`);
     if (comp.improving.length) bits.push(`On composition, ${comp.improving.slice(0, 2).join(' and ')} moved the right way.`);
     else if (comp.watch.length) bits.push(`Keep an eye on ${comp.watch.slice(0, 2).join(' and ')} from your latest scan.`);
-    if (ciLanded && checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5 — worth refocusing next week.`);
+    if (ciLanded && checkIn && checkIn.adherence <= 3) bits.push(`Your last check-in put adherence at ${checkIn.adherence}/5, worth refocusing next week.`);
     return bits.join(' ');
   })();
   // Whether any of the five reads behind this page is still in flight. Not the
@@ -683,7 +683,7 @@ export default function WeeklyReport() {
                 ? 'Reading your weight history, so the PR count is not counted yet.'
                 : c.status === 'partial'
                   ? 'You have more on your record than this screen can read at once, so your PR count is left blank rather than counted over part of it. Nothing has been reset.'
-                  : 'Pull-ups, dips and press-ups are priced against what you weighed on the day, and that history could not be read — so a count of your records would be short by every one of them. It is left blank rather than stated wrong, and nothing has been reset.'}
+                  : 'Pull-ups, dips and press-ups are priced against what you weighed on the day, and that history could not be read, so a count of your records would be short by every one of them. It is left blank rather than stated wrong, and nothing has been reset.'}
             </Text>
           ) : null}
         </Section>
@@ -699,7 +699,7 @@ export default function WeeklyReport() {
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {c.status === 'loading' ? 'Reading your measurements…'
                 : !bodyWhole ? 'We couldn’t read your weigh-ins and scans, so there is nothing to report here. They are on your record.'
-                : 'No weigh-ins or scans yet — log one and this fills in.'}
+                : 'No weigh-ins or scans yet. Log one and this fills in.'}
             </Text>
           )}
         </Section>
@@ -820,7 +820,7 @@ export default function WeeklyReport() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   {ciStatus === 'loading'
                     ? 'Reading your check-ins…'
-                    : 'We couldn’t reach your check-ins just now, so this is the last one this phone had — there may be a newer one. It is left out of the summary above rather than described as this week’s.'}
+                    : 'We couldn’t reach your check-ins just now, so this is the last one this phone had. There may be a newer one. It is left out of the summary above rather than described as this week’s.'}
                 </Text>
               ) : null}
             </Section>

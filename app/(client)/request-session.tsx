@@ -322,7 +322,7 @@ export default function RequestSessionScreen() {
               Alert.alert(
                 'Not Taken Back',
                 res.reason === 'gone'
-                  ? 'That isn’t a live request any more — your coach may have just answered it. The list has been refreshed.'
+                  ? 'That isn’t a live request any more. Your coach may have just answered it. The list has been refreshed.'
                   : 'That could not be taken back just now, so your coach is still being asked. Try again in a moment.',
               );
             }
@@ -400,7 +400,7 @@ export default function RequestSessionScreen() {
             ]} />
 
             <Section>
-              <Notice kicker="WHAT THIS DOES" title="It Asks — It Doesn’t Book" note={NOT_A_BOOKING} />
+              <Notice kicker="WHAT THIS DOES" title="It Asks, It Doesn’t Book" note={NOT_A_BOOKING} />
             </Section>
 
             {/* ── the day ─────────────────────────────────────────────── */}

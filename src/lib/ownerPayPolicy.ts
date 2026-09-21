@@ -73,7 +73,7 @@ export const POLICY_UNREAD_NOTE =
 
 /** An account with no gym behind it. */
 export const POLICY_NO_GYM_NOTE =
-  'This account is not attached to a gym, so there is no session pay policy — there are no coaches to pay for one.';
+  'This account is not attached to a gym, so there is no session pay policy. There are no coaches to pay for one.';
 
 /**
  * What being unset costs, in the owner's own terms.
@@ -141,7 +141,7 @@ export function payOutcomeLines(v: PolicyView): PayOutcomeLine[] {
         ? (noShow
           ? 'The coach held the hour, so this gym pays it. Payroll counts it exactly as it counts a delivered session.'
           : 'Your gym pays nothing for an hour the member did not turn up to. Payroll leaves it out of the total.')
-        : `Nobody has said, and ${NO_PAY_POLICY_NOTE} — so Payroll leaves it out and says the figure is incomplete rather than counting it as nothing.`,
+        : `Nobody has said, and ${NO_PAY_POLICY_NOTE}, so Payroll leaves it out and says the figure is incomplete rather than counting it as nothing.`,
     },
     {
       outcome: 'Late cancellation',
@@ -157,7 +157,7 @@ export function payOutcomeLines(v: PolicyView): PayOutcomeLine[] {
       // exists to make on screen.
       outcome: 'Nobody marked it',
       answer: 'unpaid',
-      note: 'A session with no outcome recorded is unpaid under all four policies — that is not a decision you have taken, '
+      note: 'A session with no outcome recorded is unpaid under all four policies. That is not a decision you have taken; '
         + 'it is the outcome still being unrecorded. It is also what stops the month closing, and marking it is what makes it count.',
     },
   ];

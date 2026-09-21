@@ -43,7 +43,7 @@ const run = (over: Partial<PayRun> = {}): PayRun => ({
   ok(payRunHeading(r).includes('Dana Okafor'), 'and who it is going to');
   ok(payRunYesLabel(r).includes('£1,240.00'),
     'and so does the button — the heading is above the click, the label IS the click');
-  eq(payRunYesLabel(r), 'Yes — record £1,240.00 paid', 'the whole label');
+  eq(payRunYesLabel(r), 'Yes, record £1,240.00 paid', 'the whole label');
   eq(PAY_RUN_NO_LABEL, 'Not yet',
     'the way out is not a second "Cancel" on a screen where cancelled already means a session outcome');
 }
