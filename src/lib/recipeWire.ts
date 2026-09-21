@@ -45,12 +45,12 @@
 /** Repple's `Diet`, restated. See the header for why it is not imported. */
 export type WireDiet = 'meat' | 'vegetarian' | 'vegan' | 'paleo' | 'keto';
 /** Repple's `Allergen`, restated. */
-export type WireAllergen = 'dairy' | 'gluten' | 'nuts' | 'shellfish' | 'egg' | 'soy';
+export type WireAllergen = 'dairy' | 'gluten' | 'nuts' | 'shellfish' | 'egg' | 'soy' | 'pork';
 /** Repple's `Slot`, restated. */
 export type WireSlot = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 
 const DIETS: readonly WireDiet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
-const ALLERGENS: readonly WireAllergen[] = ['dairy', 'gluten', 'nuts', 'shellfish', 'egg', 'soy'];
+const ALLERGENS: readonly WireAllergen[] = ['dairy', 'gluten', 'nuts', 'shellfish', 'egg', 'soy', 'pork'];
 const SLOTS: readonly WireSlot[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
 
 /** The most dishes one search may bring back. Each costs 0.11 points with
@@ -202,6 +202,9 @@ export const KCAL_BAND = { low: 0.45, high: 1.8 } as const;
  * it the supermarket aisle the grocery list is grouped by.
  * `instructionsRequired` keeps out the dishes that are a photograph and a link.
  */
+/** What a pork exclusion sends as `excludeIngredients`. */
+export const PORK_WORDS = ['pork', 'bacon', 'ham', 'salami', 'chorizo', 'prosciutto', 'pancetta', 'pepperoni', 'lard', 'gelatin'] as const;
+
 export function searchParams(req: RecipeSearchRequest): Record<string, string> {
   const p: Record<string, string> = {
     type: typeParam(req.slot),
@@ -218,6 +221,9 @@ export function searchParams(req: RecipeSearchRequest): Record<string, string> {
   if (diet) p.diet = diet;
   const intolerances = intolerancesParam(req.avoid);
   if (intolerances.length) p.intolerances = intolerances.join(',');
+  // Spoonacular has no pork intolerance, so pork is excluded by ingredient.
+  // src/lib/recipes.ts still re-reads every dish and marks what slipped through.
+  if (req.avoid.includes('pork')) p.excludeIngredients = PORK_WORDS.join(',');
   // A nutrient filter adds a WHOLE point to the search, roughly doubling it.
   // It is only set when the caller sent a target, so a screen that would
   // rather spend the point on a second search leaves `targetKcal` off.

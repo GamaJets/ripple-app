@@ -53,7 +53,13 @@ same(['vegetarian', 'vegan', 'paleo'].map((d) => dietParam(d as 'vegan')), ['veg
 same(intolerancesParam(['nuts']), ['Tree Nut', 'Peanut'], 'Nuts is BOTH of theirs — a peanut is a legume to a botanist and a nut to somebody with an EpiPen');
 same(intolerancesParam(ALLERGENS.map((a) => a.id)), ['Dairy', 'Gluten', 'Tree Nut', 'Peanut', 'Shellfish', 'Egg', 'Soy'],
   'every exclusion Repple offers has a translation — a new pill with none would come back []');
-eq(intolerancesParam(ALLERGENS.map((a) => a.id)).length, ALLERGENS.length + 1, 'and none of them is silently dropped');
+// Nuts is two of theirs; pork is none of theirs and goes by ingredient instead.
+eq(intolerancesParam(ALLERGENS.map((a) => a.id)).length, ALLERGENS.length, 'and none of the intolerances is silently dropped');
+{
+  const r = readRecipeRequest({ action: 'search', slot: 'Dinner', diet: 'meat', avoid: ['pork'] });
+  ok(r.ok && r.req.action === 'search' && /(^|,)bacon(,|$)/.test(searchParams(r.req).excludeIngredients ?? '') && /(^|,)pork(,|$)/.test(searchParams(r.req).excludeIngredients ?? ''),
+    'avoiding pork excludes pork and bacon by ingredient, since Spoonacular has no pork intolerance');
+}
 eq(typeParam('Lunch'), 'main course', 'they have no lunch');
 eq(typeParam('Dinner'), 'main course', 'or dinner');
 eq(typeParam('Snack'), 'snack', 'but they do have snacks');

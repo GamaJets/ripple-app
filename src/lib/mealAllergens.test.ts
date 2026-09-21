@@ -182,7 +182,9 @@ eq(allergenGapNote(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack']
   }
   ok(served > 100000, 'the sweep actually generated meals');
   eq(unsafe, 0, 'no generated meal contains an excluded allergen, in any diet, slot or combination');
-  eq(empty, 76, 'and 76 of the 1,280 combinations have no safe meal to serve');
+  // Pork (added 21 Sep 2026) doubles the combinations and never empties a slot:
+  // every one of the 76 is simply counted twice, with and without it.
+  eq(empty, 152, 'and 152 of the 2,560 combinations have no safe meal to serve');
   eq([...emptyAt].sort().join(','), 'keto/Breakfast,meat/Breakfast,paleo/Breakfast,vegan/Breakfast,vegetarian/Breakfast',
     'every one of them a breakfast');
   // The member's own sentence for the common one.
@@ -454,3 +456,13 @@ eq(mealRowSpoken({ name: 'Trail mix', kcal: null }), 'Trail mix', 'and neither i
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('mealAllergens: ok');
+
+// Pork: kept out like an allergen. Salami is a meat snack component, so a
+// member avoiding pork must never be served it, at any index.
+{
+  const size = catalogSize('meat', 'Snack', ['pork']);
+  let salami = 0;
+  for (let i = 0; i < size; i++) if (/salami|bacon|ham\b/i.test(mealAt('meat', 'Snack', i, ['pork']).n)) salami++;
+  if (salami) throw new Error(`pork: ${salami} snacks with pork in them were offered to a member avoiding pork`);
+  if (!(size > 0)) throw new Error('pork: avoiding pork must still leave snacks to eat');
+}

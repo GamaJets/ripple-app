@@ -16,6 +16,9 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { mealPhoto } from '../../src/ui/mealPhotos';
 import { CUISINES, type WireCuisine } from '../../src/lib/recipeWire';
 
+/** What a cuisine chip says. The wire value stays Spoonacular's own word. */
+const cuisineLabel = (x: WireCuisine) => (x === 'Middle Eastern' ? 'Arabic & Middle Eastern' : x);
+
 import { titleCaseName, mealTitle, mealTitleParts } from '../../src/lib/exerciseName';import { num, numUpTo } from '../../src/lib/format';
 import { fmtDay, fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
@@ -1746,11 +1749,14 @@ export default function Nutrition() {
         style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: cuisines.length === 0 ? t.brand : t.surface2 }}>
         <Text style={{ ...ty.label, ...font(cuisines.length === 0 ? '600' : '400'), color: cuisines.length === 0 ? t.brandInk : t.ink2 }}>Any</Text>
       </Pressable>
-      {CUISINES.map((x) => { const on = cuisines.includes(x); return (
+      {/* Spoonacular has no Arabic cuisine; its Arabic dishes are filed under
+          Middle Eastern, so that chip says both (owner, 21 Sep 2026). Sorted by
+          what the chip SAYS, so it sits under A. */}
+      {[...CUISINES].sort((a, b) => cuisineLabel(a).localeCompare(cuisineLabel(b))).map((x) => { const on = cuisines.includes(x); return (
         <Pressable key={x} onPress={() => toggleCuisine(x)}
-          accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`${x} cuisine`}
+          accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`${cuisineLabel(x)} cuisine`}
           style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
-          <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{x}</Text>
+          <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{cuisineLabel(x)}</Text>
         </Pressable>
       ); })}
     </View>
@@ -1795,7 +1801,7 @@ export default function Nutrition() {
   );
   const avoidPills = (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-      {ALLERGENS.map((al) => { const on = c.ownAvoid.includes(al.id); return (
+      {[...ALLERGENS].sort((x, y) => x.label.localeCompare(y.label)).map((al) => { const on = c.ownAvoid.includes(al.id); return (
         <Pressable key={al.id} onPress={() => c.setOwnAvoid(on ? c.ownAvoid.filter((x) => x !== al.id) : [...c.ownAvoid, al.id])}
           accessibilityRole="button" accessibilityState={{ selected: on }}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.surface3 : t.surface2 }}>
@@ -2524,7 +2530,7 @@ export default function Nutrition() {
             <View style={{ marginTop: sp.lg }}>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Diet Style</Text>
               <View style={{ marginBottom: sp.xl }}>{dietPills}</View>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Anything to Avoid</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Never Include · Allergies and Pork</Text>
             {avoidPills}
             {/* What their coach recorded for them, shown so nothing is kept
                 out of their meals on their behalf without them seeing it. Not
@@ -2544,7 +2550,7 @@ export default function Nutrition() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Your coach added these from what you told them. They are kept out of your meals along with your own. Ask your coach if one is wrong.</Text>
               </View>
             ) : null}
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Foods You Dislike</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Rather Not Have</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Left out of your meals where there is another option. Not an allergy: if a meal can only be made with one, it stays in and we tell you.</Text>
             {dislikeEditor}
             {dislikeError ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{dislikeError}</Flag> : null}
@@ -2902,13 +2908,13 @@ export default function Nutrition() {
               {cuisinePills}
             </View>
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>3 · Anything to Avoid</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>3 · Never Include</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Allergies, and anything you never eat, such as pork. Never in any meal, not even as a last resort.</Text>
               {avoidPills}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Allergens are never in your meals.</Text>
             </View>
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>4 · Foods You Dislike</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Left out where there is another option. Not an allergy.</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>4 · Rather Not Have</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Foods you just don’t like. Type any food. Left out when there is another choice, but may appear if nothing else fits.</Text>
               {dislikeEditor}
               {dislikeError ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{dislikeError}</Flag> : null}
             </View>

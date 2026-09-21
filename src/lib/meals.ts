@@ -30,10 +30,16 @@ interface Comp {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const forDiet = (arr: Comp[], diet: Diet) => arr.filter((x) => x.d.includes(diet));
 
-export type Allergen = 'dairy' | 'gluten' | 'nuts' | 'shellfish' | 'egg' | 'soy';
+export type Allergen = 'dairy' | 'gluten' | 'nuts' | 'shellfish' | 'egg' | 'soy' | 'pork';
 export const ALLERGENS: { id: Allergen; label: string }[] = [
   { id: 'dairy', label: 'Dairy' }, { id: 'gluten', label: 'Gluten' }, { id: 'nuts', label: 'Nuts' },
   { id: 'shellfish', label: 'Shellfish' }, { id: 'egg', label: 'Egg' }, { id: 'soy', label: 'Soy' },
+  // Not an allergen but kept out the same way, never relaxed: for many members
+  // it is religious (owner, 21 Sep 2026). LAST in this list on purpose: stored
+  // meal indices are positions in pools filtered by the first six, and the
+  // digest in src/lib/mealAllergens.test.ts walks exactly those six. Screens
+  // sort it alphabetically for display.
+  { id: 'pork', label: 'Pork' },
 ];
 /**
  * Compound names whose head word is not the thing it looks like.
@@ -115,6 +121,7 @@ function componentAllergens(comp: Comp): Allergen[] {
   if (/prawn|shrimp|crab|lobster|scallop|mussel|oyster|shellfish/.test(text)) out.push('shellfish');
   if (/\begg/.test(text)) out.push('egg');
   if (/tofu|tempeh|edamame|\bsoy|miso/.test(text) || NAMED_SOY.test(text)) out.push('soy');
+  if (/\bpork|bacon|\bham\b|salami|chorizo|prosciutto|pancetta|pepperoni|\blard\b|gelatin|sausage/.test(text)) out.push('pork');
   return out;
 }
 /**

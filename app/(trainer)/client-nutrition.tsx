@@ -1169,7 +1169,7 @@ export default function ClientNutrition() {
                             coach's note would not remove it anyway. */}
                         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>What They Told You</Text>
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-                          {ALLERGENS.map((al) => {
+                          {[...ALLERGENS].sort((x, y) => x.label.localeCompare(y.label)).map((al) => {
                             const theirs = profile.ownAvoid.includes(al.id);
                             const on = theirs || profile.coachAvoid.includes(al.id);
                             return (

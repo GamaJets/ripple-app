@@ -158,7 +158,7 @@ export function seedPlan(input: PlanInput, writtenAtISO: string): CoachMealPlan 
 
 const SLOTS: readonly Slot[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
 const DIETS: readonly Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
-const ALLERGEN_IDS: readonly Allergen[] = ['dairy', 'gluten', 'nuts', 'shellfish', 'egg', 'soy'];
+const ALLERGEN_IDS: readonly Allergen[] = ['dairy', 'gluten', 'nuts', 'shellfish', 'egg', 'soy', 'pork'];
 
 const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
