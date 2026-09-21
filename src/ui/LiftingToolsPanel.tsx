@@ -269,7 +269,7 @@ export function LiftingToolsPanel({ unit }: { unit: WeightUnit }) {
         {asked != null ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Warm-up Ramp" note={`To ${plain(asked)} ${unit}`} />
+            <SectionHead title="Warm-Up Ramp" note={`To ${plain(asked)} ${unit}`} />
             {ramp.length ? (<>
               {ramp.map((r, i) => (
                 <View key={r.pct}>

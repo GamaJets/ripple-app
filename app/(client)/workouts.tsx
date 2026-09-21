@@ -2204,7 +2204,7 @@ export default function Train() {
         {/* ── header ───────────────────────────────────────────────────────
             Whose plan this is stays the eyebrow here. The program's own name
             is the eyebrow ON the hero, and nowhere else on it. */}
-        <ScreenHeader eyebrow={coachProgram ? 'Coach plan' : 'Your training'} title="My Program" />
+        <ScreenHeader eyebrow={coachProgram ? 'Coach Plan' : 'Your Training'} title="My Program" />
 
         {/* Current and past, as the mockup draws them: above the card. Past is
             the training history screen, which already exists and already
@@ -2290,7 +2290,7 @@ export default function Train() {
             its bar takes below, and always beside the word. */}
         {dayGroups.length ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
-            {dayGroups.map((g) => <TonedChip key={g} label={g} tone={groupTone(g)} />)}
+            {dayGroups.map((g) => <TonedChip key={g} label={titleCaseName(g)} tone={groupTone(g)} />)}
           </View>
         ) : null}
 
@@ -2400,7 +2400,7 @@ export default function Train() {
           <Section>
             <SectionHead title="Muscle Focus This Week" note="Planned Sets" onPress={() => router.push('/(client)/muscles')} />
             {weekFocus.map(([g, n]) => (
-              <Meter key={g} label={g} val={n} target={weekFocus[0][1]} tone={groupTone(g)} note={n === 1 ? '1 set' : `${n} sets`} />
+              <Meter key={g} label={titleCaseName(g)} val={n} target={weekFocus[0][1]} tone={groupTone(g)} note={n === 1 ? '1 set' : `${n} sets`} />
             ))}
           </Section>
         ) : null}
@@ -4941,6 +4941,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     setCardioExtra((prev) => ({ ...prev, [i]: { ...(prev[i] ?? { dist: '', watts: '' }), ...patch } }));
   const showLoad = (kg: number) => (kg ? plain(liftIn(kg, unit) ?? 0) : '');
   const [rest, setRest] = useState(0);
+  const [restOverride, setRestOverride] = useState<Record<number, number>>({});
   /* ── which of the board's drawings is up ─────────────────────────────────
      'ready' is client page 4 — the movement, its prescription, the
      demonstration and three round controls. 'set' is page 6 — a clock as the
@@ -5176,7 +5177,10 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     const cur = exercises[idx];
     if (!cur) return;
     const sug = suggestForExercise(log, nameOf(cur), cur.reps, 2.5, unit);
-    setLoad(sug ? showLoad(sug.weight) : '');
+    // Their own history first; with none, the load the coach prescribed, so a
+    // first attempt does not open on a blank box beside "× 50 kg" (seen on
+    // the simulator, 21 Sep 2026).
+    setLoad(sug ? showLoad(sug.weight) : cur.loadKg ? showLoad(cur.loadKg) : '');
     setReps('');
     // The movement's own prescription decides which box opens. `next` and
     // `back` clear the bodyweight tick for the same reason and this is the
@@ -5509,7 +5513,9 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     // just logged is the one at `done.length` — the count before this log — so
     // finishing a warm-up rests the coach's rest and finishing the drop set
     // that follows it rests not at all.
-    setReps(''); startRest(restAfter(methodAt(done.length), restSecondsFor(ex))); setPendingFeel(wkg);
+    setReps('');
+    { const base = restAfter(methodAt(done.length), restSecondsFor(ex)); startRest(base > 0 && restOverride[idx] != null ? restOverride[idx] : base); }
+    setPendingFeel(wkg);
     // The set clock starts over. Under a rest it is not the figure and the
     // rest's end restarts it anyway; inside a drop set there is no rest, and
     // this is what times the next drop.
@@ -6095,7 +6101,13 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // rest-pause or a cluster — is not the coach's rest and must not be labelled
   // as theirs. A drop set has none, `plannedRest` is 0, and no banner opens.
   const restIsMethods = typeof methodFor(methodAt(done.length)).method.restsAfter === 'number';
-  const plannedRest = restAfter(methodAt(done.length), restSecondsFor(ex));
+  // The member's own rest for this movement, set with − and + beside Start
+  // Rest ("need to be able to adjust the rest time", owner, 21 Sep 2026). It
+  // replaces the coach's or the app's figure for the rest of this session only,
+  // for the manual Start Rest and the automatic one after a set alike. A drop
+  // set's zero rest stays zero: there is no rest there to lengthen.
+  const baseRest = restAfter(methodAt(done.length), restSecondsFor(ex));
+  const plannedRest = baseRest > 0 && restOverride[idx] != null ? restOverride[idx] : baseRest;
   // The set about to be done, or null once the plan is finished and the client
   // is adding sets of their own.
   const nextSet = plan[done.length] ?? null;
@@ -6333,10 +6345,10 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      "varied" and the checklist below carries each set's own figures. The rest
      on this line is the rest that will actually run — a drop set says nothing
      here, because there is none. */
-  const repsWord = (r: string) => (/^\d+(\s*[-–]\s*\d+)?$/.test(r.trim()) ? `${r.trim()} reps` : r);
-  const prescription = `${plan.length} set${plan.length === 1 ? '' : 's'} × ${variedPlan ? 'varied' : repsWord(ex.reps)}`
+  const repsWord = (r: string) => (/^\d+(\s*[-–]\s*\d+)?$/.test(r.trim()) ? `${r.trim()} Reps` : r);
+  const prescription = `${plan.length} Set${plan.length === 1 ? '' : 's'} × ${variedPlan ? 'Varied' : repsWord(ex.reps)}`
     + (ex.loadKg != null && !variedPlan ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : '')
-    + (plannedRest > 0 && (ex.restSec != null || restIsMethods) ? ' · ' + restClock(plannedRest) + ' rest' : '');
+    + (plannedRest > 0 && (ex.restSec != null || restIsMethods) ? ' · ' + restClock(plannedRest) + ' Rest' : '');
 
   /* The run this movement is in, above its name — "Superset · 1 of 2" — with
      the words derived from how many movements are in the run rather than
@@ -6624,7 +6636,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
      read out in the member's unit. */
   const rampBlock = done.length === 0 ? (() => { const readTop = readLift(load, unit); const wu = warmupSets(readTop.ok ? (readTop.kg ?? 0) : 0); return wu.length ? (
     <View style={{ marginTop: sp.xl }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: sp.sm }}><Icon name="flame" size={14} color={t.s3} /><Text style={{ ...ty.micro, color: t.ink3 }}>Warm-up Ramp</Text></View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: sp.sm }}><Icon name="flame" size={14} color={t.s3} /><Text style={{ ...ty.micro, color: t.ink3 }}>Warm-Up Ramp</Text></View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
         {wu.map((ws, i) => <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6 }}><Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{fig(liftLabel(ws.kg, unit))} × {ws.reps}</Text></View>)}
       </View>
@@ -7074,7 +7086,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             {/* The muscle group as the chip it is on Train, in the same colour. */}
             {ex.group ? (
               <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: sp.sm }}>
-                <TonedChip label={ex.group} tone={groupTone(ex.group)} />
+                <TonedChip label={titleCaseName(ex.group)} tone={groupTone(ex.group)} />
               </View>
             ) : null}
             {/* The caution, beside the movement it is about — above the demo
@@ -7159,15 +7171,29 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
                  Shown only when the exercise has a rest to run; a movement
                  with none has nothing for this control to do. */
               plannedRest > 0 ? (
-                <Pressable accessibilityRole="button"
-                  accessibilityLabel={`Start the ${restClock(plannedRest)} rest`}
-                  onPress={() => startRest(plannedRest)}
-                  style={{ borderRadius: radius.lg, padding: sp.lg, alignItems: 'center', marginTop: sp.xl, backgroundColor: t.night2 }}>
-                  <Text style={{ ...ty.label, ...font('600'), color: t.nightInk }}>Start Rest</Text>
-                  <Text style={{ ...ty.caption, ...numeric, color: t.nightInk2, marginTop: 2 }}>
-                    {restClock(plannedRest)}{ex.restSec != null ? ' · set by your coach' : ` · app default`}
-                  </Text>
-                </Pressable>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xl }}>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Rest 15 seconds shorter"
+                    disabled={plannedRest <= 15}
+                    onPress={() => setRestOverride((o) => ({ ...o, [idx]: Math.max(15, plannedRest - 15) }))}
+                    style={{ width: 56, alignSelf: 'stretch', borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', backgroundColor: t.night2, opacity: plannedRest <= 15 ? 0.4 : 1 }}>
+                    <Icon name="minus" size={22} color={t.nightInk} />
+                  </Pressable>
+                  <Pressable accessibilityRole="button"
+                    accessibilityLabel={`Start the ${restClock(plannedRest)} rest`}
+                    onPress={() => startRest(plannedRest)}
+                    style={{ flex: 1, borderRadius: radius.lg, padding: sp.lg, alignItems: 'center', backgroundColor: t.night2 }}>
+                    <Text style={{ ...ty.label, ...font('600'), color: t.nightInk }}>Start Rest</Text>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.nightInk2, marginTop: 2 }}>
+                      {restClock(plannedRest)}{restOverride[idx] != null ? ' · Your Choice' : ex.restSec != null ? ' · Set by Your Coach' : ' · App Default'}
+                    </Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Rest 15 seconds longer"
+                    disabled={plannedRest >= 600}
+                    onPress={() => setRestOverride((o) => ({ ...o, [idx]: Math.min(600, plannedRest + 15) }))}
+                    style={{ width: 56, alignSelf: 'stretch', borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', backgroundColor: t.night2, opacity: plannedRest >= 600 ? 0.4 : 1 }}>
+                    <Icon name="plus" size={22} color={t.nightInk} />
+                  </Pressable>
+                </View>
               ) : null
             )}
 

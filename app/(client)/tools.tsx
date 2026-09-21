@@ -253,7 +253,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {asked != null ? (<>
  <Rule />
  <Section>
- <SectionHead title="Warm-up Ramp" note={`To ${plain(asked)} ${wu}`} />
+ <SectionHead title="Warm-Up Ramp" note={`To ${plain(asked)} ${wu}`} />
  {ramp.length ? (<>
  {ramp.map((r, i) => (
  <View key={r.pct}>
