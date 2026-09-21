@@ -32,7 +32,7 @@ import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Notice, Flag, Cta, Ghost, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Notice, Flag, Cta, Ghost, fig, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -219,7 +219,7 @@ export default function RestDay() {
               {/* Shrunk to fit and never wrapped: a figure broken across two lines
                   is a figure read wrong. */}
               <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{known ? fig(wk.days) : fig(null)}</Text>
+                style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{known ? fig(wk.days) : fig(null)}</Text>
               {known ? (
                 <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{known ? (wk.days === 1 ? 'day' : 'days') : undefined}</Text>
               ) : null}

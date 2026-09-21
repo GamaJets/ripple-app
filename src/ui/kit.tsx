@@ -2012,7 +2012,7 @@ function RingBase({ value: v, figure, sub, size, stroke, arc, track, ink, subInk
         {/* Shrinks to the hole rather than wrapping or clipping: "12,480" in
             a 136pt ring is wider than "1,850", and the hole is what it is. */}
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
-          style={{ ...(under ? { ...ty.caption, ...font('700') } : value(figureSize)), color: ink, maxWidth: D - stroke * 2 - 10, textAlign: 'center' }}>
+          style={{ ...(under ? { ...ty.caption, ...font('700'), ...HERO_FIT } : value(figureSize)), color: ink, maxWidth: D - stroke * 2 - 10, textAlign: 'center' }}>
           {fig(figure)}
         </Text>
         {sub && !under ? (
@@ -2406,7 +2406,7 @@ export function Segmented<K extends string>({ options, value, onChange, scroll, 
           opacity: o.disabled ? 0.5 : 1,
         }}>
         <Text numberOfLines={1} adjustsFontSizeToFit={!scroll} minimumFontScale={0.85}
-          style={{ ...ty.label, ...numeric, ...font('600'), color: on ? t.surface : t.ink2, textAlign: 'center' }}>
+          style={{ ...ty.label, ...numeric, ...font('600'), ...(scroll ? null : HERO_FIT), color: on ? t.surface : t.ink2, textAlign: 'center' }}>
           {o.label}
         </Text>
       </Pressable>

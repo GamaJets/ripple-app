@@ -75,7 +75,7 @@ import { tapLight } from '../../src/ui/haptics';
 // are the ones that get printed as fact. `isWhole` is the gate; see
 // src/ui/loadStatus.ts and scripts/check-whole.mjs.
 import { isWhole } from '../../src/ui/loadStatus';
-import { Section, SectionHead, PageHead, Cta, Ghost, Flag, IconPlate, TonedChip, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, Cta, Ghost, Flag, IconPlate, TonedChip, type Tone, HERO_FIT } from '../../src/ui/kit';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
 import type { WearableProvider } from '../../src/lib/wearables/types';
 import { useWearables } from '../../src/ui/wearables';
@@ -349,7 +349,7 @@ export default function TrainerDevices() {
               <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
                 // Calories are orange wherever this app draws them; the INK
                 // of that hue, because a figure is type. The dash stays ink.
-                style={{ ...ty.hero, ...numeric, color: energy.kcal == null ? t.ink : t.data.orangeInk, flexShrink: 1 }}>{num(energy.kcal)}</Text>
+                style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: energy.kcal == null ? t.ink : t.data.orangeInk, flexShrink: 1 }}>{num(energy.kcal)}</Text>
               <Text style={{ ...ty.head, color: t.ink3, marginStart: 6, flexShrink: 0 }}>kcal</Text>
             </View>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>

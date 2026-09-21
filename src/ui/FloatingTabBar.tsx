@@ -45,6 +45,7 @@ import { Keyboard, Platform, Pressable, StyleSheet, Text, View, type ViewStyle }
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Tabs } from 'expo-router';
 import { useTheme } from './components';
+import { HERO_FIT } from './kit';
 import { elevation, grown, type as ty } from '../theme/scale';
 
 // Derived from <Tabs> rather than imported from expo-router's vendored
@@ -109,7 +110,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
               {options.tabBarIcon?.({ focused, color: focused ? t.brandBright : t.ink3, size: focused ? 22 : 24 })}
               {focused ? (
                 <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}
-                  style={{ ...ty.tab, color: t.nightInk, flexShrink: 1 }}>{name}</Text>
+                  style={{ ...ty.tab, ...HERO_FIT, color: t.nightInk, flexShrink: 1 }}>{name}</Text>
               ) : null}
             </Pressable>
           );

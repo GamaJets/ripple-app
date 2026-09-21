@@ -30,7 +30,7 @@ import { exerciseSlug } from '../../src/lib/exerciseId';
 import { holdRecords, holdLabel, timedSetLabel } from '../../src/lib/timedSets';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
-import { Section, SectionHead, PageHead, Ghost, Notice, Cta, fig, KpiRow, IconPlate, Expandable } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, Ghost, Notice, Cta, fig, KpiRow, IconPlate, Expandable, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value, font, radius, elevation } from '../../src/theme/scale';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 
@@ -366,7 +366,7 @@ export default function Records() {
          {/* Shrunk to fit and never wrapped: a figure broken across two lines
              is a figure read wrong. */}
          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-           style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(est1RMIn(top.est1RM, wu))}</Text>
+           style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{fig(est1RMIn(top.est1RM, wu))}</Text>
          <Text numberOfLines={1} style={{ ...ty.head, color: t.ink2, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{`${wu} est. 1RM`}</Text>
        </View>
        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{`${top.exercise} · best set ${bestSetLabel(top, setLoad(top), setAdded(top))} on ${dstr(top.at)}`}</Text>

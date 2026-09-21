@@ -37,7 +37,7 @@ import { useNow } from '../../src/ui/today';
 // the app does — 1,248 sessions, not 1248.
 import { num } from '../../src/lib/format';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ScreenHeader, HeroCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead, TonedChip, Donut, Legend, Meter, Expandable, Scrim, type Slice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, HeroCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead, TonedChip, Donut, Legend, Meter, Expandable, Scrim, type Slice, HERO_FIT } from '../../src/ui/kit';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { sharePercent } from '../../src/lib/sharePercent';
@@ -128,7 +128,7 @@ function WindowFigure({ title, figure, unit, chip, up, chipNote, line, tail, spo
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: sp.sm }}>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', flexShrink: 1 }}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}
-              style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(figure)}</Text>
+              style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{fig(figure)}</Text>
             {unit ? <Text style={{ ...ty.head, color: t.ink3, marginStart: 6 }}>{unit}</Text> : null}
           </View>
           {chip ? <TonedChip label={chip} tone={up ? 'brand' : 'neutral'} /> : null}

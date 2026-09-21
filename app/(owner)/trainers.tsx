@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { num } from '../../src/lib/format';
-import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, Donut, Legend, TonedChip, HeroCard, HeroRing, Scrim, fig } from '../../src/ui/kit';
+import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, Donut, Legend, TonedChip, HeroCard, HeroRing, Scrim, fig, HERO_FIT } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
 import { FORWARD_ICON } from '../../src/ui/direction';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, font, grown } from '../../src/theme/scale';
@@ -434,7 +434,7 @@ export default function OwnerTrainers() {
                   across two lines is a count read wrong. */}
               <View accessible accessibilityLabel={`Sessions in 30 days, ${figure}, ${note}`}>
                 <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                  style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink }}>{figure}</Text>
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
               </View>
             </Section>

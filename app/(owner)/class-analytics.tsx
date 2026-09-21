@@ -43,7 +43,7 @@ import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Section, SectionHead, KpiRow, Ghost, Flag, fig, PageHead, Ring, Meter, Expandable } from '../../src/ui/kit';
+import { Section, SectionHead, KpiRow, Ghost, Flag, fig, PageHead, Ring, Meter, Expandable, HERO_FIT } from '../../src/ui/kit';
 import { num } from '../../src/lib/format';
 import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../src/lib/classAttendance';
@@ -876,7 +876,7 @@ export default function OwnerClassAnalytics() {
                 <SectionHead title="Trainer Payroll" />
                 <View accessible accessibilityLabel={`Trainer payroll, ${figure}, ${note}`}>
                   <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                    style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                    style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink }}>{figure}</Text>
                   <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
                 </View>
               </Section>

@@ -37,7 +37,7 @@ import { plainExact } from '../../src/lib/units';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Section, SectionHead, KpiRow, Cta, Spark, Notice, fig, PageHead, Meter, Donut, Legend, type Slice, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, KpiRow, Cta, Spark, Notice, fig, PageHead, Meter, Donut, Legend, type Slice, type Tone, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
@@ -441,7 +441,7 @@ export default function OwnerRevenue() {
               style={{ backgroundColor: t.night, borderRadius: radius.xl, padding: 20, marginTop: 14, ...elevation.hero }}>
               <Text style={{ ...ty.eyebrow, color: t.nightInk3 }}>TAKEN · 30 DAYS</Text>
               <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                style={{ ...ty.hero, ...numeric, color: t.nightInk, marginTop: 6 }}>{figure}</Text>
+                style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.nightInk, marginTop: 6 }}>{figure}</Text>
               <Text style={{ ...ty.label, color: t.nightInk2, marginTop: sp.sm }}>{note}</Text>
             </View>
           );

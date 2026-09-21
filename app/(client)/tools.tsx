@@ -50,7 +50,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Field, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Field, fig, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, font } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -139,7 +139,7 @@ function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
        {/* Shrunk to fit and never wrapped: a figure broken across two lines
            is a figure read wrong. */}
        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-         style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(oneRm || null)}</Text>
+         style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{fig(oneRm || null)}</Text>
        <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{wu}</Text>
      </View>
      <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{!read.ok ? read.reason : !repRead.ok ? repRead.reason : oneRm ? `From ${liftLabel(kg, wu)} × ${reps} reps` : 'Enter a weight and rep count.'}</Text>

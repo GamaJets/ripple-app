@@ -28,7 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Field, Ring, Meter, TonedChip, IconPlate, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, Notice, PartialRead, Field, Ring, Meter, TonedChip, IconPlate, fig, HERO_FIT } from '../../src/ui/kit';
 import { sharePercent } from '../../src/lib/sharePercent';
 import { sp, layout, radius, hairline, type as ty, value, fontScale, font } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
@@ -740,7 +740,7 @@ export default function TrainerClasses() {
           <Pressable key={String(k)} onPress={() => onPick(k)} accessibilityRole="tab" accessibilityState={{ selected: on }}
             style={{ flex: 1, minHeight: 40, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
-              style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{label}</Text>
+              style={{ ...ty.label, ...font(on ? '600' : '500'), ...HERO_FIT, color: on ? t.bg : t.ink2 }}>{label}</Text>
           </Pressable>
         );
       })}

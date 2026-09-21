@@ -17,7 +17,7 @@ import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, PartialRead, Flag, PageHead, Meter } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PartialRead, Flag, PageHead, Meter, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRow } from '../../src/ui/appFeedback';
 import { SkeletonList } from '../../src/ui/Skeleton';
@@ -136,7 +136,7 @@ export default function OwnerFeedback() {
               <View accessible accessibilityLabel={`Average rating, ${figure}${avg == null ? '' : ' out of 5'}, ${note}`}>
                 <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                   <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                    style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+                    style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{figure}</Text>
                   {avg == null ? null : <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>/ 5</Text>}
                 </View>
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>

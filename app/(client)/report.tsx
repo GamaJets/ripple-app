@@ -25,7 +25,7 @@ import { startOfWeek } from '../../src/lib/weekStart';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, PageHead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, PageHead, fig, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
@@ -630,7 +630,7 @@ export default function WeeklyReport() {
               <SectionHead title="Trained This Week" />
               <View accessible accessibilityLabel={`Trained this week, ${[figure, unit].filter(Boolean).join(' ')}, ${note}`}>
                 <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35} style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{figure}</Text>
                   {unit ? <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, flexShrink: 0 }}>{unit}</Text> : null}
                 </View>
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>

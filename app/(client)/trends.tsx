@@ -38,7 +38,7 @@ import { isTimedSet, holdLabel } from '../../src/lib/timedSets';
 import { holdSeries, heldMovements, liftedMovements, holdChangeSecs, holdLoadNote } from '../../src/lib/holdTrend';
 import { useClientData } from '../../src/ui/clientData';
 import type { WorkoutEntry } from '../../src/lib/mockData';
-import { Section, SectionHead, PageHead, KpiRow, Ghost, Spark, fig, TonedChip, Expandable } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, KpiRow, Ghost, Spark, fig, TonedChip, Expandable, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, elevation, font } from '../../src/theme/scale';
 import { startOfWeek } from '../../src/lib/weekStart';
 import { fmtAxisDay } from '../../src/lib/format';
@@ -363,7 +363,7 @@ export default function Trends() {
               {/* Shrunk to fit and never wrapped: a figure broken across two lines
                   is a figure read wrong. */}
               <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}</Text>
+                style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}</Text>
               {logKnown ? (
                 <Text numberOfLines={1} style={{ ...ty.section, ...font('600', 'display'), color: t.ink2, marginStart: 6, flexShrink: 0 }}>{wu}</Text>
               ) : null}

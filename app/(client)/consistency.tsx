@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Cta, fig, DayBars, IconPlate } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, KpiRow, Ghost, Notice, Cta, fig, DayBars, IconPlate, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, grown, type as ty, numeric, elevation } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -351,7 +351,7 @@ export default function Consistency() {
               {/* Shrunk to fit and never wrapped: a figure broken across two lines
                   is a figure read wrong. */}
               <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{known ? fig(streak) : fig(null)}</Text>
+                style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{known ? fig(streak) : fig(null)}</Text>
               {known ? (
                 <Text numberOfLines={1} style={{ ...ty.head, color: t.ink2, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{!known ? undefined : claim.bounded ? boundedStreakUnit(streak) : streak === 1 ? 'day' : 'days'}</Text>
               ) : null}

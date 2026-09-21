@@ -19,7 +19,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig, PageHead, DayBars, Ring, Meter, TonedChip, IconPlate, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig, PageHead, DayBars, Ring, Meter, TonedChip, IconPlate, type Tone, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, font, fontScale } from '../../src/theme/scale';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -503,7 +503,7 @@ export default function OwnerRota() {
               <View style={{ flexDirection: fontScale >= 1.5 ? 'column' : 'row', alignItems: fontScale >= 1.5 ? 'flex-start' : 'center', gap: sp.lg }}>
                 <View accessible accessibilityLabel={`Uncovered hours, ${figure}, ${note}`} style={{ flex: fontScale >= 1.5 ? undefined : 1, minWidth: 0 }}>
                   <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                    style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                    style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink }}>{figure}</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mark }} />
                     <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{note}</Text>

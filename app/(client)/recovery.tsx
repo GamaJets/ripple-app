@@ -37,7 +37,7 @@ import { readinessMadeOf } from '../../src/lib/readiness';
 import { connectedProviders } from '../../src/lib/wearables/sleep';
 import { reportError } from '../../src/lib/reportError';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
-import { Section, SectionHead, PageHead, KpiRow, Ring, TonedChip, Cta, Ghost, Flag, fig } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, KpiRow, Ring, TonedChip, Cta, Ghost, Flag, fig, HERO_FIT } from '../../src/ui/kit';
 import { useDeviceHrv } from '../../src/ui/deviceHrv';
 import { sp, layout, radius, hairline, font, type as ty, numeric, value } from '../../src/theme/scale';
 import { localDate } from '../../src/lib/localDate';
@@ -480,7 +480,7 @@ export default function Recovery() {
    <View accessible accessibilityLabel={['Hydration', [fig(hydration.showCount ? cups : null), hydration.showRing && goalCups != null ? `of ${goalCups} glasses` : !hydration.showCount ? 'glasses today' : cups === 1 ? 'glass today' : 'glasses today'].join(' '), hydration.text].join(', ')}>
     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-      style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(hydration.showCount ? cups : null)}</Text>
+      style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{fig(hydration.showCount ? cups : null)}</Text>
      <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>
       {hydration.showRing && goalCups != null ? `of ${goalCups} glasses`
        : !hydration.showCount ? 'glasses today'

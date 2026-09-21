@@ -85,7 +85,7 @@ import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityInd
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Ghost, Cta, Notice, Flag, PartialRead, Meter, Donut, Legend, type Slice, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Ghost, Cta, Notice, Flag, PartialRead, Meter, Donut, Legend, type Slice, type Tone, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, font } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -671,7 +671,7 @@ export default function TrainerLeads() {
                         accessibilityLabel={`${f.label}, ${n == null ? 'not counted' : num(n)}`}
                         style={{ flex: 1, minHeight: 40, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
                         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
-                          style={{ ...ty.label, ...font(on ? '600' : '500'), ...numeric, color: on ? t.bg : t.ink2 }}>
+                          style={{ ...ty.label, ...font(on ? '600' : '500'), ...numeric, ...HERO_FIT, color: on ? t.bg : t.ink2 }}>
                           {f.label} {num(n)}
                         </Text>
                       </Pressable>

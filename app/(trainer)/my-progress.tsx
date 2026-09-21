@@ -69,7 +69,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
-import { Section, SectionHead, PageHead, KpiRow, Spark, Cta, Notice, PartialRead, Flag, fig } from '../../src/ui/kit';
+import { Section, SectionHead, PageHead, KpiRow, Spark, Cta, Notice, PartialRead, Flag, fig, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value as valueType, font } from '../../src/theme/scale';
 import { useCheckIns, type CheckIn } from '../../src/ui/checkins';
 import { useMeasurements, METRICS, type MeasureEntry } from '../../src/ui/measurements';
@@ -519,7 +519,7 @@ export default function MyProgress() {
                     {/* The kit's hero size, shrunk to fit before it wraps: a
                         weight broken over two lines is a figure read wrong. */}
                     <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
-                      style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{figure}</Text>
+                      style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{figure}</Text>
                     {shownWeight != null ? (
                       <Text style={{ ...ty.head, ...numeric, color: t.ink3, marginStart: 6 }}>{wu}</Text>
                     ) : null}

@@ -116,7 +116,7 @@ import { useRouter } from 'expo-router';
 import Svg, { Rect, Text as SvgText, Line, Image as SvgImage, Defs, ClipPath } from 'react-native-svg';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Section, SectionHead, Ghost, Notice, Cta, Flag, PageHead } from '../../src/ui/kit';
+import { Section, SectionHead, Ghost, Notice, Cta, Flag, PageHead, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { useTenant } from '../../src/ui/tenant';
@@ -1272,7 +1272,7 @@ function Segmented({ options, value, onChange }: {
             accessibilityLabel={o.note ? `${o.label}. ${o.note}` : o.label}
             style={{ flex: 1, minHeight: 40, paddingVertical: sp.sm, paddingHorizontal: sp.sm, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? t.ink : 'transparent' }}>
             <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
-              style={{ ...ty.label, ...font(on ? '600' : '500'), color: on ? t.bg : t.ink2 }}>{o.label}</Text>
+              style={{ ...ty.label, ...font(on ? '600' : '500'), ...HERO_FIT, color: on ? t.bg : t.ink2 }}>{o.label}</Text>
             {o.note ? <Text style={{ ...ty.caption, color: on ? t.bg : t.ink3, marginTop: 2, opacity: on ? 0.8 : 1 }}>{o.note}</Text> : null}
           </Pressable>
         );

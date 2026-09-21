@@ -133,7 +133,7 @@ import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { liftIn, plain, readLift, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, KpiRow, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Cta, Ghost, Flag, KpiRow, fig, HERO_FIT } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
 import { sp, layout, radius, hairline, elevation, numeric, type as ty, font } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
@@ -2120,7 +2120,7 @@ export default function LogSession() {
                           line above the table says in words when it is the
                           case. Kilograms out of the history, converted HERE and
                           once, like every other load on this screen. */}
-                      <Text style={{ ...ty.caption, color: t.ink3, flex: 1.7 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                      <Text style={{ ...ty.caption, ...HERO_FIT, color: t.ink3, flex: 1.7 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                         {(() => {
                           const pv = prev[i];
                           if (!pv) return '—';
@@ -2487,7 +2487,7 @@ function SessionClock({ from, ink }: { from: number; ink: string }) {
     // The hero figure, shrinking to one line rather than wrapping: "1:15:03"
     // at a large text size is wider than the strip's text column.
     <Text accessibilityLabel={`Session clock, ${face}`} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
-      style={{ ...ty.hero, color: ink, ...numeric }}>{face}</Text>
+      style={{ ...ty.hero, ...HERO_FIT, color: ink, ...numeric }}>{face}</Text>
   );
 }
 

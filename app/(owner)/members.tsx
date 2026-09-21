@@ -20,7 +20,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvo
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Flag, PageHead, Donut, Legend, TonedChip, fig, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Flag, PageHead, Donut, Legend, TonedChip, fig, type Tone, HERO_FIT } from '../../src/ui/kit';
 // Joiners, leavers and churn, from the memberships this screen ALREADY holds.
 // The same module Growth's figures come from (through `useMemberChurn`), run
 // over `rows` rather than through the hook: the hook is a second read of
@@ -775,7 +775,7 @@ export default function OwnerMembers() {
                   wrapped: broken across two lines it is a different number. */}
               <View accessible accessibilityLabel={`Recurring revenue, monthly, ${figure}, ${note}`}>
                 <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-                  style={{ ...ty.hero, ...numeric, color: t.ink }}>{figure}</Text>
+                  style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink }}>{figure}</Text>
                 <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{note}</Text>
               </View>
               {/* The membership mix, under the money it explains: every
