@@ -749,13 +749,13 @@ export default function CoachProfile() {
 
 
         <Section>
-          <SectionHead title="Specialties" note="Tap a chip to remove" />
+          <SectionHead title="Specialties" note="Tap a Chip to Remove" />
           <ChipEditor t={t} items={p.specialties} onAdd={addSpec} onRemove={(i) => p.setSpecialties(p.specialties.filter((_, x) => x !== i))} value={newSpec} setValue={setNewSpec} placeholder="e.g. Mobility" noun="A speciality" />
         </Section>
 
 
         <Section>
-          <SectionHead title="What You Offer" note="Tap a chip to remove" />
+          <SectionHead title="What You Offer" note="Tap a Chip to Remove" />
           <ChipEditor t={t} items={p.offers} onAdd={addOffer} onRemove={(i) => p.setOffers(p.offers.filter((_, x) => x !== i))} value={newOffer} setValue={setNewOffer} placeholder="e.g. Nutrition coaching" noun="Something you offer" />
         </Section>
 

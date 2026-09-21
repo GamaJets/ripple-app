@@ -268,7 +268,7 @@ export function MuscleWorkPanel({
           not, and the day count is `board.dayCount` on the screen above rather
           than anything this board could hand back. */}
       <Section>
-        <SectionHead title="Training Summary" note={whole ? `last ${windowDays} days` : undefined} />
+        <SectionHead title="Training Summary" note={whole ? `Last ${windowDays} Days` : undefined} />
         {loading ? (
           <Text style={{ ...ty.body, color: t.ink3 }}>Reading the training&hellip;</Text>
         ) : (

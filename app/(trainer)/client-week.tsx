@@ -591,7 +591,7 @@ export default function ClientWeek() {
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their Week'} note="nothing marked" />
+                    <SectionHead title={client?.name ?? 'Their Week'} note="Nothing Marked" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       The read came back and {who} has marked no days between{' '}
                       {dayHeading(window?.fromISO ?? '')} and {dayHeading(window?.toISO ?? '')}.
@@ -658,7 +658,7 @@ export default function ClientWeek() {
                         // A count is a figure, so it is only printed when the
                         // read is known to be the whole window. Under 'partial'
                         // it would be a subtotal presented as a total.
-                        note={isWhole(status) ? `${board.ahead.length} marked` : undefined}
+                        note={isWhole(status) ? `${board.ahead.length} Marked` : undefined}
                       />
                       <Expandable title="What Ahead Covers">
                       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
@@ -682,7 +682,7 @@ export default function ClientWeek() {
                       <>
                         <Rule />
                         <Section>
-                          <SectionHead title="Already Gone" note={`last ${DAYS_BEHIND} days`} />
+                          <SectionHead title="Already Gone" note={`Last ${DAYS_BEHIND} Days`} />
                           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                             What {who} meant to do, on days that have passed. Still only intentions:
                             this screen does not read their training log, so nothing below says
@@ -712,7 +712,7 @@ export default function ClientWeek() {
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading what they logged&hellip;</Text></Section>
                 ) : (
                   <Section>
-                    <SectionHead title="Plan Against Record" note={`last ${WINDOW_DAYS} days`} />
+                    <SectionHead title="Plan Against Record" note={`Last ${WINDOW_DAYS} Days`} />
                     <Text style={{ ...ty.body, color: t.ink2 }}>{coverageLine(pva, WINDOW_DAYS, who)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{WINDOW_IS_NOT_A_WEEKDAY}</Text>
 

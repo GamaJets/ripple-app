@@ -227,7 +227,7 @@ export function OwnTrendsPanel({ log, status, weights, unit, nowMs }: {
         <Text style={{ ...ty.body, color: t.ink3 }}>Reading your log…</Text>
       ) : (<>
         <Section>
-          <SectionHead title="Weekly Volume" note={`${WEEKS} weeks`} />
+          <SectionHead title="Weekly Volume" note={`${WEEKS} Weeks`} />
           {/* The chart is drawn under 'partial' and the FIGURES are not. A
               truncated read holds the newest rows, so the recent weeks it draws
               are real — but "best week" over a prefix nominates the best of
@@ -269,7 +269,7 @@ export function OwnTrendsPanel({ log, status, weights, unit, nowMs }: {
         <Rule />
 
         <Section>
-          <SectionHead title="Lift by Lift" note={name ? `last ${CHART_DAYS} days logged` : undefined} />
+          <SectionHead title="Lift by Lift" note={name ? `Last ${CHART_DAYS} Days Logged` : undefined} />
           {names.length ? (<>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>

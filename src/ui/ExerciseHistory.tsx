@@ -597,9 +597,9 @@ export function ExerciseHistoryPanel({ log, status, windowDays, unit, voice, his
         // WINDOW is a different thing: it is complete, so it is shown, with the
         // window named beside it rather than passed off as the record.
         note={covers
-          ? `${index.length} movement${index.length === 1 ? '' : 's'}`
+          ? `${index.length} Movement${index.length === 1 ? '' : 's'}`
           : whole
-            ? `${index.length} movement${index.length === 1 ? '' : 's'}${readQualifier(false, windowDays)}`
+            ? `${index.length} Movement${index.length === 1 ? '' : 's'}${readQualifier(false, windowDays)}`
             : undefined}
       />
       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>

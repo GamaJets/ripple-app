@@ -655,7 +655,7 @@ export default function ClientGoals() {
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their Goals'} note="none set" />
+                    <SectionHead title={client?.name ?? 'Their Goals'} note="None Set" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {who} hasn&rsquo;t set a goal yet. The read came back and it was empty, so this
                       is about them rather than about the connection, which makes it worth raising.
@@ -663,7 +663,7 @@ export default function ClientGoals() {
                   </Section>
                 ) : board.state === 'reached' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their Goals'} note="all reached" />
+                    <SectionHead title={client?.name ?? 'Their Goals'} note="All Reached" />
                     <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.md }}>
                       Everything {who} set has been reached and marked done. Nothing is outstanding,
                       which is not the same as nothing being set, and is usually the moment to agree
@@ -689,7 +689,7 @@ export default function ClientGoals() {
                       const pct = Math.round(Math.max(0, Math.min(100, lead.prog.pct)));
                       return (
                         <Section>
-                          <SectionHead title={goalLabel(lead.goal)} note={`${pct}% of the way`} />
+                          <SectionHead title={goalLabel(lead.goal)} note={`${pct}% of the Way`} />
                           {/* One stop for the ear: goal, reading, how far, what
                               is left. Four Texts were four unrelated facts. */}
                           <View accessible accessibilityLabel={`${goalLabel(lead.goal)}, ${figure} ${unit}. ${pct}% of the way to the goal, ${left}.`}
@@ -726,7 +726,7 @@ export default function ClientGoals() {
                           gates its own "N marked" on exactly this, and
                           app/(trainer)/checklists.tsx its "N showing". */}
                       <SectionHead title={client?.name ?? 'Their Goals'}
-                        note={isWhole(goalStatus) ? `${board.open.length} open` : undefined} />
+                        note={isWhole(goalStatus) ? `${board.open.length} Open` : undefined} />
                       {/* Deadline pressure, said once at the top.
                        *
                        * The overdue mark was on the individual cards and nowhere
@@ -808,7 +808,7 @@ export default function ClientGoals() {
                   </Section>
                 ) : tape.state === 'none' ? (
                   <Section>
-                    <SectionHead title="Tape" note="none recorded" />
+                    <SectionHead title="Tape" note="None Recorded" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {who} hasn&rsquo;t logged a tape measurement. The read came back and it was
                       empty, so this is about them rather than about the connection, and it is the

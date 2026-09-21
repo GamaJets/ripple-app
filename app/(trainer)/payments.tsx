@@ -2867,7 +2867,7 @@ export default function TrainerPayments() {
                 `promoBlocker` refuses a one-off package by name so a coach
                 reads WHY rather than finding the option missing. */}
             <Section>
-              <SectionHead title="Discount Codes" note="Typed by your client on the payment page" />
+              <SectionHead title="Discount Codes" note="Typed by Your Client on the Payment Page" />
 
               {/* An empty list and an unreadable one are different sentences.
                   A coach who has just printed a poster must not be told they

@@ -2083,7 +2083,7 @@ export default function Scans() {
             the read was whole; under 'partial' the rows are the most recent
             part of the record and the sentence at the foot says so. */}
         <Section>
-          <SectionHead title="Scans" note={scansReading ? undefined : scansWhole ? `${num(scans.length)} scans` : 'Not all read'} />
+          <SectionHead title="Scans" note={scansReading ? undefined : scansWhole ? `${num(scans.length)} Scans` : 'Not All Read'} />
           {scans.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {scansReading ? 'Reading your scans…'
@@ -2454,22 +2454,33 @@ export default function Scans() {
                 into one wrapped sentence (a "jumbled" paragraph, the owner
                 said, 21 Sep 2026) and each row below already carries its own
                 dot for the same verdict. */}
-            {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
+            {/* The count of what improved, then BY NAME everything that did
+                not: what went the wrong way and what stood still. A count on
+                its own hid the rest (owner, 21 Sep 2026). */}
+            {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.unchanged.length > 0 || mInsights.balance.length > 0) && (
               <View style={{ marginBottom: sp.lg, gap: 6 }}>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: sp.lg, rowGap: 4 }}>
-                  {mInsights.improving.length > 0 ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
-                      <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{mInsights.improving.length} improving</Text>
-                    </View>
-                  ) : null}
-                  {mInsights.watch.length > 0 ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
-                      <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{mInsights.watch.length} to watch</Text>
-                    </View>
-                  ) : null}
+                {mInsights.improving.length > 0 ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                    <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{mInsights.improving.length} Improving</Text>
+                  </View>
+                ) : null}
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: mInsights.watch.length ? t.warn : t.ink3, marginTop: 7 }} />
+                  <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
+                    <Text style={{ ...font('500'), color: t.ink }}>{mInsights.watch.length ? `${mInsights.watch.length} Getting Worse: ` : 'Nothing Getting Worse'}</Text>
+                    {mInsights.watch.join(', ')}
+                  </Text>
                 </View>
+                {mInsights.unchanged.length > 0 ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.ink3, marginTop: 7 }} />
+                    <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>
+                      <Text style={{ ...font('500'), color: t.ink }}>{mInsights.unchanged.length} Unchanged: </Text>
+                      {mInsights.unchanged.join(', ')}
+                    </Text>
+                  </View>
+                ) : null}
                 {mInsights.balance.map((b, i) => <Text key={i} style={{ ...ty.caption, color: t.ink3 }}>{b}</Text>)}
               </View>
             )}
@@ -2477,13 +2488,15 @@ export default function Scans() {
                 subtraction the reader has to do. */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.xs }}>
               <View style={{ flex: 1 }} />
-              <Text style={{ ...ty.micro, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>Now</Text>
-              <Text style={{ ...ty.micro, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>Before</Text>
-              <Text style={{ ...ty.micro, color: t.ink3, minWidth: COL, textAlign: END_ALIGN }}>Change</Text>
+              <Text style={{ ...ty.eyebrow, color: t.ink2, minWidth: COL, textAlign: END_ALIGN }}>NOW</Text>
+              <Text style={{ ...ty.eyebrow, color: t.ink2, minWidth: COL, textAlign: END_ALIGN }}>BEFORE</Text>
+              <Text style={{ ...ty.eyebrow, color: t.ink2, minWidth: COL, textAlign: END_ALIGN }}>CHANGE</Text>
             </View>
             {mByGroup.map((grp) => (
               <View key={grp.group} style={{ marginBottom: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{grp.group}</Text>
+                {/* A heading, drawn as one: bold and a step above the rows
+                    it names, so the topic stands out from its figures. */}
+                <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink, marginTop: sp.sm, marginBottom: sp.xs }}>{grp.group}</Text>
                 {grp.items.map((it) => {
                   // ── this row, in the member's own unit ──────────────────
                   //
@@ -2540,7 +2553,7 @@ export default function Scans() {
                       )}
                     </Pressable>
                     {mxOpen === String(it.def.key) && it.series.length >= 2 ? (
-                      <View style={{ paddingVertical: sp.sm }}><Spark data={series} h={54} /></View>
+                      <View style={{ paddingVertical: sp.sm }}><Spark data={series} h={54} labels={it.dates} unit={` ${rowUnit}`} /></View>
                     ) : null}
                   </View>
                   );
@@ -2590,7 +2603,7 @@ export default function Scans() {
 
         {/* ── what the training actually worked ───────────────────────────── */}
         <Section>
-          <SectionHead title="Muscles Worked" note="last 7 days" />
+          <SectionHead title="Muscles Worked" note="Last 7 Days" />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Your Muscles. ${muscleWeek.head}. ${muscleWeek.body} Opens the body diagram, recovery map and muscle rankings.`}
@@ -2635,7 +2648,7 @@ export default function Scans() {
             the edge unannounced. Ordered by the question being asked, not by
             when each screen was built. */}
         <Section>
-          <SectionHead title="Body & Recovery" note="From you and your devices" />
+          <SectionHead title="Body & Recovery" note="From You and Your Devices" />
           <ChipGrid items={([
             ['trending', 'Composition', '/(client)/body-trends'],
             ['ruler', 'Measurements', '/(client)/measurements'],
@@ -2648,7 +2661,7 @@ export default function Scans() {
 
 
         <Section>
-          <SectionHead title="Training Progress" note="What changed in your work" />
+          <SectionHead title="Training Progress" note="What Changed in Your Work" />
           {/* ── what a member means by "progress" and could not find here ──
               src/lib/features.ts files SEVENTEEN screens under Progress &
               Insights; this list once held nine. History, Trends, Badges and

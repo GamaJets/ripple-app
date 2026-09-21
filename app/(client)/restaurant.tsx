@@ -122,7 +122,7 @@ export default function Restaurant() {
         </ScrollView>
 
         <Section>
-          <SectionHead title={cuisine || 'All Dishes'} note={`${results.length} dish${results.length === 1 ? '' : 'es'}`} />
+          <SectionHead title={cuisine || 'All Dishes'} note={`${results.length} Dish${results.length === 1 ? '' : 'es'}`} />
           {/* The standing sentence, above the rows. Marks with no caveat read
               the wrong way round: an allergic member takes an unmarked row as
               cleared, and nothing here has cleared anything. */}

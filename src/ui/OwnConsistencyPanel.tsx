@@ -158,7 +158,7 @@ export function OwnConsistencyPanel({ log, status, nowMs }: {
       <Rule />
 
       <Section>
-        <SectionHead title="Training Days" note={status === 'loading' ? 'still reading' : `${WEEKS} weeks`} />
+        <SectionHead title="Training Days" note={status === 'loading' ? 'Still Reading' : `${WEEKS} Weeks`} />
         {/* Eighty-four squares with nothing above them and nothing spoken is a
             picture only a sighted reader can use, and only roughly: a gap is
             visible and undatable. The summary frames the whole thing, the month

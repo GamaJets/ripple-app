@@ -1110,7 +1110,7 @@ export default function ClientTraining() {
                     twelve weeks would be answering a different question from
                     the one it answered yesterday without saying so. */}
                 <Section>
-                  <SectionHead title="How Far Back" note={status === 'partial' ? 'The read is at its limit' : undefined} />
+                  <SectionHead title="How Far Back" note={status === 'partial' ? 'The Read Is at Its Limit' : undefined} />
                   <View accessibilityRole="tablist"
                     style={{ flexDirection: 'row', backgroundColor: t.surface2, borderRadius: radius.pill, padding: 3 }}>
                     {RANGES.map((rg) => {
@@ -1169,13 +1169,13 @@ export default function ClientTraining() {
                      end of what one request returns, which is a different thing
                      to do about it. */
                   <Section>
-                    <SectionHead title="Their Program" note="not in this read" />
+                    <SectionHead title="Their Program" note="Not in This Read" />
                     <Notice tone={t.warn} kicker="Row Limit" title="We could not tell what they are on"
                       note={`Your clients' programs came back at the row limit and ${who} was past the end of it, so whether ${who} is on a program is unknown rather than no. Nothing below compares their training against a plan. Pull down to read again.`} />
                   </Section>
                 ) : !program ? (
                   <Section>
-                    <SectionHead title="Their Program" note="none assigned" />
+                    <SectionHead title="Their Program" note="None Assigned" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       The read came back and {who} is on no coach-assigned program, so there is nothing
                       to compare the sessions below against. Writing one in the Program Builder puts it on
@@ -1187,7 +1187,7 @@ export default function ClientTraining() {
                     <SectionHead
                       title="Program Versus Record"
                       note={pva.state === 'ready' && position.phase === 'during' && position.week
-                        ? `week ${position.week} of ${position.weeks}`
+                        ? `Week ${position.week} of ${position.weeks}`
                         : undefined}
                     />
                     <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{program.title || 'An untitled program'}</Text>
@@ -1499,7 +1499,7 @@ export default function ClientTraining() {
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={fullName || 'Their Training'} note="nothing logged" />
+                    <SectionHead title={fullName || 'Their Training'} note="Nothing Logged" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       The read came back and {who} has no logged sessions at all. That is about them
                       rather than about the connection, which makes it worth raising. A session
@@ -1519,7 +1519,7 @@ export default function ClientTraining() {
                         arrived as what there is. */}
                     <Section>
                       <SectionHead title="Days Trained"
-                        note={board.dayCount != null && board.newestDay ? `last ${dayLabel(board.newestDay)}` : undefined} />
+                        note={board.dayCount != null && board.newestDay ? `Last ${dayLabel(board.newestDay)}` : undefined} />
                       <View accessible
                         accessibilityLabel={`Days trained, ${board.dayCount == null ? 'not counted' : `${fig(board.dayCount)} ${board.dayCount === 1 ? 'day' : 'days'}`}. ${board.dayCount == null
                           ? 'Their training came back at the row limit, so how much of it there is cannot be counted from here.'
@@ -1599,7 +1599,7 @@ export default function ClientTraining() {
                         never with a target: there is no right number of sets
                         for a back and this screen does not pretend to know one. */}
                     <Section>
-                      <SectionHead title="By Muscle Group" note={cat.status === 'ready' ? `last ${muscleDays} days` : undefined} />
+                      <SectionHead title="By Muscle Group" note={cat.status === 'ready' ? `Last ${muscleDays} Days` : undefined} />
                       {/* One piece of state behind two controls. The muscle
                           panel below draws its own copy of these chips, and
                           both read and write `muscleDays`, so the group board
@@ -1731,7 +1731,7 @@ export default function ClientTraining() {
                         kilograms in March, only that March has no logged
                         sessions in it. */}
                     <Section>
-                      <SectionHead title="The Long View" note={longWhole && trainedCells.length ? `${trainedCells.length} months trained` : undefined} />
+                      <SectionHead title="The Long View" note={longWhole && trainedCells.length ? `${trainedCells.length} Months Trained` : undefined} />
                       {!longWhole ? (
                         <Flag tone={t.warn}>
                           The read came back at its row limit, so no monthly roll-up is drawn. Over a truncated
@@ -1826,7 +1826,7 @@ export default function ClientTraining() {
 
                     {board.days.length ? (
                       <Section>
-                        <SectionHead title="Sessions" note={board.dayCount == null ? undefined : `${board.dayCount} days`} />
+                        <SectionHead title="Sessions" note={board.dayCount == null ? undefined : `${board.dayCount} Days`} />
                         {board.days.map(dayBlock)}
                       </Section>
                     ) : null}

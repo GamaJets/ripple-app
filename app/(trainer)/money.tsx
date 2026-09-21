@@ -1035,7 +1035,7 @@ export default function CoachMoney() {
         </Expandable>
 
         <Section>
-          <SectionHead title="All Recorded" note="Every payment Repple has a record of" />
+          <SectionHead title="All Recorded" note="Every Payment Repple Has a Record of" />
           {drawIn(allIn, 'in')}
           {/* Where it came from, per currency: each strand's pot as a share of
               that currency's own total. Only under a stated total — `ledger()`
@@ -1070,7 +1070,7 @@ export default function CoachMoney() {
         {/* ── RECORDED, NOT COLLECTED ────────────────────────────────────── */}
 
         <Section>
-          <SectionHead title="Recorded Against Clients" note="Late cancellations you settle yourself" />
+          <SectionHead title="Recorded Against Clients" note="Late Cancellations You Settle Yourself" />
           {fees.status === 'error' ? (
             <Flag>
               Your late-cancellation fees could not be read. This is not a statement that there are none. Anything already recorded still stands against the client it was recorded against.
@@ -1152,7 +1152,7 @@ export default function CoachMoney() {
             three numbers. `PAYOUT_IS_NOT_A_SALE` is that sentence on the page,
             and this is the same discipline `NO_NET_NOTE` keeps at the top. */}
         <Section>
-          <SectionHead title="What Landed in Your Bank" note="Mirrored from Stripe as each payout happens" />
+          <SectionHead title="What Landed in Your Bank" note="Mirrored from Stripe as Each Payout Happens" />
           {payouts.status === 'partial' ? (
             <PartialRead what="payouts" shown={payouts.rows.length} onPress={load} />
           ) : null}
@@ -1256,7 +1256,7 @@ export default function CoachMoney() {
             own word rather than Stripe's — the two are different KINDS of fact
             and this screen's whole design is about not blurring those. */}
         <Section>
-          <SectionHead title="Recorded by You" note="Cash, transfers and anything taken at a gym" />
+          <SectionHead title="Recorded by You" note="Cash, Transfers and Anything Taken at a Gym" />
           {receipts.status === 'partial' ? (
             <PartialRead what="recorded payments" shown={receipts.rows.length} onPress={load} />
           ) : null}
@@ -1303,7 +1303,7 @@ export default function CoachMoney() {
         {/* ── GOING OUT ──────────────────────────────────────────────────── */}
 
         <Section>
-          <SectionHead title="Going Out" note="What you pay, and what you have told us your ads cost" />
+          <SectionHead title="Going Out" note="What You Pay, and What You Have Told Us Your Ads Cost" />
           {plan?.error ? (
             <Flag>
               Your own plan could not be read, so nothing here says what you are on. This is not a statement that you have no subscription.
@@ -1359,7 +1359,7 @@ export default function CoachMoney() {
         </Section>
 
         <Section>
-          <SectionHead title="Ad Spend" note="What you recorded, per join code" />
+          <SectionHead title="Ad Spend" note="What You Recorded, per Join Code" />
           {codes.status === 'error' ? (
             <Flag>{codes.reason ?? 'What your codes cost could not be read, so nothing here is a figure.'}</Flag>
           ) : codes.status === 'partial' ? (
@@ -1405,7 +1405,7 @@ export default function CoachMoney() {
             the rule since before this table existed and this is the feature
             that makes breaking it possible for the first time. */}
         <Section>
-          <SectionHead title="What Your Business Costs" note="What you have recorded going out" />
+          <SectionHead title="What Your Business Costs" note="What You Have Recorded Going Out" />
           {costs.status === 'error' ? (
             <Flag>{costsEmptyLine('error')}</Flag>
           ) : costs.status === 'partial' ? (
@@ -1460,7 +1460,7 @@ export default function CoachMoney() {
             gives the reason and it applies twice over here: two places to type
             the same number is how they come to disagree. */}
         <Section>
-          <SectionHead title="Which Codes Worked" note="Named codes only" />
+          <SectionHead title="Which Codes Worked" note="Named Codes Only" />
 
           {/* First, before any figure. Every number below is last touch, and a
               coach about to move a budget on them is owed that sentence before
@@ -1568,7 +1568,7 @@ export default function CoachMoney() {
             them. `VALUE_IS_NET_OF_REFUNDS` says which of the two figures is
             which, on the screen rather than only here. */}
         <Section>
-          <SectionHead title="What Each Client Has Paid" note="All time" />
+          <SectionHead title="What Each Client Has Paid" note="All Time" />
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{VALUE_IS_PAST}</Text>
 
           {/* The BOOK's empty state, not a person's. This was

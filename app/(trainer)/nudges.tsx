@@ -666,7 +666,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
 
 
         <Section>
-          <SectionHead title="Your Message" note="Edit before sending" />
+          <SectionHead title="Your Message" note="Edit Before Sending" />
           <TextInput
             value={body}
             onChangeText={setBody}
@@ -744,7 +744,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
         ) : null}
 
         <Section>
-          <SectionHead title="The Record" note="What was actually read" />
+          <SectionHead title="The Record" note="What Was Actually Read" />
           {evidence ? (
             <View>
               {evidence.lines.map((l, i) => (
@@ -765,7 +765,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
         {evidence && evidence.baselineDays.length ? (
           <>
             <Section>
-              <SectionHead title="Every Day on Record" note="In the window read" />
+              <SectionHead title="Every Day on Record" note="In the Window Read" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
                 {[...evidence.baselineDays, ...evidence.recentDays].map((d) => (
                   <View key={d.day}

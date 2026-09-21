@@ -1261,7 +1261,7 @@ export default function TrainerSessions() {
         ) : days.map((day, di) => (
           <View key={day.day}>
             <Section>
-              <SectionHead title={day.label} note={`${day.rows.length} to mark`} />
+              <SectionHead title={day.label} note={`${day.rows.length} to Mark`} />
 
               <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.md }}>
                 <Text style={{ ...ty.caption, color: t.ink3, alignSelf: 'center' }}>Whole Day:</Text>
@@ -1348,7 +1348,7 @@ export default function TrainerSessions() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="Marked Just Now" note="Tap to undo" />
+              <SectionHead title="Marked Just Now" note="Tap to Undo" />
               {justMarked.map((e, i) => (
                 <View key={e.s.id}>
                   {i > 0 ? <Rule /> : null}
@@ -1392,7 +1392,7 @@ export default function TrainerSessions() {
             <Rule />
             <Section>
               <SectionHead title="What Already Happened"
-                note={`${history.length} in ${loadedDays} days`} />
+                note={`${history.length} in ${loadedDays} Days`} />
 
               {/* The edge of the window, said plainly. A list that simply stops
                   is read as a record that stops. */}

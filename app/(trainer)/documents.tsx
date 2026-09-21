@@ -842,7 +842,7 @@ export default function CoachDocumentsScreen() {
 
             {retired.length ? (
               <Section>
-                <SectionHead title="Retired" note="Still readable to whoever accepted them" />
+                <SectionHead title="Retired" note="Still Readable to Whoever Accepted Them" />
                 {retired.map((d, i) => (
                   <View key={d.id}>
                     {i ? <Rule /> : null}

@@ -434,8 +434,8 @@ export default function TrainerAdSpend() {
             note={!settled
               ? undefined
               : anyChannelSetUp
-                ? `${num(connected.length)} of ${num(AD_CHANNELS.length)} connected`
-                : 'None of the three is set up here'}
+                ? `${num(connected.length)} of ${num(AD_CHANNELS.length)} Connected`
+                : 'None of the Three Is Set Up Here'}
           />
           {status === 'loading' ? (
             <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} accessible accessibilityRole="progressbar" accessibilityLabel="Checking which ad accounts are connected…" />
@@ -482,8 +482,8 @@ export default function TrainerAdSpend() {
             <SectionHead
               title={choices.accounts.length > 1 ? 'Which Ad Account?' : 'Confirm Your Ad Account'}
               note={choices.accounts.length > 1
-                ? `This ${channelLabel(choices.channel)} login can see more than one`
-                : `This ${channelLabel(choices.channel)} login found one, and it was not saved`} />
+                ? `This ${channelLabel(choices.channel)} Login Can See More Than One`
+                : `This ${channelLabel(choices.channel)} Login Found One, and It Was Not Saved`} />
             {choices.accounts.length === 1 ? (
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
                 Nothing is wrong with the connection. The account below simply was not stored when you

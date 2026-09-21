@@ -173,7 +173,7 @@ eq(sayLayer('biceps_femoris'), 'biceps femoris', 'a layer name is said without i
   const said = bodySpoken({ side: 'back', lit, missing: ['soleus'], graded: true, caution: null });
   ok(said.includes('2 muscles trained'), 'the count is said, not left to the picture');
   ok(said.includes('band 4 of 4'), 'and every muscle carries its band NUMBER, not just a colour');
-  ok(said.includes('Very heavy'), 'and its band name');
+  ok(said.includes('Very Heavy'), 'and its band name');
   ok(said.indexOf('pectoralis major') < said.indexOf('abdominals'),
     'said hottest first, which is the order a person would ask in');
   ok(said.includes('front of the body'), 'a muscle this side cannot draw is said too, and where it is');
@@ -192,7 +192,7 @@ eq(sayLayer('biceps_femoris'), 'biceps femoris', 'a layer name is said without i
 }
 
 eq(bodySpoken({ side: 'front', lit: litLayers({ abdominals: 0.9 }, FRONT, RAMP_DARK), missing: [], graded: true, caution: null }),
-  'Front of the body. 1 muscle trained. abdominals, band 4 of 4, Very heavy.',
+  'Front of the body. 1 muscle trained. abdominals, band 4 of 4, Very Heavy.',
   'one muscle is said in the singular');
 
 eq(bandSpoken(RAMP_DARK[1]), 'Band 2 of 4, Moderate', 'a legend chip says its number and its name');

@@ -451,14 +451,14 @@ export default function SessionCredits() {
 
         {ledger && ledger.upcoming.length > 0 ? (<>
           <Section>
-            <SectionHead title="Booked" note="What these are expected to draw" />
+            <SectionHead title="Booked" note="What These Are Expected to Draw" />
             {ledger.upcoming.map((r) => row(r))}
           </Section>
         </>) : null}
 
         {ledger && ledger.past.length > 0 ? (<>
           <Section>
-            <SectionHead title="Already Had" note="What each one actually cost you" />
+            <SectionHead title="Already Had" note="What Each One Actually Cost You" />
             {ledger.past.map((r) => row(r))}
           </Section>
         </>) : null}

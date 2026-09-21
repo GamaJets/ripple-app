@@ -1392,7 +1392,7 @@ export default function FoodLog() {
  {favs.length || remembered.recent.length || remembered.frequent.length ? (<>
  <Section>
  <SectionHead title="Log It Again"
-   note={favs.length ? `${favs.length} pinned` : undefined} />
+   note={favs.length ? `${favs.length} Pinned` : undefined} />
  {/* Said when the lists are drawn from less than the whole log. A food
      missing from a short read has not been "never eaten"; it is a food we
      could not see. */}
@@ -1462,7 +1462,7 @@ export default function FoodLog() {
      no average — so "how much do I actually eat" was a question the app
      collected the answer to and never showed anybody. */}
  <Section>
- <SectionHead title="Recent Days" note={histWhole && hist.average ? `${hist.average.overDays} day${hist.average.overDays === 1 ? '' : 's'} logged` : undefined} />
+ <SectionHead title="Recent Days" note={histWhole && hist.average ? `${hist.average.overDays} Day${hist.average.overDays === 1 ? '' : 's'} Logged` : undefined} />
  {/* A mean over a fortnight is a figure, and src/ui/loadStatus.ts is
      explicit that a figure may not be computed over a read that failed or
      stopped at its row limit. `overDays` goes with it wherever it is

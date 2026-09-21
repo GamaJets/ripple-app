@@ -583,7 +583,7 @@ export default function MyNutrition() {
 
           {/* ── macros ───────────────────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Today’s Macros" note={target ? 'against your target' : undefined} />
+            <SectionHead title="Today’s Macros" note={target ? 'Against Your Target' : undefined} />
             {macroRow('Protein', 'blue', fl.consumed.protein, target ? target.protein : null)}
             {macroRow('Carbs', 'orange', fl.consumed.carbs, target ? target.carbs : null)}
             {macroRow('Fat', 'purple', fl.consumed.fat, target ? target.fat : null)}
@@ -746,7 +746,7 @@ export default function MyNutrition() {
 
           {/* ── log a meal ───────────────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Log a Meal" note={home === 'no-record' ? 'closed' : undefined} />
+            <SectionHead title="Log a Meal" note={home === 'no-record' ? 'Closed' : undefined} />
             {home === 'no-record' ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
                 Closed until this account has somewhere to store a meal. See the note above. Nothing

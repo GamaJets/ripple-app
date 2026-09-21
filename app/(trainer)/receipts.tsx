@@ -410,7 +410,7 @@ export default function Receipts() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="By Month" note="Counted by the day you say you were paid" />
+              <SectionHead title="By Month" note="Counted by the Day You Say You Were Paid" />
               {byMonth.months.map((g) => slice(g, 'payment'))}
               {/* A day that will not read is in NO month. Swept into this one it
                   would make one month quietly too big; dropped in silence it

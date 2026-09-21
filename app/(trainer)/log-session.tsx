@@ -1707,7 +1707,7 @@ export default function LogSession() {
             </Section>
           ) : (
           <Section>
-            <SectionHead title="Client" note={picked ? undefined : 'Pick one'} />
+            <SectionHead title="Client" note={picked ? undefined : 'Pick One'} />
 
             {r.status === 'error' ? (
               <View style={{ marginBottom: sp.md }}>

@@ -426,7 +426,7 @@ export default function Measurements() {
    {/* `${entries.length} entries` over a truncated read prints the cap as a
      total. `readFailed` is 'error' only, and that is right for the LIST —
      the rows are real — but a count over them is not. */}
-        <SectionHead title="History" note={status === 'ready' && entries.length ? `${entries.length} entries` : undefined} />
+        <SectionHead title="History" note={status === 'ready' && entries.length ? `${entries.length} Entries` : undefined} />
    {/* ── the read that was cut short, said out loud ──────────────────────
        The count above has been gated on 'ready' since it was written, and
        that was the whole of what this screen said about a truncated read —

@@ -496,7 +496,7 @@ export default function TrainerLeads() {
             down still says what each half of that fraction counts. */}
         {isWhole(book.status) && book.rows.length > 0 ? (
           <Section>
-            <SectionHead title="The Funnel" note={`${num(book.rows.length)} on record`} />
+            <SectionHead title="The Funnel" note={`${num(book.rows.length)} on Record`} />
             {FUNNEL.map((f) => {
               const n = book.rows.filter((r) => r.state === f.key).length;
               return <Meter key={f.key} label={f.label} val={n} target={book.rows.length} tone={f.tone}

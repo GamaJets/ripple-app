@@ -144,7 +144,7 @@ export default function SavedMessages() {
 
         {offers.length ? (<>
           <Section>
-            <SectionHead title="Ones to Start From" note="Not yours until you add one" />
+            <SectionHead title="Ones to Start From" note="Not Yours Until You Add One" />
             {offers.map((tpl, i) => (
               <View key={tpl.title} style={{ flexDirection: 'row', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <IconPlate icon="sparkle" tone="purple" />

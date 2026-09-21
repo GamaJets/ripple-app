@@ -852,7 +852,7 @@ export default function OwnerMembers() {
               and incomplete; the note is the half that says which six. */}
           <SectionHead
             title={loaded && list.length ? `Memberships · ${num(list.length)}` : 'Memberships'}
-            note={loaded && list.length && (lens !== 'all' || q.trim()) ? `${num(shown.length)} shown` : undefined}
+            note={loaded && list.length && (lens !== 'all' || q.trim()) ? `${num(shown.length)} Shown` : undefined}
           />
 
           {/* ── the three questions, above the name box ────────────────────

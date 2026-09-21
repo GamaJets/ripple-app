@@ -166,6 +166,11 @@ const VISIBLE = new Map([
   ['FigureCard', ['title']],     // ty.section, through SectionHead
   ['ActionBlock', ['title']],    // ty.section
   ['Expandable', ['title']],     // ty.head
+  // Swept 21 Sep 2026 on the owner's word ("a global capitalization as well as
+  // a title capitalization for everything"): every heading and its side note,
+  // "last 7 days" included. A title or note that is a whole sentence (it ends
+  // in a full stop, a ? or a !) is prose and not judged; see notTitleCase.
+  ['SectionHead', ['title', 'note']],
 ]);
 
 /**
@@ -309,6 +314,7 @@ function judged(text) {
 /** Every word of `text` that breaks Title Case, or [] if it holds. */
 function notTitleCase(text) {
   const bad = [];
+  if (/[.!?…]$/.test(text.trim())) return bad; // a sentence, which is prose
   for (const { i, w } of judged(text)) {
     if (fixedCase(w)) continue;
     if (!/^[a-z]/.test(w)) continue;

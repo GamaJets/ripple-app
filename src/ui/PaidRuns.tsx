@@ -239,7 +239,7 @@ export function PaidRuns({ paid }: { paid: MySettlements }) {
 
   return (
     <Section>
-      <SectionHead title="What You Have Been Paid" note="Payroll your gym has closed for you" />
+      <SectionHead title="What You Have Been Paid" note="Payroll Your Gym Has Closed for You" />
 
       {/* The three answers that are not a list. `settledEmptyLine` picks which
           — and the one that matters is 'no_gym', which is what nearly every

@@ -286,7 +286,7 @@ export default function ThisWeek() {
         ) : null}
 
         <Section>
-          <SectionHead title="The Plan" note={trainingDays === 0 ? 'No days scheduled' : `${trainingDays} training day${trainingDays === 1 ? '' : 's'} a week`} />
+          <SectionHead title="The Plan" note={trainingDays === 0 ? 'No Days Scheduled' : `${trainingDays} Training Day${trainingDays === 1 ? '' : 's'} a Week`} />
 
           {/* ── the week at a glance ────────────────────────────────────────
               Seven bars: how many movements the log holds for each day of THIS
@@ -396,7 +396,7 @@ export default function ThisWeek() {
             is always a plan; the branch is kept in the module for a caller
             that has none. */}
         <Section>
-          <SectionHead title="Against the Plan" note={`Last ${PLAN_WINDOW_DAYS} days`} />
+          <SectionHead title="Against the Plan" note={`Last ${PLAN_WINDOW_DAYS} Days`} />
           <Text style={{ ...ty.body, color: t.ink }}>{planCheck.note}</Text>
           {allLogged ? (
             <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{allLogged}</Text>
@@ -441,7 +441,7 @@ export default function ThisWeek() {
             has been training here for two years. */}
         <Section>
           <SectionHead title="Programs You've Been On"
-            note={hist.earlierCount == null ? undefined : `${hist.earlierCount} earlier`} />
+            note={hist.earlierCount == null ? undefined : `${hist.earlierCount} Earlier`} />
           <Text style={{ ...ty.caption, color: t.ink3 }}>{historyLine(history.status, hist, 'you')}</Text>
           {hist.entries.map((e, i) => (
             <View key={e.key} style={{ marginTop: sp.md, paddingTop: i ? sp.md : 0, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>

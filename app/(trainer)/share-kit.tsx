@@ -791,7 +791,7 @@ export default function ShareKit() {
         ) : (
           <>
             <Section>
-              <SectionHead title="The Result" note="You type it" />
+              <SectionHead title="The Result" note="You Type It" />
               <TextInput value={spanText} onChangeText={setSpanText} placeholder="12 weeks in" placeholderTextColor={t.ink3} style={field} accessibilityLabel="The period, in your words" />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>The headline on the card: the period, in your words.</Text>
 
@@ -850,7 +850,7 @@ export default function ShareKit() {
                 types those because the app cannot verify them, and picks this
                 from a list the database built because it can. */}
             <Section>
-              <SectionHead title="A Photo" note="Their call" />
+              <SectionHead title="A Photo" note="Their Call" />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>{SEEING_IS_NOT_PUBLISHING}</Text>
 
               {rosterStatus === 'error' ? (
@@ -997,7 +997,7 @@ export default function ShareKit() {
         {build.ok ? (
           <>
             <Section>
-              <SectionHead title="Caption" note="Copied when you share" />
+              <SectionHead title="Caption" note="Copied When You Share" />
               <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
                 <Text selectable style={{ ...ty.body, color: t.ink }}>{build.card.caption}</Text>
               </View>

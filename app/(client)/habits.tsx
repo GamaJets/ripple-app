@@ -613,7 +613,7 @@ export default function Habits() {
               unread zero was printed as fact. One module, both screens. */}
           <SectionHead title="Water"
             note={!waterCounted ? undefined
-              : h.waterGoal != null ? `${h.water} / ${h.waterGoal} glasses`
+              : h.waterGoal != null ? `${h.water} / ${h.waterGoal} Glasses`
               : `${h.water} ${h.water === 1 ? 'glass' : 'glasses'}`} />
           {waterCounted ? (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: h.waterGoal == null ? sp.md : sp.lg }}>

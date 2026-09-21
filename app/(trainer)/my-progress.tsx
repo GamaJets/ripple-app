@@ -540,7 +540,7 @@ export default function MyProgress() {
             {/* The note counts the whole series, not the drawn window, and only
                 when the read was whole — a count over a truncated list is not
                 a count. */}
-            <SectionHead title="Your Weight Trend" note={weighWhole && weighed.length ? `${weighed.length} weigh-ins` : undefined} />
+            <SectionHead title="Your Weight Trend" note={weighWhole && weighed.length ? `${weighed.length} Weigh-ins` : undefined} />
             {trend.length >= 2 ? (
               // The filled area chart the client's own body screens draw.
               // Weight takes the accent, as it does there (fat is orange and
@@ -702,7 +702,7 @@ export default function MyProgress() {
 
           {/* ── history ──────────────────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Your History" note={isWhole(ms.status) && ms.entries.length ? `${ms.entries.length} entries` : undefined} />
+            <SectionHead title="Your History" note={isWhole(ms.status) && ms.entries.length ? `${ms.entries.length} Entries` : undefined} />
             {ms.entries.map((e: MeasureEntry, i) => (
               <View key={e.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 {/* Read through localDate: `taken_at` is a bare DATE, and
@@ -749,7 +749,7 @@ export default function MyProgress() {
 
           {/* ── body composition scans ───────────────────────────────────── */}
           <Section>
-            <SectionHead title="Body Composition" note={isWhole(cd.scansStatus) && cd.scans.length ? `${cd.scans.length} scans` : undefined} />
+            <SectionHead title="Body Composition" note={isWhole(cd.scansStatus) && cd.scans.length ? `${cd.scans.length} Scans` : undefined} />
             {/* How often, before what. A trend through three readings taken in
                 one week and a trend through three taken in three years are the
                 same list of rows and nothing like the same evidence — and the

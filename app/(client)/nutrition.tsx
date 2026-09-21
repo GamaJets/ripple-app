@@ -1913,7 +1913,7 @@ export default function Nutrition() {
             read every time and a swap is made now and then. */}
         {view === 'today' ? (
         <Section>
-              <SectionHead title="Swap or Search" note={`${num(plan.length)} meals a day`} />
+              <SectionHead title="Swap or Search" note={`${num(plan.length)} Meals a Day`} />
               {/* One slot at a time, the way the board lists meals. The slots
                   come from the plan itself, so a 4- or 5-meal day shows its
                   snacks as a segment rather than losing them. */}
@@ -2096,7 +2096,7 @@ export default function Nutrition() {
             removed to get there; the blocks moved whole. */}
         {/* ── the one card: log what you actually ate ────────────────────── */}
         <Section>
-          <SectionHead title="Log What You Ate" note={dayWhole ? `${fl.consumed.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal` : `${target.kcal.toLocaleString()} kcal target`} />
+          <SectionHead title="Log What You Ate" note={dayWhole ? `${fl.consumed.kcal.toLocaleString()} of ${target.kcal.toLocaleString()} kcal` : `${target.kcal.toLocaleString()} kcal Target`} />
           <Card>
             <View style={{ flexDirection: 'row', gap: sp.sm }}>
               <Pressable accessibilityLabel="Log a meal from a photo" accessibilityRole="button" onPress={photoLog}
@@ -2240,7 +2240,7 @@ export default function Nutrition() {
             <Section>
               <SectionHead
                 title="Snacks"
-                note={planHasSnacks ? 'On top of the plan' : `About ${Math.round(SNACK_SHARE * 100)}% of your day each`}
+                note={planHasSnacks ? 'On Top of the Plan' : `About ${Math.round(SNACK_SHARE * 100)}% of Your Day Each`}
               />
               {snacks.map((m: PlannedMeal, i: number) => {
                 // The third meal list, and the one that had neither half of the

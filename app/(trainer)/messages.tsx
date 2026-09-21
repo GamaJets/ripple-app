@@ -777,7 +777,7 @@ export default function Messages() {
                 title={waitingThreads.length || inReplyQueue.size ? 'Other Conversations' : 'Conversations'}
                 note={narrowed
                   ? `${shown.length} of ${conversations.length}`
-                  : 'Most recent first'}
+                  : 'Most Recent First'}
               />
               {otherThreads.map((c, i) => (
                 <View key={c.clientId}>
@@ -817,8 +817,8 @@ export default function Messages() {
                 // to somebody looking at fifteen on the Clients tab reads as a
                 // roster that has lost twelve people.
                 note={shownUnstarted.length === 1
-                  ? 'One client with an account you have not written to yet'
-                  : `${shownUnstarted.length} clients with an account you have not written to yet`}
+                  ? 'One Client with an Account You Have Not Written to Yet'
+                  : `${shownUnstarted.length} Clients with an Account You Have Not Written to Yet`}
               />
               {/* A coach who has typed a name is looking for that person, so the
                   matches are drawn rather than hidden behind the button — the

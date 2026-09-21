@@ -986,7 +986,7 @@ export default function Invoices() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="By Who Owes It" note="Everything one person is late on, in one note" />
+              <SectionHead title="By Who Owes It" note="Everything One Person Is Late on, in One Note" />
               {chase.withheld ? <Flag style={{ marginTop: sp.sm }}>{chase.withheld}</Flag> : null}
               {chase.groups.map((g) => (
                 <View key={g.key} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
@@ -1106,7 +1106,7 @@ export default function Invoices() {
             chasing it from a day, or say it was paid. */}
         {ageing.undated.length ? (
           <Section>
-            <SectionHead title="No Due Date on Them" note="In no figure above and on no list of what is late" />
+            <SectionHead title="No Due Date on Them" note="In No Figure Above and on No List of What Is Late" />
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{CHASE_FROM_IS_NOT_A_DUE_DATE}</Text>
             {ageing.undated.map(({ invoice, age }) => undatedRow(invoice, age.line))}
           </Section>

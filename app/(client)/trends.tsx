@@ -440,7 +440,7 @@ export default function Trends() {
 
         {/* ── per-exercise est-1RM ───────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Strength Trend" note="Estimated 1-rep max" />
+          <SectionHead title="Strength Trend" note="Estimated 1-Rep Max" />
           {exercises.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {logKnown ? 'Log a few sets and your strength trend shows up here.' : logStatus === 'loading' ? 'Reading your logged sets…' : logStatus === 'partial' ? 'More logged sets than this screen can read at once, so there is no honest trend to draw over them.' : 'We couldn’t read your logged sets, so there is no strength trend to draw.'}
@@ -578,7 +578,7 @@ export default function Trends() {
               record's clothes. */}
         {holdNames.length ? (<>
           <Section>
-            <SectionHead title="Hold Trend" note="Time held" />
+            <SectionHead title="Hold Trend" note="Time Held" />
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: G }}>
               {holdNames.map((n) => {
                 const on = n === holdName;
@@ -677,7 +677,7 @@ export default function Trends() {
         <Section>
           {/* A description of the ordering rather than a claim about the data,
               so it is true under every read state that has rows to order. */}
-          <SectionHead title="Lift by Lift" note={verdicts.length ? 'Heaviest first' : undefined} />
+          <SectionHead title="Lift by Lift" note={verdicts.length ? 'Heaviest First' : undefined} />
           {/* Four arms, and each of the two bad ones splits again on whether
               there are rows underneath it. `useWorkoutLog` does not clear `log`
               on a failed refresh, so "there is nothing to read" printed above a

@@ -169,7 +169,7 @@ export default function BuildWorkout() {
 
       <Section>
         <SectionHead title="What Do You Want To Train?"
-          note={chosen.length ? `${chosen.length} picked` : undefined} />
+          note={chosen.length ? `${chosen.length} Picked` : undefined} />
 
         {/* One row per group, the group chip first and the muscles under it
             beside it. This is the whole point of the screen: a member who
@@ -201,7 +201,7 @@ export default function BuildWorkout() {
 
       <Section>
         <SectionHead title="Equipment"
-          note="What you have to train with today" />
+          note="What You Have to Train with Today" />
         <Segmented
           options={[
             { key: 'any', label: 'Anything' },
@@ -316,7 +316,7 @@ export default function BuildWorkout() {
             <Section>
               <SectionHead
                 title={d.focus}
-                note={`${d.exercises.length === 1 ? '1 movement' : `${d.exercises.length} movements`} · ${d.exercises.reduce((n, e) => n + e.sets, 0)} sets`}
+                note={`${d.exercises.length === 1 ? '1 movement' : `${d.exercises.length} movements`} · ${d.exercises.reduce((n, e) => n + e.sets, 0)} Sets`}
               />
               {d.exercises.map((e, ei) => {
                 // The movement this row currently holds: the generated one, or

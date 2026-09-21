@@ -174,7 +174,7 @@ export function EndReasonSheet({
         </Section>
 
         <Section>
-          <SectionHead title="Anything Else" note="optional" />
+          <SectionHead title="Anything Else" note="Optional" />
           <TextInput
             value={note}
             onChangeText={setNote}
@@ -459,7 +459,7 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
     <>
       <Rule />
       <Section>
-        <SectionHead title="Why People Have Left" note={`Last ${DEPARTURE_WINDOW_DAYS} days`} />
+        <SectionHead title="Why People Have Left" note={`Last ${DEPARTURE_WINDOW_DAYS} Days`} />
         {/* The one sentence both sections used to say. Withheld entirely under
             a truncated read, along with the counts below it. */}
         {sectionNote ? <Text style={{ ...ty.label, color: t.ink2 }}>{sectionNote}</Text> : null}

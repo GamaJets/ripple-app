@@ -616,7 +616,7 @@ export default function ExerciseScreen() {
 
       {detail.instructions.length ? (
         <Section>
-          <SectionHead title="Instructions" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
+          <SectionHead title="Instructions" note={`${detail.instructions.length} Step${detail.instructions.length === 1 ? '' : 's'}`} />
           {detail.instructions.map((step, n) => (
             <View key={n} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, marginBottom: sp.md }}>
               {/* The numeral on the accent's plate, in Sora: the step number is
@@ -1291,7 +1291,7 @@ export default function ExerciseScreen() {
                 loaded day is a sentence, not a line. */}
             {isWhole(logStatus) && summary ? (
               <Section>
-                <SectionHead title="Best Set over Time" note={`Est. 1RM · ${wu}`} />
+                <SectionHead title="Best Set Over Time" note={`Est. 1RM · ${wu}`} />
                 <ChartShell status={logStatus} points={bestSeries.points}
                   emptyLine="No set of this with a load on the bar is on record yet, so there is no best set to chart."
                   onePointLine="One day with a loaded set so far. The line appears from the second.">
@@ -1313,7 +1313,7 @@ export default function ExerciseScreen() {
                 paragraph was pushing them down the page. */}
             {name ? (
               <Section>
-                <SectionHead title="Log a Set" note="Into today" />
+                <SectionHead title="Log a Set" note="Into Today" />
                 <LogSetRow t={t} unit={wu} onLog={(set) => { void logOne(set); }} />
                 {clipOffer}
                 {unsentLine}

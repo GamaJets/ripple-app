@@ -466,7 +466,7 @@ export default function Compare() {
 
             {/* ── the strip you pick from ──────────────────────────────── */}
             <Section>
-              <SectionHead title="Your Photos" note={`${photos.length} saved`} />
+              <SectionHead title="Your Photos" note={`${photos.length} Saved`} />
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
                 Oldest first. Tap two to compare; tap a selected one again to drop it. To send a photo to your coach, or delete one, press and hold it on the Progress tab.
               </Text>

@@ -473,7 +473,7 @@ export default function Membership() {
             term as a meter. When there is no membership to state, the figure
             is the dash and `detail` is the reason, never a blank card. */}
         <FigureCard title="Your Membership"
-          note={mStatus === 'ready' && mships.length > 1 ? `${mships.length} on record` : undefined}
+          note={mStatus === 'ready' && mships.length > 1 ? `${mships.length} on Record` : undefined}
           figure={primary && standing && planState ? standingLabel(standing) : null}
           tone={standing ? (isCurrent(standing) ? t.brand : t.warn) : undefined}
           comparison={!primary || !standing || !planState ? undefined

@@ -194,8 +194,8 @@ const GENERATED_NOTE = /latest InBody scan/i;
    wants to grow into. It is deliberately not built yet: "no equipment" is the
    thing that was asked for and the thing that has to work end to end first. */
 const KIT_OPTIONS: readonly Segment<'any' | 'none'>[] = [
-  { key: 'any', label: 'Any equipment' },
-  { key: 'none', label: 'No equipment', a11yLabel: 'No equipment available' },
+  { key: 'any', label: 'Any Equipment' },
+  { key: 'none', label: 'No Equipment', a11yLabel: 'No equipment available' },
 ];
 
 let KEY = 1;
@@ -2779,7 +2779,7 @@ export default function Builder() {
             look complete. */}
         <Section>
           <SectionHead title="Weekly Volume"
-            note={totalExercises ? `${num(totalExercises)} exercise${s(totalExercises)}` : undefined} />
+            note={totalExercises ? `${num(totalExercises)} Exercise${s(totalExercises)}` : undefined} />
           {weekVolume.groups.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3 }}>
               {totalExercises ? 'No sets on a named muscle group yet' : 'Add exercises to see sets per muscle group'}
@@ -2892,7 +2892,7 @@ export default function Builder() {
           {/* The roster count is a count, so it waits for a whole read. Under
               'partial' `roster.length` is the size of the page that came back,
               not the size of the book. */}
-          <SectionHead title="Building For" note={rosterStatus === 'ready' && roster.length ? `${num(roster.length)} in roster` : undefined} />
+          <SectionHead title="Building For" note={rosterStatus === 'ready' && roster.length ? `${num(roster.length)} in Roster` : undefined} />
           {/* Two different questions, and they used to be one control. This one
               is whose current program and disclosures the builder shows; who
               it gets SENT to is the tick-list further down, and it can be
@@ -3065,7 +3065,7 @@ export default function Builder() {
 
 
         <Section>
-          <SectionHead title="Templates" note={tplStatus === 'ready' && savedCount ? `${num(savedCount)} saved` : undefined} />
+          <SectionHead title="Templates" note={tplStatus === 'ready' && savedCount ? `${num(savedCount)} Saved` : undefined} />
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
             Start from one you have already built. To keep this week for reuse, Save as Template is beside Assign at the foot of the screen. It goes to your library and reaches nobody.
           </Text>
@@ -3427,7 +3427,7 @@ export default function Builder() {
         {editorOpen ? (<>
         <Section>
           <SectionHead title={blockWeeks.length > 1 ? weekLabel(blockWeeks[weekIdx], weekIdx + 1) : 'Training Days'}
-            note={days.length ? `${days.length} day${s(days.length)} · ${num(totalExercises)} exercise${s(totalExercises)}` : undefined} />
+            note={days.length ? `${days.length} Day${s(days.length)} · ${num(totalExercises)} Exercise${s(totalExercises)}` : undefined} />
 
           {days.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
@@ -4667,7 +4667,7 @@ export default function Builder() {
             page whatever is folded above it. */}
         <Section>
           <SectionHead title="Program Checks"
-            note={blockExercises && review.findings.length ? `${num(review.findings.length)} to read` : undefined} />
+            note={blockExercises && review.findings.length ? `${num(review.findings.length)} to Read` : undefined} />
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: coverage ? sp.xs : sp.lg }}>{checksLine()}</Text>
           {/* Only on a block, and only because the sentence above used to be
               true of week one and read as true of twelve. */}

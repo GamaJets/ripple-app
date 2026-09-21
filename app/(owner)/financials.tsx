@@ -1113,7 +1113,7 @@ export default function Financials() {
         {!hydrated ? null : editing ? (
           /* ── entry form ───────────────────────────────────────────────── */
           <Section>
-            <SectionHead title="Your Monthly Figures" note="This phone only" />
+            <SectionHead title="Your Monthly Figures" note="This Phone Only" />
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
               Leave a field blank if you don't track it. {storageNote()}
             </Text>
@@ -1299,7 +1299,7 @@ export default function Financials() {
                    review has run — so the ring is never handed a null here;
                    every state in which it has not run is a branch above. */
                 <Section>
-                  <SectionHead title="Health Score" note="From your figures" />
+                  <SectionHead title="Health Score" note="From Your Figures" />
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
                     <Ring value={pctOf100 / 100} figure={num(r.score)} sub="of 100" tone={tone}
                       spoken={`Health score, ${num(r.score)} out of 100, ${note}`} />
@@ -1337,15 +1337,15 @@ export default function Financials() {
                 line instead of drawing two moneys as one. See useMrrHistory. */}
             <Section>
               <SectionHead title="Recurring Revenue Trend"
-                note={!mrrHistWhole ? 'your months could not be read'
-                  : cur == null ? 'set a currency to record it'
+                note={!mrrHistWhole ? 'Your Months Could Not Be Read'
+                  : cur == null ? 'Set a Currency to Record It'
                   /* `money`, not `num`: this delta is CURRENCY, and the gym's
                      own. The Sessions Trend beside it was shipped printing a
                      count with a dollar sign in front of it for exactly the
                      want of this distinction. */
-                  : mrrHist.delta !== 0 ? `${deltaSign(mrrHist.delta, 0)}${money(Math.abs(mrrHist.delta))} vs last mo`
-                  : mrrHist.months >= 2 ? 'level with last month'
-                  : 'Tracking started'} />
+                  : mrrHist.delta !== 0 ? `${deltaSign(mrrHist.delta, 0)}${money(Math.abs(mrrHist.delta))} vs Last Mo`
+                  : mrrHist.months >= 2 ? 'Level with Last Month'
+                  : 'Tracking Started'} />
               {!mrrHistWhole ? (
                 /* Not "no history yet" — that is a claim about this gym, and
                    under a failed read the only months in hand are whatever
@@ -1378,7 +1378,7 @@ export default function Financials() {
             <Rule />
 
             <Section>
-              <SectionHead title="This Month" note="From your figures" />
+              <SectionHead title="This Month" note="From Your Figures" />
               {/* Money in beside money out, on one scale, so the gap between
                   the two bars IS the margin. Both are what the owner typed, in
                   the gym's one currency; neither is the register's or the cost

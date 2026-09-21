@@ -666,7 +666,7 @@ export default function StandingAppointments() {
         {/* ── your arrangements ──────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Your Weekly Slots"
-            note={seriesStatus === 'error' ? 'Not read' : seriesStatus === 'partial' ? 'Part of the list' : undefined} />
+            note={seriesStatus === 'error' ? 'Not Read' : seriesStatus === 'partial' ? 'Part of the List' : undefined} />
 
           {/* An empty list under 'error' means the arrangements could not be
               READ. Told "you have none", a member goes and books the slot they

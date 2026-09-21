@@ -212,7 +212,7 @@ export function OwnRecordsPanel({ log, status, weights, weightsKnown, unit }: {
       ) : (<>
         {prs.length ? (
           <Section>
-            <SectionHead title="Best Estimated Max" note={isWhole(status) ? undefined : 'not all read'} />
+            <SectionHead title="Best Estimated Max" note={isWhole(status) ? undefined : 'Not All Read'} />
             {prs.map((pr, i) => row(`${pr.exercise}-${i}`, {
               title: movement(pr.exercise),
               line: bestSetLabel(pr, setLoad(pr), setAdded(pr)),

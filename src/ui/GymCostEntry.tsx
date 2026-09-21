@@ -144,7 +144,7 @@ export function GymCostEntry({ costs, currency, closesUnread }: {
   return (
     <Section>
       <SectionHead title="Money Out"
-        note={isWhole(status) && costs.rows.length ? `${costs.rows.length} this month` : undefined} />
+        note={isWhole(status) && costs.rows.length ? `${costs.rows.length} This Month` : undefined} />
       <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
         What the gym paid for, written down where you paid it.
         {costs.monthLabel ? ` The lines below are ${costs.monthLabel}.` : ''}

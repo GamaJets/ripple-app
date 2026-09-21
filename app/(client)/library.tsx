@@ -609,7 +609,7 @@ export default function Library() {
          reader resolves that by believing the list, and concludes the sentence
          is broken rather than that it is about something else. */}
      <SectionHead title={group === 'All' ? 'Clips from Your Coach' : `${group} Clips`}
-      note={status === 'ready' && list.length ? `${list.length} clip${list.length === 1 ? '' : 's'}` : undefined} />
+      note={status === 'ready' && list.length ? `${list.length} Clip${list.length === 1 ? '' : 's'}` : undefined} />
 
      {/* The read failed, so nothing below this line is a statement about what
          the coach has uploaded. Anything the phone already had is still shown
@@ -915,7 +915,7 @@ export default function Library() {
      {/* ── log it, from here ────────────────────────────────────────────── */}
      <Rule />
      <View>
-      <SectionHead title="Log This Exercise" note={banked.length ? `${banked.length} set${banked.length === 1 ? '' : 's'} ready` : undefined} />
+      <SectionHead title="Log This Exercise" note={banked.length ? `${banked.length} Set${banked.length === 1 ? '' : 's'} Ready` : undefined} />
       {banked.length ? (
        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: sp.md, alignItems: 'center' }}>
         {banked.map((s, i) => (

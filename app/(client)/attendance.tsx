@@ -138,7 +138,7 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
       // the row that holds it.
       return { label: 'You cancelled this inside your gym’s notice period.', tone: 'quiet' };
     case 'upcoming':
-      return { label: 'Booked · still to come', tone: 'ahead' };
+      return { label: 'Booked · Still to Come', tone: 'ahead' };
     case 'waitlisted':
       return { label: 'You were on the waitlist', tone: 'quiet' };
     case 'unknown':

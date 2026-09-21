@@ -1011,7 +1011,7 @@ export default function OwnerClassAnalytics() {
 
           {/* ── where the check-ins are ──────────────────────────────────── */}
           <Section>
-            <SectionHead title="Attendance by Branch" note={`${totals.attended} of ${totals.booked} booked`} />
+            <SectionHead title="Attendance by Branch" note={`${totals.attended} of ${totals.booked} Booked`} />
             {byBranch.map(([b, v]) => (
               <Meter key={b} label={b} tone="blue" val={v.attended} target={maxBranch} note={`${num(v.attended)} of ${num(v.booked)} came`} />
             ))}
@@ -1043,7 +1043,7 @@ export default function OwnerClassAnalytics() {
           <Section>
             <SectionHead
               title="By Time of Day"
-              note={slots.slots.length ? `${slots.slots.length} slot${slots.slots.length === 1 ? '' : 's'}` : undefined}
+              note={slots.slots.length ? `${slots.slots.length} Slot${slots.slots.length === 1 ? '' : 's'}` : undefined}
             />
             {/* Said before the bars, because it governs what they are made of.
                 Three sentences for three silences — a gym that has not set a
@@ -1118,7 +1118,7 @@ export default function OwnerClassAnalytics() {
 
           {/* ── the log the numbers came from ────────────────────────────── */}
           <Section>
-            <SectionHead title="Classes" note={`${list.length} in range`} />
+            <SectionHead title="Classes" note={`${list.length} in Range`} />
             {list.map((r, i) => {
               const on = already.has(r.classId);
               const cents = worth(r);

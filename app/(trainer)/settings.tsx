@@ -1210,7 +1210,7 @@ export default function TrainerSettings() {
 
 
         <Section>
-          <SectionHead title="Account &amp; Sign-in" />
+          <SectionHead title="Account &Amp; Sign-in" />
           {/* The other half of src/lib/accountSecurity.ts. It was written,
               tested and wired into the CLIENT app only, so a coach who wanted
               to change their password had to sign out and trigger a reset email

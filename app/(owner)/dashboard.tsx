@@ -676,7 +676,7 @@ export default function OwnerOverview() {
         {!trainersUnknown && roll.atRiskCount > 0 ? (
           <Section>
             <SectionHead title="Needs a Look"
-              note={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} · ${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'}`} />
+              note={`${roll.atRiskCount} Trainer${roll.atRiskCount === 1 ? '' : 's'} · ${roll.atRiskClients} Client${roll.atRiskClients === 1 ? '' : 's'}`} />
             {[...ranked.filter((r) => r.h.risk === 'high'), ...ranked.filter((r) => r.h.risk === 'watch'), ...ranked.filter((r) => r.h.risk !== 'ok' && r.h.risk !== 'high' && r.h.risk !== 'watch')]
               .map(({ tr, h }, i) => (
                 <AttentionRow key={tr.id} divider={i > 0}
@@ -836,10 +836,10 @@ export default function OwnerOverview() {
               be drawn as one line. It was printed with a dollar sign in front
               of it, so a month up twelve sessions read "+$12 vs last mo". */}
           <SectionHead title="Sessions Trend"
-            note={histStatus === 'loading' ? 'reading your months'
-              : !histWhole ? 'your months could not be read'
-              : delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo`
-              : 'Tracking started'}
+            note={histStatus === 'loading' ? 'Reading Your Months'
+              : !histWhole ? 'Your Months Could Not Be Read'
+              : delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} Session${Math.abs(delta) === 1 ? '' : 's'} vs Last Mo`
+              : 'Tracking Started'}
             onPress={() => router.push('/(owner)/revenue')} />
           {/* The kit's ChartShell owns the ladder now: a read still in flight
               says so instead of borrowing the failed read's sentence, which is

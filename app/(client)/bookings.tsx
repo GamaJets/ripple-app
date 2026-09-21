@@ -774,7 +774,7 @@ export default function Bookings() {
               heading is where the member reads it. The queued rows stay ON the
               list — they are real and they are theirs — they are simply not
               what the word "booked" counts. */}
-          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.filter((it) => !it.waitlist && !it.cancelled).length} booked` : undefined} />
+          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.filter((it) => !it.waitlist && !it.cancelled).length} Booked` : undefined} />
           {/* Above the rows, not below them: the rows are what makes the list
               look finished, and the reader has to be told before they scroll
               past the one booking that did come back. */}
@@ -955,7 +955,7 @@ export default function Bookings() {
         {waitStatus === 'error' || myQueue.length > 0 ? (
           <>
             <Section>
-              <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not read' : waitStatus === 'ready' && myQueue.length > 0 ? `${myQueue.length} slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
+              <SectionHead title="Waiting For" note={waitStatus === 'error' ? 'Not Read' : waitStatus === 'ready' && myQueue.length > 0 ? `${myQueue.length} Slot${myQueue.length === 1 ? '' : 's'}` : undefined} />
               {waitStatus === 'error' ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>
                   We couldn’t read your waitlists. This is not a statement that you are on none. Any place you hold still stands, and a slot that frees can still be booked for you.

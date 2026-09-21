@@ -138,6 +138,15 @@ ok(read.watch.length === 0, 'with nothing to watch when every metric moved the w
 // the same character every other movement in the app is printed with.
 ok(read.improving.every((l) => !l.includes('-')), 'a fall is signed with a real minus, not a hyphen');
 
+// What did not move is named, not left out of a count: the owner's two scans
+// read visceral fat 5 and minerals 4.24 kg both times (21 Sep 2026).
+const level = compositionInsights([
+  scan('2026-08-25', { visceralFat: 5, mineralsKg: 4.24, proteinKg: 12.1 }),
+  scan('2026-09-09', { visceralFat: 5, mineralsKg: 4.24, proteinKg: 12.4 }),
+]);
+eq(level.unchanged.join(','), 'Visceral Fat,Minerals', 'the metrics that stood still are listed by name');
+ok(level.improving.length === 1 && level.watch.length === 0, 'and are neither improving nor to watch');
+
 const wrongWay = compositionInsights([
   scan('2026-06-01', { visceralFat: 8, inbodyScore: 78 }),
   scan('2026-08-01', { visceralFat: 11, inbodyScore: 74 }),

@@ -2398,7 +2398,7 @@ export default function Train() {
             drawn empty. */}
         {weekFocus.length ? (
           <Section>
-            <SectionHead title="Muscle Focus This Week" note="Planned sets" onPress={() => router.push('/(client)/muscles')} />
+            <SectionHead title="Muscle Focus This Week" note="Planned Sets" onPress={() => router.push('/(client)/muscles')} />
             {weekFocus.map(([g, n]) => (
               <Meter key={g} label={g} val={n} target={weekFocus[0][1]} tone={groupTone(g)} note={n === 1 ? '1 set' : `${n} sets`} />
             ))}
@@ -4513,7 +4513,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
 
           {zoneSecondsTotal(zoneSecs) > 0 ? (<>
             <Section>
-              <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} splat`} />
+              <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} Splat`} />
               <ZoneBoard seconds={zoneSecs} showSplat={false} elapsed={elapsed} />
             </Section>
             <Rule />
@@ -5965,7 +5965,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           <Rule />
           {zoneSecondsTotal(zoneSecs) > 0 ? (<>
             <Section>
-              <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} splat`} />
+              <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} Splat`} />
               <ZoneBoard seconds={zoneSecs} showSplat={false} />
             </Section>
             <Rule />

@@ -1794,7 +1794,7 @@ export default function Calendar() {
             than making it. Days already gone are not here: they are history,
             and history belongs to the log. */}
         <Section>
-          <SectionHead title="Planned Ahead" note={planStatus === 'error' ? 'Not read' : planStatus === 'partial' ? 'Part of the list' : undefined} />
+          <SectionHead title="Planned Ahead" note={planStatus === 'error' ? 'Not Read' : planStatus === 'partial' ? 'Part of the List' : undefined} />
           {planStatus === 'error' ? (
             // No count, no list, no reassurance. Under a failed read the honest
             // statement is that we do not know. That used to be said with a
@@ -1860,7 +1860,7 @@ export default function Calendar() {
         {feeStatus === 'error' || myFees.length > 0 ? (
           <>
             <Section>
-              <SectionHead title="Charges" note={feeStatus === 'error' ? 'Not read' : feeStatus === 'partial' ? 'Part of the list' : undefined} />
+              <SectionHead title="Charges" note={feeStatus === 'error' ? 'Not Read' : feeStatus === 'partial' ? 'Part of the List' : undefined} />
               {feeStatus === 'error' ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>{chargesLine('error')}</Text>
               ) : (<>

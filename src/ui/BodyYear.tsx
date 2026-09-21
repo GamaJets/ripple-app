@@ -132,7 +132,7 @@ export function BodyYear({ scans, status, unit, goal, now }: {
       {/* The count is of MONTHS WITH A READING, not of the window — a member
           who measured twice in a year has two, and saying "12 months" over that
           would describe the frame rather than the history. */}
-      <SectionHead title="Your Year" note={`${cells.length} month${cells.length === 1 ? '' : 's'}`} />
+      <SectionHead title="Your Year" note={`${cells.length} Month${cells.length === 1 ? '' : 's'}`} />
       <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{note}</Text>
 
       {/* A history two weeks old is not a year, and a year-shaped frame drawn

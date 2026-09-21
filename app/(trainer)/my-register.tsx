@@ -352,7 +352,7 @@ export default function MyRegister() {
           return (
           <>
             <Section>
-              <SectionHead title={heading} note={waiting != null ? `${num(waiting)} booked` : undefined} />
+              <SectionHead title={heading} note={waiting != null ? `${num(waiting)} Booked` : undefined} />
               <Text style={{ ...ty.label, color: t.ink3 }}>{gapsNote(gaps)}</Text>
               {/* Said out loud because a class can honestly appear twice on this
                   screen. This list is the window the chips above choose; the

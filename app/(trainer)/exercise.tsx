@@ -369,7 +369,7 @@ export default function TrainerExercise() {
             {detail.instructions.length ? (
               <>
                 <Section>
-                  <SectionHead title="Instructions" note={`${detail.instructions.length} steps`} />
+                  <SectionHead title="Instructions" note={`${detail.instructions.length} Steps`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
                       {/* The mockups' numbered plate: a Sora numeral on the

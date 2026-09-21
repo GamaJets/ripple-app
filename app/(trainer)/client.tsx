@@ -2670,7 +2670,7 @@ export default function ClientScreen() {
             and for most self-employed coaches cash is the bigger half. The
             arithmetic is `clientValue`'s and this screen does not repeat it. */}
         <Section>
-          <SectionHead title="What They Have Paid You" note="All time" />
+          <SectionHead title="What They Have Paid You" note="All Time" />
           {unasked ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>{unasked}</Text>
           ) : !value || valueRead === 'loading' ? (

@@ -147,7 +147,7 @@ export function meGroupFeatures(key: MeGroupKey, list: Feature[] = CLIENT_FEATUR
  * told, replace this array and the heading together.
  */
 export const ME_QUICK: string[] = ['/(client)/my-coach', '/(client)/membership', '/(client)/settings'];
-export const ME_QUICK_TITLE = 'Most people start here';
+export const ME_QUICK_TITLE = 'Most People Start Here';
 
 /**
  * Screens in app/(client)/ that are deliberately absent from CLIENT_FEATURES,

@@ -430,7 +430,7 @@ export default function TrainerDevices() {
         <Section>
           {/* "Connected Apps", the board's name for this list (client page
               17), over the same catalogue. */}
-          <SectionHead title="Connected Apps" note={connected.length ? `${connected.length} connected` : undefined} />
+          <SectionHead title="Connected Apps" note={connected.length ? `${connected.length} Connected` : undefined} />
           {/* Every row in the catalogue, including the ones that cannot be
               connected in this build. Removing them would be the tidier list
               and the worse screen — see the header of

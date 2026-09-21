@@ -288,7 +288,7 @@ export default function Promotions() {
           const share = countable && live != null && promos.length > 0 ? live / promos.length : null;
           return (
             <Section>
-              <SectionHead title="Live Codes" note={countable && promos.length ? `of ${promos.length}` : undefined} />
+              <SectionHead title="Live Codes" note={countable && promos.length ? `Of ${promos.length}` : undefined} />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
                 <Ring size={112} value={share} figure={live == null ? null : figure} sub={unit} tone="brand"
                   spoken={`Live codes, ${figure === '—' ? 'no figure' : `${figure} ${unit}`}, ${note}`} />
@@ -370,7 +370,7 @@ export default function Promotions() {
               switched-off ones belong in this list — a promotion the gym ran
               and ended is a thing that happened — but the heading may not call
               them active, and each row says which it is. */}
-          <SectionHead title="Your Codes" note={countable && promos.length ? `${live} live of ${promos.length}` : undefined} />
+          <SectionHead title="Your Codes" note={countable && promos.length ? `${live} Live of ${promos.length}` : undefined} />
           {status === 'error' ? (
             // An empty list under 'error' is unknown, not "no promotions" —
             // and offering to create the first code to somebody who may

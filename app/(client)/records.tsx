@@ -382,7 +382,7 @@ export default function Records() {
    <Section>
     {/* The count goes on a truncated read for the same reason the totals go
         on Consistency: it is the size of what came back, not of the board. */}
-    <SectionHead title="All Records" note={logStatus === 'partial' ? undefined : `${prs.length} lift${prs.length === 1 ? '' : 's'}`} />
+    <SectionHead title="All Records" note={logStatus === 'partial' ? undefined : `${prs.length} Lift${prs.length === 1 ? '' : 's'}`} />
     {prs.map((pr, i) => (
      <View key={pr.exercise} accessible accessibilityRole="text"
       accessibilityLabel={prSpoken(pr, i + 1)}
@@ -430,7 +430,7 @@ export default function Records() {
        nothing the log does not already hold. */}
    {repsOnly.length ? (<>
     <Section>
-     <SectionHead title="Bodyweight Bests" note={logStatus === 'partial' ? undefined : `${repsOnly.length} movement${repsOnly.length === 1 ? '' : 's'}`} />
+     <SectionHead title="Bodyweight Bests" note={logStatus === 'partial' ? undefined : `${repsOnly.length} Movement${repsOnly.length === 1 ? '' : 's'}`} />
      {repsOnly.map((r, i) => (
       <View key={r.exercise} accessible accessibilityRole="text"
        accessibilityLabel={repSpoken(r)}
@@ -467,7 +467,7 @@ export default function Records() {
        achievement as a bare 60. */}
    {holds.length ? (<>
     <Section>
-     <SectionHead title="Longest Holds" note={logStatus === 'partial' ? undefined : `${holds.length} movement${holds.length === 1 ? '' : 's'}`} />
+     <SectionHead title="Longest Holds" note={logStatus === 'partial' ? undefined : `${holds.length} Movement${holds.length === 1 ? '' : 's'}`} />
      {holds.map((h, i) => (
       <View key={h.exercise} accessible accessibilityRole="text"
        accessibilityLabel={holdSpoken(h)}

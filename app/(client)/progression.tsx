@@ -154,7 +154,7 @@ export default function Progression() {
             ) : null}
           </Section>
           <Section>
-            <SectionHead title="Aim for These Next Time" note={`${tips.length} lift${tips.length === 1 ? '' : 's'}`} />
+            <SectionHead title="Aim for These Next Time" note={`${tips.length} Lift${tips.length === 1 ? '' : 's'}`} />
             {tips.map((tip, i) => {
               const m = META[tip.action];
               const bump = tip.nextWeight - tip.lastWeight;

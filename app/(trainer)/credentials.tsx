@@ -838,7 +838,7 @@ function AskSheet({ row, onClose, onSent }: {
         </Section>
 
         <Section>
-          <SectionHead title="Your Message" note="edit before sending" />
+          <SectionHead title="Your Message" note="Edit Before Sending" />
           <TextInput
             value={body}
             onChangeText={setBody}

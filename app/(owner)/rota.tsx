@@ -586,7 +586,7 @@ export default function OwnerRota() {
             the week adds up to, or what share of the till the floor eats —
             which is the figure an owner actually rosters against. */}
         <Section>
-          <SectionHead title="What the Week Costs" note="Live shifts only" />
+          <SectionHead title="What the Week Costs" note="Live Shifts Only" />
           <KpiRow items={[
             {
               label: 'Wage Bill',
@@ -706,7 +706,7 @@ export default function OwnerRota() {
           <SectionHead
             title="The Week"
             note={loaded && sum!.shifts > 0
-              ? `${sum!.shifts} shift${sum!.shifts === 1 ? '' : 's'}${sum!.cancelled ? ` · ${sum!.cancelled} pulled` : ''}`
+              ? `${sum!.shifts} Shift${sum!.shifts === 1 ? '' : 's'}${sum!.cancelled ? ` · ${sum!.cancelled} pulled` : ''}`
               : undefined}
           />
           {failed ? (

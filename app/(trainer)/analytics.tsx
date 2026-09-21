@@ -1363,7 +1363,7 @@ export default function TrainerAnalytics() {
         {/* ── roster health ──────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Roster Health"
-            note={!rosterWhole ? undefined : avgAdh == null ? 'No check-ins yet' : `${avgAdh}% avg adherence`} />
+            note={!rosterWhole ? undefined : avgAdh == null ? 'No Check-ins Yet' : `${avgAdh}% Avg Adherence`} />
           {/* The ring is withheld rather than drawn from what loaded. A ring
               always closes, so a split computed over a short roster is
               rendered as the whole book at whatever proportions the fragment
@@ -1756,14 +1756,14 @@ export default function TrainerAnalytics() {
               one figure whose currency does not change what it means, so there
               is nothing to withhold and nothing to guess. */}
           <SectionHead title="Revenue Trend"
-            note={revenue == null ? 'This month not recorded'
-              : revHist.series[revHist.series.length - 2] == null ? 'Tracking started'
-              : revHist.delta === 0 ? 'Level with last mo'
+            note={revenue == null ? 'This Month Not Recorded'
+              : revHist.series[revHist.series.length - 2] == null ? 'Tracking Started'
+              : revHist.delta === 0 ? 'Level with Last Mo'
               : priced(Math.abs(revHist.delta)) == null
-                ? (curGap === 'gym-unset' || curGap === 'own-unset' ? 'No currency set'
-                  : curGap === 'reading' ? 'Reading your currency'
-                  : 'Currency not read')
-              : `${deltaSign(revHist.delta, 0)}${priced(Math.abs(revHist.delta))} vs last mo`}
+                ? (curGap === 'gym-unset' || curGap === 'own-unset' ? 'No Currency Set'
+                  : curGap === 'reading' ? 'Reading Your Currency'
+                  : 'Currency Not Read')
+              : `${deltaSign(revHist.delta, 0)}${priced(Math.abs(revHist.delta))} vs Last Mo`}
             onPress={() => router.push('/(trainer)/payments')} />
           {/* This drew the wrong months, not merely undated ones. The
               `.filter()` threw away exactly the nulls monthlyHistory.ts exists

@@ -210,7 +210,7 @@ export default function Leaderboard() {
               still worth showing — the people on it are real — but how many
               were ranked is a figure over an unknown fraction. */}
           <SectionHead title="Ranking"
-            note={isWhole(status) && scored.length ? `${scored.length} client${scored.length === 1 ? '' : 's'}` : undefined} />
+            note={isWhole(status) && scored.length ? `${scored.length} Client${scored.length === 1 ? '' : 's'}` : undefined} />
           {/* What the order is, said before anybody reads it as a score. There
               is no composite behind this board and nothing on it was measured
               by the app: it is what each client last said about themselves, and

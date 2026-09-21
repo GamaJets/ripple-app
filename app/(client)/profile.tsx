@@ -704,7 +704,7 @@ export default function Profile() {
         </View>
 
         {/* ── three shortcuts, and an honest heading over them ─────────────
-            ME_QUICK_TITLE is "Most people start here", not "You open these
+            ME_QUICK_TITLE is "Most People Start Here", not "You open these
             most". Nothing records which screens THIS member opens, so the
             second sentence would be a claim about them that the app has no
             basis for. See ME_QUICK in src/lib/features.ts. */}

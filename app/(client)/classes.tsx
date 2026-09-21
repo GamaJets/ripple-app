@@ -433,8 +433,8 @@ export default function Classes() {
                   than a count of classes anybody can attend. */}
               <SectionHead title={g.label}
                 note={classStatus === 'ready'
-                  ? `${classesThatRan(g.items).length} class${classesThatRan(g.items).length === 1 ? '' : 'es'}`
-                  : classStatus === 'partial' ? 'Not all read' : undefined} />
+                  ? `${classesThatRan(g.items).length} Class${classesThatRan(g.items).length === 1 ? '' : 'es'}`
+                  : classStatus === 'partial' ? 'Not All Read' : undefined} />
               {g.items.map((c, i) => {
                 // The member's own standing, read as a WORD and never as the
                 // truthiness of a status string. 'cancelled' and

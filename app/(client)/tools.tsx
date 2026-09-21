@@ -253,7 +253,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {asked != null ? (<>
  <Rule />
  <Section>
- <SectionHead title="Warm-up Ramp" note={`to ${plain(asked)} ${wu}`} />
+ <SectionHead title="Warm-up Ramp" note={`To ${plain(asked)} ${wu}`} />
  {ramp.length ? (<>
  {ramp.map((r, i) => (
  <View key={r.pct}>
@@ -276,7 +276,7 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  {load.plates.length ? (<>
  <Rule />
  <Section>
- <SectionHead title="Load, Heaviest First" note={`${wu} a side`} />
+ <SectionHead title="Load, Heaviest First" note={`${wu} a Side`} />
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
  {load.plates.map((p, i) => (
  <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
@@ -343,7 +343,7 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  <View>
  {m ? (<>
  <Section>
- <SectionHead title="Your Figures" note="Your latest scan or measurement" />
+ <SectionHead title="Your Figures" note="Your Latest Scan or Measurement" />
  {/* The client's own bodyweight, read out the way every other screen reads
      it. It was printed in kilograms here whatever they had chosen, which is
      the same figure their profile shows in pounds — two numbers for one
@@ -412,7 +412,7 @@ function MacroRef({ t, wu }: { t: Theme; wu: WeightUnit }) {
  <Rule />
 
  <Section>
- <SectionHead title="Macro Reference" note={m ? 'Where those figures come from' : undefined} />
+ <SectionHead title="Macro Reference" note={m ? 'Where Those Figures Come from' : undefined} />
  {rows.map(([k, cal, note], i) => (
  <View key={k}>
  {i > 0 ? <Rule /> : null}

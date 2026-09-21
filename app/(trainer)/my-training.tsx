@@ -709,7 +709,7 @@ export default function MyTraining() {
             { label: 'Lifted', value: whole ? num(volumeIn(wk.volumeKg, wu)) : fig(null), unit: whole ? wu : undefined, tone: 'orange' },
           ]} />
           <Section>
-            <SectionHead title="Your Last 7 Days" note="Exercises each day" />
+            <SectionHead title="Your Last 7 Days" note="Exercises Each Day" />
             {/* Seven bars, one per LOCAL day ending today, each the number of
                 exercises the log holds for that day: the client's /week bars,
                 over the coach's own log. Only from a whole log. Under anything

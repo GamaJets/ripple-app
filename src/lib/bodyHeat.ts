@@ -69,7 +69,7 @@ export interface Band {
   to: number;
 }
 
-const NAMES: Record<BandNo, string> = { 1: 'Light', 2: 'Moderate', 3: 'Heavy', 4: 'Very heavy' };
+const NAMES: Record<BandNo, string> = { 1: 'Light', 2: 'Moderate', 3: 'Heavy', 4: 'Very Heavy' };
 const CUTS: Array<[number, number]> = [[0, 0.25], [0.25, 0.5], [0.5, 0.75], [0.75, 1]];
 
 const band = (no: BandNo, color: string): Band =>

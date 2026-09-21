@@ -231,7 +231,7 @@ export function LiftingToolsPanel({ unit }: { unit: WeightUnit }) {
         {load.plates.length ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Load, Heaviest First" note={`${unit} a side`} />
+            <SectionHead title="Load, Heaviest First" note={`${unit} a Side`} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {load.plates.map((p, i) => (
                 <View key={`${p}-${i}`} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
@@ -269,7 +269,7 @@ export function LiftingToolsPanel({ unit }: { unit: WeightUnit }) {
         {asked != null ? (<>
           <Rule />
           <Section>
-            <SectionHead title="Warm-up Ramp" note={`to ${plain(asked)} ${unit}`} />
+            <SectionHead title="Warm-up Ramp" note={`To ${plain(asked)} ${unit}`} />
             {ramp.length ? (<>
               {ramp.map((r, i) => (
                 <View key={r.pct}>

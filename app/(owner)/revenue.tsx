@@ -456,7 +456,7 @@ export default function OwnerRevenue() {
             figure above but in no slice — a share of a whole cannot be owed. */}
         {sources ? (
           <Section>
-            <SectionHead title="How It Was Paid" note="Payments recorded" />
+            <SectionHead title="How It Was Paid" note="Payments Recorded" />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
               <Donut slices={sources} centre={num(sources.length)} sub={sources.length === 1 ? 'method' : 'methods'}
                 spoken={`How the last 30 days were paid. ${sources.map((s) => `${s.label} ${s.shown ?? ''}`).join(', ')}`} />
@@ -537,7 +537,7 @@ export default function OwnerRevenue() {
 
         {/* ── unit economics ─────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Unit Economics" note="Per client" />
+          <SectionHead title="Unit Economics" note="Per Client" />
           {/* The session fee is the tenant's own row, not a roll-up, so it
               survives a failed roster read and is still worth stating. */}
           <KpiRow items={[
@@ -594,9 +594,9 @@ export default function OwnerRevenue() {
               last mo" under a heading saying Sessions, and an owner had no way
               to know which of the two the screen meant. */}
           <SectionHead title="Sessions Trend"
-            note={!histWhole ? 'your months could not be read'
-              : delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo`
-              : 'Tracking started'} />
+            note={!histWhole ? 'Your Months Could Not Be Read'
+              : delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} Session${Math.abs(delta) === 1 ? '' : 's'} vs Last Mo`
+              : 'Tracking Started'} />
           {!histWhole ? (
             /* Not "not enough history": the sentence below is a claim about
                this gym, and under a failed read the only months in hand are

@@ -848,7 +848,7 @@ export default function TrainerVideos() {
                   default text size, a coach read the British spelling in a
                   section title and the American one in the tab it is about. */}
               <SectionHead title="What Your Programs Need"
-                note={coverage.missing.length ? `${num(coverage.missing.length)} to film` : undefined} />
+                note={coverage.missing.length ? `${num(coverage.missing.length)} to Film` : undefined} />
               <Text style={{ ...ty.label, color: t.ink2 }}>{coverageLine(coverage)}</Text>
 
               {coverage.missing.length ? (
@@ -967,7 +967,7 @@ export default function TrainerVideos() {
 
         {/* ── the library ────────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Library" note={known && vids.length ? `${vids.length} clip${vids.length === 1 ? '' : 's'}` : undefined} />
+          <SectionHead title="Library" note={known && vids.length ? `${vids.length} Clip${vids.length === 1 ? '' : 's'}` : undefined} />
 
           {status === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your library…</Text>

@@ -1138,7 +1138,7 @@ export default function OwnerOps() {
                   list in hand is whatever survived, and "0 sent" to an owner
                   who posted three on Friday is the sentence
                   src/ui/loadStatus.ts exists to stop. */}
-              <SectionHead title="Sent" note={noticeStatus === 'ready' && myNotices.length ? `${myNotices.length} sent` : undefined} />
+              <SectionHead title="Sent" note={noticeStatus === 'ready' && myNotices.length ? `${myNotices.length} Sent` : undefined} />
               {noticeStatus === 'error' ? (
                 <Empty tone={t.ink3}>Your notices could not be read just now. This is not a statement that you have sent none.</Empty>
               ) : myNotices.length === 0 ? (
@@ -1340,7 +1340,7 @@ export default function OwnerOps() {
                 owner sets one". This is that screen. */}
             <Section>
               <SectionHead title="Class Cancellations"
-                note={tenant?.classCancelHours == null ? 'not stated' : `${tenant.classCancelHours}h notice`} />
+                note={tenant?.classCancelHours == null ? 'Not Stated' : `${tenant.classCancelHours}h Notice`} />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
                 How much notice a member must give before a class, and what you charge if they give less.
                 Until you set this, members cancelling a class are told plainly that this app does not hold
@@ -1573,7 +1573,7 @@ export default function OwnerOps() {
             <Section>
               {/* "All resolved" is a claim about every ticket there is, so it
                   needs the whole inbox behind it. */}
-              <SectionHead title="Support Inbox" note={inboxKnown && allTickets.length ? (openCount ? `${openCount} open` : 'All resolved') : undefined} />
+              <SectionHead title="Support Inbox" note={inboxKnown && allTickets.length ? (openCount ? `${openCount} Open` : 'All Resolved') : undefined} />
               {fbFailed ? (
                 // Tickets held on this device still show below — they are real —
                 // but they are not the inbox, and saying nothing here would let

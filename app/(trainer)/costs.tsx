@@ -367,7 +367,7 @@ export default function Costs() {
           <>
             <Rule />
             <Section>
-              <SectionHead title="By Month" note="Counted by the day you say you paid" />
+              <SectionHead title="By Month" note="Counted by the Day You Say You Paid" />
               {byMonth.months.map((m) => (
                 <View key={m.key} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <Text style={{ ...ty.label, color: t.ink2 }}>{m.label}</Text>
@@ -451,7 +451,7 @@ export default function Costs() {
               made from a list that is the whole list. `fetchMyCosts` answers
               `{rows: [], status: 'error'}` for a refused read, and "Nothing
               recorded yet" over that is a sentence this app cannot support. */}
-          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} recorded` : 'Nothing Recorded Yet') : 'What Is on Record'} />
+          <SectionHead title={isWhole(status) ? (rows.length ? `${rows.length} Recorded` : 'Nothing Recorded Yet') : 'What Is on Record'} />
           {rows.map((c) => (
             <View key={c.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>

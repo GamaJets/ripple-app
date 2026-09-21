@@ -408,7 +408,7 @@ export default function ClassCheckin() {
           const note = unlinked ? 'No class was passed to this screen, so this is not a count.' : loading ? 'Still reading the roster.' : registerLine(reg, counted);
           return (
             <Section>
-              <SectionHead title="Checked In" note={counted ? `${fig(booked)} booked` : undefined} />
+              <SectionHead title="Checked In" note={counted ? `${fig(booked)} Booked` : undefined} />
               {/* `present` and `booked` are plain counts under `counted`, so
                   they go into the sentence as digits; the dash is only ever
                   drawn under the label, never spoken mid-sentence. */}

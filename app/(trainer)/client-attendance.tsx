@@ -220,7 +220,7 @@ function outcomeWords(o: ClassOutcome): { label: string; tone: 'good' | 'quiet' 
         tone: 'quiet',
       };
     case 'upcoming':
-      return { label: 'Booked · still to come', tone: 'ahead' };
+      return { label: 'Booked · Still to Come', tone: 'ahead' };
     case 'waitlisted':
       return { label: 'On the waitlist. They never had a place to turn up to', tone: 'quiet' };
     case 'unknown':
@@ -504,7 +504,7 @@ export default function ClientAttendanceScreen() {
             <Section>
               <SectionHead
                 title="Days a Week"
-                note={countable ? `${num(a.days.length)} ${a.days.length === 1 ? 'day' : 'days'} on record` : undefined}
+                note={countable ? `${num(a.days.length)} ${a.days.length === 1 ? 'day' : 'days'} on Record` : undefined}
               />
 
               {a.status === 'loading' ? (

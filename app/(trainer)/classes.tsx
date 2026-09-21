@@ -799,7 +799,7 @@ export default function TrainerClasses() {
           const share = drawn ? sharePercent(taken, places) : null;
           return (
             <Section>
-              <SectionHead title="Places Filled" note="Upcoming classes" />
+              <SectionHead title="Places Filled" note="Upcoming Classes" />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
                 <Ring tone="purple" size={112} value={drawn ? taken / places : null} figure={share}
                   spoken={drawn ? `${share ?? 'An unknown share'} of places filled, ${taken} of ${places}` : 'Places filled, not counted'} />

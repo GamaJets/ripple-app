@@ -722,7 +722,7 @@ export default function CoachChecklists() {
                   the bulk control, and the four the page cut off are silently
                   not part of anybody's routine. */}
               <SectionHead title={client?.name ?? 'Their List'}
-                note={shown && isWhole(status) ? `${shown.filter((i) => i.active).length} showing` : undefined} />
+                note={shown && isWhole(status) ? `${shown.filter((i) => i.active).length} Showing` : undefined} />
 
               {/* The caveats come BEFORE the figures they qualify. A coach who
                   reads "3 of 28" first and the reason it might not mean what it
@@ -922,7 +922,7 @@ export default function CoachChecklists() {
               <View>
                 <Section>
                   <SectionHead title="Give These to Somebody Else"
-                    note={sourceLines.length === 1 ? '1 line' : `${sourceLines.length} lines`} />
+                    note={sourceLines.length === 1 ? '1 Line' : `${sourceLines.length} Lines`} />
 
                   {!copyOpen ? (<>
                     <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>

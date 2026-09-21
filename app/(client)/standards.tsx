@@ -201,7 +201,7 @@ export default function Standards() {
   <ScreenHelp screen="standards" />
 
   <Section>
-   <SectionHead title="The Big Lifts" note={bw != null ? `bodyweight ${weightLabel(bw, wu)}` : bodyWhole ? 'add your weight for ratios' : 'bodyweight not read'} />
+   <SectionHead title="The Big Lifts" note={bw != null ? `Bodyweight ${weightLabel(bw, wu)}` : bodyWhole ? 'Add Your Weight for Ratios' : 'Bodyweight Not Read'} />
    {/* One button, before the rows, rather than one per lift.
        Every row on this screen grades a lift against bodyweight, so with no
        weight on the record all six say the same thing — "add one and this

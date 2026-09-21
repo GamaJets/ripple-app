@@ -376,7 +376,7 @@ export default function OwnerDeletions() {
           const ringTone: Tone = failed || overdue ? 'red' : soonest != null && soonest <= 7 ? 'amber' : 'brand';
           return (
             <Section>
-              <SectionHead title="Waiting on You" note={figure === '—' ? undefined : `${figure} waiting`} />
+              <SectionHead title="Waiting on You" note={figure === '—' ? undefined : `${figure} Waiting`} />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
                 <Ring size={120} tone={ringTone}
                   value={soonest == null ? null : Math.max(0, Math.min(30, soonest)) / 30}
@@ -503,8 +503,8 @@ export default function OwnerDeletions() {
           <SectionHead
             title="Already Actioned"
             note={logFailed || !log?.length ? undefined
-              : logShort ? `most recent ${log.length}`
-              : `${log.length} recorded`} />
+              : logShort ? `Most Recent ${log.length}`
+              : `${log.length} Recorded`} />
           {logFailed ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: log?.length ? sp.md : 0 }}>
               The record could not be read just now. Deletions you have already carried out are

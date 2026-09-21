@@ -265,7 +265,7 @@ export default function OwnerOrders() {
           ].map((x) => ({ ...x, shown: String(x.value) } as Slice)) : [];
           return (
             <Section>
-              <SectionHead title="Need Attention" note={loaded ? `${list.length} in ${WINDOW_DAYS} days` : undefined} />
+              <SectionHead title="Need Attention" note={loaded ? `${list.length} in ${WINDOW_DAYS} Days` : undefined} />
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: sp.lg }}>
                 <Donut slices={slices} centre={loaded ? String(needsAPerson) : null} sub="need you" size={120}
                   spoken={`Need attention, ${figure === '—' ? 'no figure' : figure}, ${note}`} />
@@ -347,7 +347,7 @@ export default function OwnerOrders() {
 
         {/* ── what was taken ─────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Taken Online" note={`Last ${WINDOW_DAYS} days`} />
+          <SectionHead title="Taken Online" note={`Last ${WINDOW_DAYS} Days`} />
           {!loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {state === 'failed'

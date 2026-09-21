@@ -3160,7 +3160,7 @@ export default function TrainerSchedule() {
             const counted = countable && n > 0;
             return (
               <SectionHead title={`${DOW[selDate.getDay()]} ${selD} ${MON_SHORT[selM]}`}
-                note={!known ? 'Not read' : counted ? `${n} ${n === 1 ? 'session' : 'sessions'}` : 'Add'}
+                note={!known ? 'Not Read' : counted ? `${n} ${n === 1 ? 'session' : 'sessions'}` : 'Add'}
                 onPress={counted ? () => router.push('/(trainer)/sessions') : () => { setAddClient(null); setAddOpen(true); }} />
             );
           })()}
@@ -3657,7 +3657,7 @@ export default function TrainerSchedule() {
             (o, s) => (o == null || Date.parse(s.startsAt) < Date.parse(o.startsAt) ? s : o), null);
           return (
             <Section>
-              <SectionHead title="Needs Marking" note={unknown ? 'Not counted' : undefined} />
+              <SectionHead title="Needs Marking" note={unknown ? 'Not Counted' : undefined} />
               {/* Amber, by name: "slipping" in the look's vocabulary, which is
                   what a session nobody marked is. The plate is the kit's, so
                   the icon sits on its own pale ground in both themes. */}
@@ -3695,7 +3695,7 @@ export default function TrainerSchedule() {
         {feeStatus === 'error' || lateFees.length > 0 ? (
           <Section>
             <SectionHead title="Late-Cancellation Fees"
-              note={feeStatus === 'error' ? 'Not read' : feeStatus === 'partial' ? 'Part of the list' : undefined} />
+              note={feeStatus === 'error' ? 'Not Read' : feeStatus === 'partial' ? 'Part of the List' : undefined} />
             {feeStatus === 'error' ? (
               <Flag tone={t.warn}>
                 We couldn’t read your late-cancellation fees. This is not a statement that there are none. Any fee already recorded still stands.
@@ -3736,7 +3736,7 @@ export default function TrainerSchedule() {
             out — and nobody presses Generate to keep them coming. */}
         <Section>
           <SectionHead title="Standing Appointments"
-            note={seriesStatus === 'error' ? 'Not read' : 'Set One Up'}
+            note={seriesStatus === 'error' ? 'Not Read' : 'Set One Up'}
             onPress={seriesStatus === 'error' ? undefined : () => { setSrClient(null); setSeriesOpen(true); }} />
 
           {/* An empty list under 'error' means the arrangements could not be
@@ -3857,7 +3857,7 @@ export default function TrainerSchedule() {
           const range = `${dateOfLabel(weekStart)} – ${dateOfLabel(new Date(selY, selM, selD - selDate.getDay() + 6))}`;
           return (
             <Section>
-              <SectionHead title="This Week’s Bookings" note={covered ? `${num(total)} booked` : 'Not counted'} />
+              <SectionHead title="This Week’s Bookings" note={covered ? `${num(total)} Booked` : 'Not Counted'} />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.xs, marginBottom: sp.md }}>{range}</Text>
               <DayBars days={days}
                 spoken={covered
@@ -3896,7 +3896,7 @@ export default function TrainerSchedule() {
         {bookedAheadListable(sessionsStatus) && sessions.some((s) => s.status === 'booked') ? (
           <>
             <Section>
-              <SectionHead title="Booked Ahead" note={`Next ${BOOKED_AHEAD_DAYS} days`} />
+              <SectionHead title="Booked Ahead" note={`Next ${BOOKED_AHEAD_DAYS} Days`} />
               {bookedAheadHeading(ahead.length) ? (
                 <>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
@@ -3974,7 +3974,7 @@ export default function TrainerSchedule() {
           <>
             <Section>
               <SectionHead title="Not Rebooked"
-                note={sessionsStatus === 'partial' ? 'Part of the list' : undefined} />
+                note={sessionsStatus === 'partial' ? 'Part of the List' : undefined} />
               {unrebookedHeading(quiet.length) ? (
                 <>
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>

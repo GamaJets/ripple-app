@@ -478,7 +478,7 @@ export default function CheckIn() {
                   means by an unconfirmed non-empty answer. */}
               <SectionHead
                 title="Last Check-in"
-                note={isPending(ci.latest.id) ? 'not sent yet' : ci.status === 'error' ? 'not checked' : fmtFullDay(ci.latest.at)}
+                note={isPending(ci.latest.id) ? 'Not Sent Yet' : ci.status === 'error' ? 'Not Checked' : fmtFullDay(ci.latest.at)}
               />
               {/* The stored kilograms read back in the client's unit. The two
                   ratings beside it are scores out of five and are not a

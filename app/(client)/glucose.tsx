@@ -218,7 +218,7 @@ export default function Glucose() {
         {/* ── The window's headline figures ─────────────────────────────── */}
         <Section style={{ marginTop: sp.lg }}>
           <SectionHead title="Last 14 Days"
-            note={unreadable ? 'Could not be read' : known ? undefined : g.status === 'partial' ? 'More readings than shown' : undefined} />
+            note={unreadable ? 'Could Not Be Read' : known ? undefined : g.status === 'partial' ? 'More Readings Than Shown' : undefined} />
           {unreadable ? (
             <>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>

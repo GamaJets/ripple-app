@@ -252,9 +252,9 @@ export function OwnRecoveryPanel({ noGoalNote }: {
       {/* ── the nights ────────────────────────────────────────────────── */}
       <Section>
         <SectionHead title="Sleep"
-          note={sleepWhole && avgSleep != null ? `${avgSleep} h average`
-            : sleepStatus === 'error' ? 'not confirmed'
-              : sleepStatus === 'partial' ? 'more nights than are shown' : undefined} />
+          note={sleepWhole && avgSleep != null ? `${avgSleep} h Average`
+            : sleepStatus === 'error' ? 'Not Confirmed'
+              : sleepStatus === 'partial' ? 'More Nights Than Are Shown' : undefined} />
         <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
           Nights you type in. A night a watch or a ring recorded is read separately and is never
           averaged into these. A figure somebody remembered in the morning and a figure a device

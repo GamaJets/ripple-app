@@ -66,21 +66,28 @@ export const METRIC_DEFS: MetricDef[] = [
 ];
 
 export interface ScanLike { takenAt: string; metrics?: ScanMetrics }
-export interface MetricTrend { def: MetricDef; latest: number; prev: number | null; delta: number | null; good: boolean | null; series: number[] }
+export interface MetricTrend {
+  def: MetricDef; latest: number; prev: number | null; delta: number | null; good: boolean | null; series: number[];
+  /** The scan date of each point in `series`, parallel to it. A chart of a
+   *  limb's lean mass with no dates is a line of numbers nobody can place. */
+  dates: string[];
+}
 
 /** Per-metric latest value, delta vs the previous scan that had it, and the full series. */
 export function metricTrends(scans: ScanLike[]): MetricTrend[] {
   const asc = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const out: MetricTrend[] = [];
   for (const def of METRIC_DEFS) {
-    const pts = asc.map((s) => (s.metrics ? s.metrics[def.key] : undefined)).filter((v): v is number => typeof v === 'number');
+    const read = asc.filter((s) => typeof s.metrics?.[def.key] === 'number');
+    const pts = read.map((s) => s.metrics![def.key] as number);
+    const dates = read.map((s) => s.takenAt);
     if (!pts.length) continue;
     const latest = pts[pts.length - 1];
     const prev = pts.length > 1 ? pts[pts.length - 2] : null;
     const delta = prev != null ? +(latest - prev).toFixed(def.decimals ?? 0) : null;
     let good: boolean | null = null;
     if (delta != null && def.better !== 'none' && delta !== 0) good = def.better === 'up' ? delta > 0 : delta < 0;
-    out.push({ def, latest, prev, delta, good, series: pts });
+    out.push({ def, latest, prev, delta, good, series: pts, dates });
   }
   return out;
 }
@@ -213,7 +220,13 @@ function betterSays(def: MetricDef, delta: number | null | undefined, decimals: 
   return def.better === 'up' ? f > 0 : f < 0;
 }
 
-export interface CompositionRead { improving: string[]; watch: string[]; balance: string[] }
+export interface CompositionRead {
+  improving: string[]; watch: string[]; balance: string[];
+  /** Names of the metrics that did not move between the last two readings.
+   *  A count of what improved says nothing about the rest; the owner asked to
+   *  see what is NOT improving (21 Sep 2026), and "unchanged" is part of it. */
+  unchanged: string[];
+}
 
 /**
  * Plain-English "what's improving / what to watch", plus left-right balance
@@ -235,7 +248,7 @@ export interface CompositionRead { improving: string[]; watch: string[]; balance
  */
 export function compositionInsights(scans: ScanLike[], unit: WeightUnit = 'kg'): CompositionRead {
   const trends = metricTrends(scans);
-  const improving: string[] = [], watch: string[] = [];
+  const improving: string[] = [], watch: string[] = [], unchanged: string[] = [];
   // A mass is read out in the member's unit; a level, a score, a kcal and a
   // litre are not masses and keep their own. See src/lib/compositionUnit.ts for
   // the grain each is printed at and for why a litre of body water is not
@@ -270,6 +283,7 @@ export function compositionInsights(scans: ScanLike[], unit: WeightUnit = 'kg'):
     const good = betterSays(tr.def, moved(tr), grain(tr.def));
     if (good === true) improving.push(line(tr));
     else if (good === false) watch.push(line(tr));
+    else if (moved(tr) === 0) unchanged.push(tr.def.label);
   }
   const balance: string[] = [];
   const asc = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
@@ -284,5 +298,5 @@ export function compositionInsights(scans: ScanLike[], unit: WeightUnit = 'kg'):
     pair(m.leanArmLKg, m.leanArmRKg, 'Arms');
     pair(m.leanLegLKg, m.leanLegRKg, 'Legs');
   }
-  return { improving, watch, balance };
+  return { improving, watch, balance, unchanged };
 }

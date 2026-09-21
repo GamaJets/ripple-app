@@ -941,7 +941,7 @@ export default function Devices() {
       screen FOR, and because a disconnected watch was being explained three
       sections above the row that would reconnect it. */}
   <Section>
-   <SectionHead title="Connected Apps" note={readable.length ? `${readable.length} connected` : undefined} />
+   <SectionHead title="Connected Apps" note={readable.length ? `${readable.length} Connected` : undefined} />
    {PROVIDERS.map((p, i) => {
     const st = w.states[p.meta.id] || 'disconnected';
     // The account question and the sleep question, asked separately and
@@ -1361,7 +1361,7 @@ export default function Devices() {
       believe they have stopped sharing because they turned off the one they
       remembered. See supabase/parts/2670. */}
   <Section>
-   <SectionHead title="Your Coach" note={wellnessShare.shared === true ? 'sharing' : undefined} />
+   <SectionHead title="Your Coach" note={wellnessShare.shared === true ? 'Sharing' : undefined} />
    <Text style={{ ...ty.label, color: t.ink2 }}>
     The sleep and water you type in yourself are yours. Off by default: nothing of it reaches your coach until you say so here.
    </Text>
@@ -1404,7 +1404,7 @@ export default function Devices() {
   {/* ── where sleep comes from ──────────────────────────────────────── */}
   {connected.length ? (<>
    <Section>
-    <SectionHead title="Sleep Sources" note={`last night`} />
+    <SectionHead title="Sleep Sources" note={`Last Night`} />
     <Text style={{ ...ty.label, color: t.ink2 }}>
      Sleep is read from every device you have connected, not from one of them. Where two disagree, Recovery shows the figure one device actually reported and names it. It never averages them into a number no device recorded.
     </Text>
@@ -1478,7 +1478,7 @@ export default function Devices() {
 
   {/* ── write sessions back to Apple Health ─────────────────────────── */}
   <Section>
-   <SectionHead title="Write to Apple Health" note={hkAuth === 'granted' ? 'allowed' : undefined} />
+   <SectionHead title="Write to Apple Health" note={hkAuth === 'granted' ? 'Allowed' : undefined} />
    <Text style={{ ...ty.label, color: t.ink2 }}>
     Send the sessions you logged in {BRAND.label} to the Health app, so a gym session sits beside everything your watch recorded. One workout per session: a push day with eight exercises goes in as one entry, not eight.
    </Text>

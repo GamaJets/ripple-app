@@ -647,8 +647,8 @@ export default function History() {
             they saw before. */}
         <SectionHead title="Your Years"
           note={!whole ? undefined
-            : earlier > 0 ? `${active} of the last ${cells.length} months`
-            : `${active} month${active === 1 ? '' : 's'} trained`} />
+            : earlier > 0 ? `${active} of the Last ${cells.length} Months`
+            : `${active} Month${active === 1 ? '' : 's'} Trained`} />
         <YearGrid rows={rows} peak={peak} t={t} unit={wu} />
         <GridLegend t={t} />
       </>)}
@@ -657,7 +657,7 @@ export default function History() {
 
     {/* ── month by month ─────────────────────────────────────────────────── */}
     <Section>
-      <SectionHead title="Month by Month" note={`Total ${wu} lifted`} />
+      <SectionHead title="Month by Month" note={`Total ${wu} Lifted`} />
       {peak != null ? (<>
         <MonthBars cells={cells} t={t} unit={wu} />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
@@ -773,7 +773,7 @@ export default function History() {
     {/* ── then and now ───────────────────────────────────────────────────── */}
     {arc ? (<>
       <Section>
-        <SectionHead title="Then and Now" note={`${arc.months} months apart`} />
+        <SectionHead title="Then and Now" note={`${arc.months} Months Apart`} />
         {/* Each column is one FACT and is marked as one. Drawn, these are a
             month over a figure over a unit, read in that order by the eye in
             about a second. Left as three sibling <Text>s they are three
@@ -827,7 +827,7 @@ export default function History() {
         last session rather than the end of a window. */}
     {(breaks.length > 0 || (quiet != null && quiet > 0) || quiet == null) ? (<>
       <Section>
-        <SectionHead title="Breaks" note={worstGap ? `Longest ${worstGap.months} month${worstGap.months === 1 ? '' : 's'}` : undefined} />
+        <SectionHead title="Breaks" note={worstGap ? `Longest ${worstGap.months} Month${worstGap.months === 1 ? '' : 's'}` : undefined} />
         {breaks.map((g) => (
           <View key={g.afterKey} style={{ paddingVertical: sp.sm }}>
             <Text style={{ ...ty.body, color: t.ink2 }}>
@@ -866,7 +866,7 @@ export default function History() {
 
     {/* ── personal bests over time, not just the current best ────────────── */}
     <Section>
-      <SectionHead title="Personal Bests over Time" note={records.length ? 'Newest first' : undefined} />
+      <SectionHead title="Personal Bests Over Time" note={records.length ? 'Newest First' : undefined} />
       {records.length === 0 ? (
         <Text style={{ ...ty.label, color: t.ink3 }}>
           No records set yet. The first weighted set you log becomes one.
@@ -1118,7 +1118,7 @@ function MuscleSection({ log, unit, weightSeries }: {
 
   return (
     <Section>
-      <SectionHead title="By Muscle Group" note={status === 'ready' ? `last ${days} days` : undefined} />
+      <SectionHead title="By Muscle Group" note={status === 'ready' ? `Last ${days} Days` : undefined} />
       <Segmented style={{ marginBottom: sp.md }}
         value={String(days) as '7' | '28'}
         onChange={(k) => setDays(Number(k) as 7 | 28)}

@@ -291,7 +291,7 @@ export default function OwnerTrainers() {
           {/* Every figure on this screen is over the same thirty days — the
               window `fetchGymTrainers` reads — and the head says so once
               rather than each row implying it. */}
-          <SectionHead title="Roster Health" note="Last 30 days" />
+          <SectionHead title="Roster Health" note="Last 30 Days" />
           {/* All three are counts over `trainers`, which is empty under a failed
               read as well as under an empty gym — hence fig() behind the same
               flag rather than String() behind `loading` alone. */}
@@ -340,7 +340,7 @@ export default function OwnerTrainers() {
           {/* Worst first, as Overview's health board sorts the same people: the
               provider's order is most clients first, which put the trainer an
               owner most needs to see at the foot of the list. */}
-          <SectionHead title="Trainers" note={!trainersUnknown && trainers.length ? 'Worst first' : undefined} />
+          <SectionHead title="Trainers" note={!trainersUnknown && trainers.length ? 'Worst First' : undefined} />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : trainersUnread ? (

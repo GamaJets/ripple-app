@@ -341,7 +341,7 @@ export default function OwnerGrowth() {
               two trainer blocks now sit together and the member blocks follow
               under their own names, so nobody has to work out which population
               a percentage is a share of. */}
-          <SectionHead title="Trainer Retention" note="Trainers, not members · last 30 days" />
+          <SectionHead title="Trainer Retention" note="Trainers, Not Members · Last 30 Days" />
           {/* The share of the roster that is NOT idle, as a ring, with the
               sample it is a share of beside it. `idlePct` is null for a roster
               that did not come back whole or has nobody on it, and the ring
@@ -517,7 +517,7 @@ export default function OwnerGrowth() {
               not in this one. Neither is wrong and they will not agree — so
               they are separately headed rather than folded together, and
               nothing here subtracts anybody. */}
-          <SectionHead title="Clients of Your Trainers" note="Counted today, through the roster" />
+          <SectionHead title="Clients of Your Trainers" note="Counted Today, Through the Roster" />
           <KpiRow items={[
             { label: 'Active Clients', value: trainersUnknown ? '—' : fig(num(ca.total)) },
             { label: 'Engaged', value: trainersUnknown ? '—' : fig(ca.engagementPct), unit: trainersUnknown || ca.engagementPct == null ? undefined : '%' },
@@ -560,7 +560,7 @@ export default function OwnerGrowth() {
           {/* "Cohort Retention · By signup month" reads as member cohorts and
               is `cohorts(trainers)` — trainers, grouped by the month THEY
               joined. */}
-          <SectionHead title="Trainer Cohorts" note="Trainers, by signup month" />
+          <SectionHead title="Trainer Cohorts" note="Trainers, by Signup Month" />
           {loading ? <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
             : trainersUnread ? <Text style={{ ...ty.label, color: t.ink3 }}>Your trainers could not be read, so there was nothing to group into cohorts.</Text>
             : coh.length === 0 ? <Text style={{ ...ty.label, color: t.ink3 }}>No trainer signups to group yet.</Text> : null}
@@ -572,7 +572,7 @@ export default function OwnerGrowth() {
 
         {/* ── trainer acquisition funnel ─────────────────────────────────── */}
         <Section>
-          <SectionHead title="Trainer Acquisition Funnel" note={trainersUnknown || roll.trainers === 0 ? 'From signup' : `Of ${num(roll.trainers)} on the roster today`} />
+          <SectionHead title="Trainer Acquisition Funnel" note={trainersUnknown || roll.trainers === 0 ? 'From Signup' : `Of ${num(roll.trainers)} on the Roster Today`} />
           {loading ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : trainersUnread ? (
@@ -606,7 +606,7 @@ export default function OwnerGrowth() {
               `redeem_promo` against this same `promos` table — so the label
               named the wrong audience entirely, on the one screen an owner
               reads aloud when explaining a promotion to somebody. */}
-          <SectionHead title="Promo & Referral Codes" note="Redeemed by members" />
+          <SectionHead title="Promo & Referral Codes" note="Redeemed by Members" />
           {/* ── how the codes have done, then the tool that makes one ────────
               The list leads. This section opened on the create field, so the
               first thing under "Promo & Referral Codes" was a form, and what

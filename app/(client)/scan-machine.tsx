@@ -530,7 +530,7 @@ export default function ScanMachine() {
               </Section>
             ) : (
               <Section>
-                <SectionHead title="Add Your Sets" note={sets.length ? `${sets.length} logged` : undefined} />
+                <SectionHead title="Add Your Sets" note={sets.length ? `${sets.length} Logged` : undefined} />
                 {/* What KIND of set this is, asked before the numbers, because
                     the first box means different things under each answer. Both
                     are sticky: sets come in threes and fours, and re-tapping

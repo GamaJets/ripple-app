@@ -750,7 +750,7 @@ export default function ClientBody() {
         <Section>
           <SectionHead
             title={s.label}
-            note={`${scans === 1 ? '1 scan' : `${scans} scans`} · ${inRange.length} in the last ${rangeWord}`}
+            note={`${scans === 1 ? '1 scan' : `${scans} scans`} · ${inRange.length} in the Last ${rangeWord}`}
           />
           {inRange.length === 0 ? (
             <Text style={{ ...ty.body, color: t.ink2 }}>
@@ -866,7 +866,7 @@ export default function ClientBody() {
           <View style={rowStyle}>{inner}</View>
         )}
         {open && canOpen ? (
-          <View style={{ paddingVertical: sp.sm }}><Spark data={it.series} h={54} /></View>
+          <View style={{ paddingVertical: sp.sm }}><Spark data={it.series} h={54} labels={it.dates} unit={` ${it.def.unit}`} /></View>
         ) : null}
       </View>
     );
@@ -1016,7 +1016,7 @@ export default function ClientBody() {
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>
-                    <SectionHead title={client?.name ?? 'Their Scans'} note="never scanned" />
+                    <SectionHead title={client?.name ?? 'Their Scans'} note="Never Scanned" />
                     {/* "The read came back and it was empty" is only true when
                         nothing was dropped. Rows that arrived and could not be
                         used are a different story, and the flag below tells it
@@ -1055,9 +1055,9 @@ export default function ClientBody() {
                           counting rows nobody asked for. */}
                       <SectionHead
                         title="Composition"
-                        note={compScans === 0 ? (isWhole(scanStatus) ? 'no breakdown' : 'not shown')
-                          : compScans === 1 ? 'one breakdown'
-                          : `${compScans} breakdowns`}
+                        note={compScans === 0 ? (isWhole(scanStatus) ? 'No Breakdown' : 'Not Shown')
+                          : compScans === 1 ? 'One Breakdown'
+                          : `${compScans} Breakdowns`}
                       />
                       {/* The same sentence the client's own screen carries, for
                           the same reason: this table is a transcription of an
@@ -1204,7 +1204,7 @@ export default function ClientBody() {
                   </Section>
                 ) : manual == null ? (
                   <Section>
-                    <SectionHead title="Typed by Hand" note="none" />
+                    <SectionHead title="Typed by Hand" note="None" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       Nothing typed. Every figure above came off a scan sheet, so there is no
                       hand-entered number sitting under the same heading as a machine reading.
@@ -1212,7 +1212,7 @@ export default function ClientBody() {
                   </Section>
                 ) : (
                   <Section>
-                    <SectionHead title="Typed by Hand" note="not a scan" />
+                    <SectionHead title="Typed by Hand" note="Not a Scan" />
                     {/* Which figure the client's own app is showing them is a
                         comparison against their newest scan, so it can only be
                         made once that read has landed. Under a failed or
@@ -1274,7 +1274,7 @@ export default function ClientBody() {
                   </Section>
                 ) : tape.state === 'none' ? (
                   <Section>
-                    <SectionHead title="Tape" note="none recorded" />
+                    <SectionHead title="Tape" note="None Recorded" />
                     <Text style={{ ...ty.body, color: t.ink2 }}>
                       {voice.they} {voice.have}n&rsquo;t logged a tape measurement. The read came back
                       and it was empty, so this is about them rather than about the connection,
@@ -1338,8 +1338,8 @@ export default function ClientBody() {
                 <Rule />
                 <Section>
                   <SectionHead
-                    title="Sleep &amp; Water"
-                    note={wellnessView.kind === 'shared' ? `last ${WELLNESS_WINDOW_DAYS} days` : undefined} />
+                    title="Sleep &Amp; Water"
+                    note={wellnessView.kind === 'shared' ? `Last ${WELLNESS_WINDOW_DAYS} Days` : undefined} />
                   {wellnessView.kind === 'not-asked' ? (
                     <Text style={{ ...ty.body, color: t.ink2 }}>{notAskedLine(voice)}</Text>
                   ) : wellnessView.kind === 'loading' ? (

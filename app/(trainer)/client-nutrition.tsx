@@ -863,7 +863,7 @@ export default function ClientNutrition() {
                         — `macrosFor` off the client's own body and goal, moved
                         by this coach's deltas — or a dash. */}
                     <Section>
-                      <SectionHead title="Daily Targets" note={built ? (adjusted ? 'your adjustment applied' : 'unadjusted') : undefined} />
+                      <SectionHead title="Daily Targets" note={built ? (adjusted ? 'Your Adjustment Applied' : 'Unadjusted') : undefined} />
                       {/* The kit's Ring, each macro in the colour it has
                           everywhere in the app. Half the card wide so four
                           fall two by two. The arc is the COMPOSED day against
@@ -1018,7 +1018,7 @@ export default function ClientNutrition() {
                     {input && draft && built ? (
                       <>
                         <Section>
-                          <SectionHead title="Fill the Week" note="from this day" />
+                          <SectionHead title="Fill the Week" note="From This Day" />
                           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                             {PLAN_WEEKDAYS.map((d, i) => i === dayIdx ? null : (
                               <Pressable key={d} onPress={() => {
@@ -1069,7 +1069,7 @@ export default function ClientNutrition() {
                         <Section>
                           <SectionHead
                             title="Their Targets"
-                            note={adjusted ? 'your adjustment applied' : 'unadjusted'}
+                            note={adjusted ? 'Your Adjustment Applied' : 'Unadjusted'}
                           />
                           <Text style={{ ...ty.body, ...numeric, color: t.ink }}>
                             {num(built.target.kcal)} kcal · {num(built.target.protein)} g protein ·{' '}
@@ -1133,7 +1133,7 @@ export default function ClientNutrition() {
                       <Section>
                         <SectionHead
                           title="What They Avoid"
-                          note={profile.avoid.length ? `${profile.avoid.length} kept out` : 'none recorded'}
+                          note={profile.avoid.length ? `${profile.avoid.length} Kept Out` : 'None Recorded'}
                         />
                         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Their Own List</Text>
                         {profile.ownAvoid.length ? (

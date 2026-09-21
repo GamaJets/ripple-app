@@ -277,7 +277,7 @@ export default function RestDay() {
             Recovery screen draws, because a member comparing the two screens
             for an explanation of one number must not find two explanations. */}
         <Section>
-          <SectionHead title="Recovery Signals" note={read.state === 'scored' ? 'Same figure as Home' : undefined} />
+          <SectionHead title="Recovery Signals" note={read.state === 'scored' ? 'Same Figure as Home' : undefined} />
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
             <Text style={{ ...value(30), ...numeric, color: read.score != null ? t.ink : t.ink3 }}>
               {fig(read.score)}

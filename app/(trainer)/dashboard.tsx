@@ -3263,7 +3263,7 @@ export default function TrainerClients() {
         </>) : sentInvites.filter((i) => i.status === 'pending').length > 0 ? (<>
           <Section>
             <SectionHead title="Pending Invites"
-              note={inviteStatus === 'ready' ? `${sentInvites.filter((i) => i.status === 'pending').length} awaiting` : undefined} />
+              note={inviteStatus === 'ready' ? `${sentInvites.filter((i) => i.status === 'pending').length} Awaiting` : undefined} />
             {sentInvites.filter((i) => i.status === 'pending').map((i, idx) => (
               <View key={i.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: idx === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <IconPlate icon="message" tone="blue" size={36} />

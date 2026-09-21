@@ -563,9 +563,9 @@ export default function Recovery() {
   <Section>
    <SectionHead
     title="Sleep"
-    note={sleepWhole && sleep.length ? `avg ${avgSleep} h logged`
-      : sleepStatus === 'error' ? 'not confirmed, showing this device’s copy'
-      : sleepStatus === 'partial' ? 'more nights than are shown here'
+    note={sleepWhole && sleep.length ? `Avg ${avgSleep} h Logged`
+      : sleepStatus === 'error' ? 'Not Confirmed, Showing This Device’s Copy'
+      : sleepStatus === 'partial' ? 'More Nights Than Are Shown Here'
       : undefined} />
 
    {/* ── what the devices recorded ──────────────────────────────────
@@ -738,7 +738,7 @@ export default function Recovery() {
 
   {/* ── logged recovery sessions ─────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Recovery Sessions" note={isWhole(logStatus) && recoverySessions.length ? `${recoverySessions.length} recent` : undefined} />
+   <SectionHead title="Recovery Sessions" note={isWhole(logStatus) && recoverySessions.length ? `${recoverySessions.length} Recent` : undefined} />
    {logStatus === 'error' ? (
     <Text style={{ ...ty.label, color: t.ink2 }}>
      Your sessions could not be read, so none are shown. That is not the same as having logged none.
@@ -788,7 +788,7 @@ export default function Recovery() {
 
   {/* ── mobility routines ───────────────────────────────────────────── */}
   <Section>
-   <SectionHead title="Mobility & Warm-ups" note={`${MOBILITY.length} routines`} />
+   <SectionHead title="Mobility & Warm-ups" note={`${MOBILITY.length} Routines`} />
    {MOBILITY.map((r, i) => {
     const open = openRoutine === i;
     return (

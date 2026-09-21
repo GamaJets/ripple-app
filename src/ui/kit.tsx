@@ -1131,6 +1131,7 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
   const c = toneOf(t, tone);
   const [sel, setSel] = useState<number | null>(null);
   const [boxW, setBoxW] = useState(w);
+  const [readW, setReadW] = useState(0);
 
   const runs = segments(data);
   const drawn = readablePoints(data);
@@ -1181,9 +1182,18 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '', area, tone = '
           over a 74px chart covers the thing it is describing. */}
       {/* One line of caption. Pinned at 16 it clipped the readout in half for
           anybody on Larger Text — the strip grows with the line it holds. */}
-      <View style={{ height: grown(16), justifyContent: 'center' }}>
-        {shownValue != null ? (
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>
+      {/* Centred over the point it reads, clamped inside the card at both
+          ends. At the left edge it read "12.1" beside a different point than
+          the one touched (owner, 21 Sep 2026). LTR for the same reason as the
+          axis below: the line is SVG and never mirrors. */}
+      <View style={{ height: grown(16), justifyContent: 'center', direction: 'ltr' }}>
+        {shownValue != null && shownPoint != null ? (
+          <Text onLayout={(e) => setReadW(e.nativeEvent.layout.width)}
+            style={{
+              ...ty.caption, ...numeric, ...font('600'), color: t.ink, position: 'absolute',
+              // rtl-ok: physical left, under the `direction: 'ltr'` pin.
+              left: Math.max(0, Math.min((boxW || w) - readW, (x(shownPoint.i) / w) * (boxW || w) - readW / 2)),
+            }}>
             {shownValue}{unit}{when ? ` · ${when}` : ''}
           </Text>
         ) : (

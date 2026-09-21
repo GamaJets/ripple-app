@@ -717,7 +717,7 @@ export default function WeeklyReport() {
         <View>
           <Rule />
           <Section>
-            <SectionHead title="Your Week in a Nutshell" note={reportWhole ? undefined : 'from what loaded'} />
+            <SectionHead title="Your Week in a Nutshell" note={reportWhole ? undefined : 'From What Loaded'} />
             {coachAvailable() && consent === 'unknown' ? (
               <Text style={{ ...ty.caption, color: t.ink3 }}>Checking what you asked us to share…</Text>
             ) : coachAvailable() && consent === 'unasked' ? (

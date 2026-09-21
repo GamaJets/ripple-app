@@ -462,7 +462,7 @@ export default function Activity() {
               the cut was silent this line reported it as the total: a member
               with two hundred events read "40 events" under a heading that was
               answering a different question from the one they asked. */}
-          <SectionHead title="Recent" note={isWhole(feedStatus) && events.length > 0 ? `${events.length} event${events.length === 1 ? '' : 's'}` : undefined} />
+          <SectionHead title="Recent" note={isWhole(feedStatus) && events.length > 0 ? `${events.length} Event${events.length === 1 ? '' : 's'}` : undefined} />
 
           {/* One line for the week, above the rows that make it up. Null when
               nothing landed in the window — "nothing in the last 7 days" is a

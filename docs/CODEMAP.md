@@ -18,7 +18,7 @@ is paid again on every turn of the session that opened it.
 | 3,348 | 54k | `app/(trainer)/payments.tsx` |
 | 3,313 | 50k | `app/(trainer)/client.tsx` |
 | 3,298 | 45k | `studio-web/app/close/page.tsx` |
-| 3,100 | 50k | `app/(client)/scans.tsx` |
+| 3,114 | 50k | `app/(client)/scans.tsx` |
 | 2,954 | 50k | `app/(client)/nutrition.tsx` |
 | 2,806 | 37k | `studio-web/app/door/page.tsx` |
 | 2,595 | 35k | `studio-web/app/payroll/page.tsx` |
@@ -26,7 +26,7 @@ is paid again on every turn of the session that opened it.
 | 2,554 | 32k | `src/lib/gymExport.ts` |
 | 2,505 | 32k | `studio-web/app/staff/page.tsx` |
 | 2,474 | 30k | `studio-web/app/members/page.tsx` |
-| 2,440 | 32k | `src/ui/kit.tsx` |
+| 2,450 | 32k | `src/ui/kit.tsx` |
 | 2,260 | 30k | `studio-web/app/timetable/page.tsx` |
 | 2,189 | 34k | `supabase/functions/stripe-webhook/index.ts` |
 | 2,110 | 29k | `src/ui/sessions.tsx` |
@@ -56,7 +56,7 @@ is paid again on every turn of the session that opened it.
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 
-Total: 46 files, 117,049 lines, ~1691k tokens if every one were read whole.
+Total: 46 files, 117,073 lines, ~1691k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -1167,81 +1167,81 @@ Total: 46 files, 117,049 lines, ~1691k tokens if every one were read whole.
 
 ## `app/(client)/scans.tsx`
 
-3,100 lines · ~50k tokens · 72 anchors
+3,114 lines · ~50k tokens · 72 anchors
 
 ```
-138-219       §        the handover document
-220-239       fn       consentWhen
-240-282       §        The two invokes that used to live here
-283-283       fn       Wheel
-284-337       fn         step
-338-342       fn       coachSubject
-343-357       default  Scans
-358-370       §        sharing and exporting this record
-371-389       fn         exportRows
-390-390       fn         sendPdf
-391-391       fn         sendCsv
-392-393       fn         sendSummary
-394-428       §        the handover document
-429-440       fn         muscleBoard7
-441-448       fn         muscleShading7
-449-469       fn         muscleWeek
-470-531       fn         buildReport
-532-546       fn         shareForProfessional
-547-575       fn         shareProgress
-576-621       fn           options
-622-635       fn         fieldFromKg
-636-707       §        who can see these
-708-725       fn         _connectedKey
-726-756       fn         devWeight
-757-759       fn         pull
-760-790       §        Correcting a scan
-791-812       §        the correction sheet's own date wheel
-813-813       fn         scanDateISO
-814-829       fn         scanDateLabel
-830-838       fn         pick
-839-931       fn         runSheetRead
-932-949       fn         saveScan
-950-993       §        the muscle figure, against the weight beside it
-994-1090      §        what the OTHER scans say, and whether we heard them
-1091-1104     fn           sign
-1105-1108     §        progress photos
-1109-1125     fn         loadPhotos
-1126-1144     fn         loadShares
-1145-1163     fn         loadPubs
-1164-1190     fn         allowPublishing
-1191-1211     fn         stopPublishing
-1212-1225     fn         savePhoto
-1226-1276     §        The three arguments this call has always accepted and never been
-1277-1277     fn         physiqueCheck
-1278-1337     fn           keep
-1338-1349     fn         exifTakenAt
-1350-1383     fn         addPhoto
-1384-1423     fn         removePhoto
-1424-1450     fn         sendToCoach
-1451-1476     fn         takeBackFromCoach
-1477-1480     fn         photoActions
-1481-1499     fn           buttons
-1500-1501     fn         toggleCmp
-1502-1503     fn         chrono
-1504-1522     fn         wsv
-1523-1524     fn         editing
-1525-1555     fn         openEdit
-1556-1561     fn         eWheelISO
-1562-1575     fn         saveEdit
-1576-1598     §        the date, and the consequence said before it happens
-1599-1639     fn               proceed
-1640-1678     fn         removeScan
-1679-1697     §        where each figure came from, and when
-1698-1721     fn         priorOf
-1722-1756     fn         progressTrendReads
-1757-1782     fn         dlt
-1783-1789     §        the latest scan as one picture
-1790-2222     fn         comp
-2223-2274     fn               p
-2275-2466     fn               p
-2467-2493     §        this row, in the member's own unit
-2494-3100     fn               series
+138-222       §        the handover document
+223-242       fn       consentWhen
+243-285       §        The two invokes that used to live here
+286-286       fn       Wheel
+287-340       fn         step
+341-345       fn       coachSubject
+346-360       default  Scans
+361-373       §        sharing and exporting this record
+374-392       fn         exportRows
+393-393       fn         sendPdf
+394-394       fn         sendCsv
+395-396       fn         sendSummary
+397-431       §        the handover document
+432-443       fn         muscleBoard7
+444-451       fn         muscleShading7
+452-472       fn         muscleWeek
+473-534       fn         buildReport
+535-549       fn         shareForProfessional
+550-578       fn         shareProgress
+579-624       fn           options
+625-638       fn         fieldFromKg
+639-710       §        who can see these
+711-728       fn         _connectedKey
+729-759       fn         devWeight
+760-762       fn         pull
+763-793       §        Correcting a scan
+794-815       §        the correction sheet's own date wheel
+816-816       fn         scanDateISO
+817-832       fn         scanDateLabel
+833-841       fn         pick
+842-934       fn         runSheetRead
+935-952       fn         saveScan
+953-996       §        the muscle figure, against the weight beside it
+997-1093      §        what the OTHER scans say, and whether we heard them
+1094-1107     fn           sign
+1108-1111     §        progress photos
+1112-1128     fn         loadPhotos
+1129-1147     fn         loadShares
+1148-1166     fn         loadPubs
+1167-1193     fn         allowPublishing
+1194-1214     fn         stopPublishing
+1215-1228     fn         savePhoto
+1229-1279     §        The three arguments this call has always accepted and never been
+1280-1280     fn         physiqueCheck
+1281-1340     fn           keep
+1341-1352     fn         exifTakenAt
+1353-1386     fn         addPhoto
+1387-1426     fn         removePhoto
+1427-1453     fn         sendToCoach
+1454-1479     fn         takeBackFromCoach
+1480-1483     fn         photoActions
+1484-1502     fn           buttons
+1503-1504     fn         toggleCmp
+1505-1506     fn         chrono
+1507-1525     fn         wsv
+1526-1527     fn         editing
+1528-1558     fn         openEdit
+1559-1564     fn         eWheelISO
+1565-1578     fn         saveEdit
+1579-1601     §        the date, and the consequence said before it happens
+1602-1642     fn               proceed
+1643-1681     fn         removeScan
+1682-1700     §        where each figure came from, and when
+1701-1724     fn         priorOf
+1725-1759     fn         progressTrendReads
+1760-1785     fn         dlt
+1786-1792     §        the latest scan as one picture
+1793-2232     fn         comp
+2233-2284     fn               p
+2285-2500     fn               p
+2501-2527     §        this row, in the member's own unit
+2528-3114     fn               series
 ```
 
 ## `app/(client)/nutrition.tsx`
@@ -1748,7 +1748,7 @@ Total: 46 files, 117,049 lines, ~1691k tokens if every one were read whole.
 
 ## `src/ui/kit.tsx`
 
-2,440 lines · ~32k tokens · 72 anchors
+2,450 lines · ~32k tokens · 72 anchors
 
 ```
 1-71          §        The kit
@@ -1775,54 +1775,54 @@ Total: 46 files, 117,049 lines, ~1691k tokens if every one were read whole.
 930-989       fn       QuickRow
 990-1016      fn       Scrim
 1017-1114     fn       Meter
-1115-1139     fn       Spark
-1140-1142     fn         vals
-1143-1143     fn         x
-1144-1151     fn         y
-1152-1210     fn         pick
-1211-1314     fn               at
-1315-1328     fn       Flag
-1329-1367     fn       Notice
-1368-1399     fn       PartialRead
-1400-1414     fn       Dot
-1415-1501     type     FigureItem
-1502-1533     fn       FigureCard
-1534-1537     fn         say
-1538-1597     fn         one
-1598-1626     type     SyncState
-1627-1671     fn       SyncBadge
-1672-1772     fn       AttentionRow
-1773-1829     fn       ActionBlock
-1830-1894     fn       Expandable
-1895-1906     fn       ChartShell
-1907-1948     fn         quiet
-1949-1949     fn       clamp01
-1950-1955     fn       known
-1956-1972     fn       IconPlate
-1973-1995     fn       TonedChip
-1996-2035     fn       RingBase
-2036-2049     type     RingProps
-2050-2056     fn       Ring
-2057-2065     fn       HeroRing
-2066-2073     fn       MiniRing
-2074-2120     fn       CtaBright
-2121-2159     fn       HeroCard
-2160-2173     type     DayBar
-2174-2175     fn       DayBars
-2176-2201     fn         top
-2202-2218     type     Slice
-2219-2224     fn       Donut
-2225-2225     fn         drawn
-2226-2256     fn         total
-2257-2274     fn       Legend
-2275-2276     fn       plot
-2277-2279     fn         vals
-2280-2280     fn         x
-2281-2295     fn         y
-2296-2340     fn       KpiTile
-2341-2383     type     Segment
-2384-2392     fn       Segmented
-2393-2440     fn         segs
+1115-1140     fn       Spark
+1141-1143     fn         vals
+1144-1144     fn         x
+1145-1152     fn         y
+1153-1220     fn         pick
+1221-1324     fn               at
+1325-1338     fn       Flag
+1339-1377     fn       Notice
+1378-1409     fn       PartialRead
+1410-1424     fn       Dot
+1425-1511     type     FigureItem
+1512-1543     fn       FigureCard
+1544-1547     fn         say
+1548-1607     fn         one
+1608-1636     type     SyncState
+1637-1681     fn       SyncBadge
+1682-1782     fn       AttentionRow
+1783-1839     fn       ActionBlock
+1840-1904     fn       Expandable
+1905-1916     fn       ChartShell
+1917-1958     fn         quiet
+1959-1959     fn       clamp01
+1960-1965     fn       known
+1966-1982     fn       IconPlate
+1983-2005     fn       TonedChip
+2006-2045     fn       RingBase
+2046-2059     type     RingProps
+2060-2066     fn       Ring
+2067-2075     fn       HeroRing
+2076-2083     fn       MiniRing
+2084-2130     fn       CtaBright
+2131-2169     fn       HeroCard
+2170-2183     type     DayBar
+2184-2185     fn       DayBars
+2186-2211     fn         top
+2212-2228     type     Slice
+2229-2234     fn       Donut
+2235-2235     fn         drawn
+2236-2266     fn         total
+2267-2284     fn       Legend
+2285-2286     fn       plot
+2287-2289     fn         vals
+2290-2290     fn         x
+2291-2305     fn         y
+2306-2350     fn       KpiTile
+2351-2393     type     Segment
+2394-2402     fn       Segmented
+2403-2450     fn         segs
 ```
 
 ## `studio-web/app/timetable/page.tsx`

@@ -483,7 +483,7 @@ export default function Consistency() {
               lands — so for the first frame every one of the twelve weeks is a
               blank square, which is the same claim the hero was making. It
               cannot say much in a heading, but it can say it is not finished. */}
-          <SectionHead title="Training Days" note={logStatus === 'loading' ? 'Still reading' : `${WEEKS} weeks`} />
+          <SectionHead title="Training Days" note={logStatus === 'loading' ? 'Still Reading' : `${WEEKS} Weeks`} />
           {/* ── what the grid is, said once ──────────────────────────────
               Eighty-four squares with nothing above them and nothing spoken is
               a picture only a sighted reader can use, and only roughly: a gap

@@ -487,7 +487,7 @@ export default function Muscles() {
           both reads landed whole. */}
       {showLeast ? (<>
         <View style={{ height: sp.xl }} />
-        <SectionHead title="Least Trained" note="Of the muscles you did work" />
+        <SectionHead title="Least Trained" note="Of the Muscles You Did Work" />
         {rankings.least.map((e) => (
           // The same bar on the same scale as the list above, so a short one
           // here is short BESIDE those — in blue, because this list is not
@@ -550,7 +550,7 @@ export default function Muscles() {
         tick and no green, because this app measures none of the things that
         would justify one. */}
     <Section>
-      <SectionHead title="Recovery Map" note={rests.length ? `${num(rests.length)} muscles` : undefined} />
+      <SectionHead title="Recovery Map" note={rests.length ? `${num(rests.length)} Muscles` : undefined} />
       {rests.length === 0 ? (
         <Text style={{ ...ty.body, color: t.ink2 }}>
           There is nothing to map yet. No set in this window could be filed to a muscle, and the

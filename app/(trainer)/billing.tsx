@@ -412,7 +412,7 @@ export default function TrainerBilling() {
             No total, here or anywhere near here. Every row carries its own
             currency from Stripe and two currencies do not add up. */}
         <Section>
-          <SectionHead title="Your Invoices" note="what Repple has charged you" />
+          <SectionHead title="Your Invoices" note="What Repple Has Charged You" />
           {(() => {
             const state = invoiceListState(invoices, invStatus);
             const note = invoiceListNote(state);

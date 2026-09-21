@@ -741,7 +741,7 @@ export default function MyCoach() {
                 squeezed. */}
             {showRhythm ? (
               <Section>
-                <SectionHead title="Check-in Rhythm" note={`Last ${WEEKS} weeks`} onPress={() => go('/(client)/checkin')} />
+                <SectionHead title="Check-in Rhythm" note={`Last ${WEEKS} Weeks`} onPress={() => go('/(client)/checkin')} />
                 {rhythm ? (
                   <>
                     <View style={{ flexDirection: fontScale >= 1.35 ? 'column' : 'row', alignItems: 'center', gap: sp.lg }}>
