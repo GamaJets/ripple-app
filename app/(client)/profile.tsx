@@ -12,7 +12,8 @@
 // sits on the ground under a centred head with Settings at its trailing edge,
 // the three figures are tiles in their own hues over eight real weeks, the
 // badges are a row of medals, and the daily target is the macro mix as a donut.
-// Flow: who you are → what you have done → what you hold → rows.
+// Flow: who you are → search → the six groups → most people start here →
+// what you have done → what you hold → the goal and coaching controls.
 //
 // TF-37: the edit sheet had its own kg/lb and cm/in toggles, local to the
 // modal and gone the moment it closed, converting through a bare `round1` in
@@ -671,6 +672,53 @@ export default function Profile() {
           ) : null}
         </HeroCard>
 
+        {/* ── search, before anything else ──────────────────────────────────
+            Not a second search. It is the field Explore already owns, sitting
+            where a member looks first; tapping it opens that screen. A member
+            who knows the word for what they want should never have to know
+            which of six cards it was filed under. */}
+        <Pressable onPress={() => router.push("/(client)/explore")} accessibilityRole="button"
+          accessibilityLabel="Search anything in Repple"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginTop: sp.lg }}>
+          <Icon name="search" size={16} color={t.ink3} />
+          <Text style={{ ...ty.body, color: t.ink3 }}>Search anything in Repple</Text>
+        </Pressable>
+
+        {/* ── the six ───────────────────────────────────────────────────────
+            A card with a coloured spine, its name, and the line that says what
+            is behind it. The spine is the group's Tone through the data
+            palette — never a hex here. */}
+        <View style={{ gap: sp.sm, marginTop: sp.lg }}>
+          {groups.map((g) => (
+            <Pressable key={g.key} onPress={() => router.push({ pathname: '/(client)/me-group', params: { g: g.key } })}
+              accessibilityRole="button" accessibilityLabel={`${g.title}. ${g.note}. ${g.items.length} screens`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, borderStartWidth: 4, borderStartColor: toneOf(t, g.tone).mark, ...elevation.card }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ ...ty.head, color: t.ink }}>{g.title}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{g.note}</Text>
+              </View>
+              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{g.items.length}</Text>
+              <Icon name={FORWARD_ICON} size={18} color={t.ink3} />
+            </Pressable>
+          ))}
+        </View>
+
+        {/* ── three shortcuts, and an honest heading over them ─────────────
+            ME_QUICK_TITLE is "Most people start here", not "You open these
+            most". Nothing records which screens THIS member opens, so the
+            second sentence would be a claim about them that the app has no
+            basis for. See ME_QUICK in src/lib/features.ts. */}
+        {quick.length ? (
+          <Section style={{ marginTop: sp.lg }}>
+            <SectionHead title={ME_QUICK_TITLE} />
+            {quick.map((f) => (
+              <ListRow key={f.route} icon={f.icon} tone="brand" title={f.label} note={f.note}
+                onPress={() => router.push(f.route as any)} />
+            ))}
+          </Section>
+        ) : null}
+
+
         {/* The mockup's three: workouts, badges, best streak — each a tile of
             its own on the ground, in its own hue, over its own eight weeks. All
             counted off the training log, and only under a WHOLE read of it. A
@@ -718,20 +766,6 @@ export default function Profile() {
           ) : null}
         </Section>
 
-        <Section>
-          {/* A named tone each — the mockups' coloured icon plates — so the hub
-              stops being a column of seven identical grey circles. The hue is
-              decoration and carries nothing: every row says what it is. */}
-          <ListRow icon="pencil" tone="brand" title="Edit Profile" note="Photo, name and body details" onPress={openEdit} />
-          <ListRow icon="heart" tone="pink" title="Connected Apps" note="Your watch and the apps that feed your day" onPress={() => router.push('/(client)/devices')} />
-          <ListRow icon="target" tone="purple" title="Goals" note="What you are working toward, and by when" onPress={() => router.push('/(client)/goal')} />
-          <ListRow icon="bell" tone="amber" title="Notifications" note="Choose what you are sent, and when" onPress={() => router.push('/(client)/notification-prefs')} />
-          <ListRow icon="lock" tone="blue" title="Privacy" note="Your account, your data and who can see it" onPress={() => router.push('/(client)/account')} />
-          <ListRow icon="message" tone="teal" title="Help & Support" note="Tell us what to improve, or ask for help" onPress={() => router.push('/(client)/feedback')} />
-          {/* Sign Out stays on Settings, where its confirmation and the
-              sentence about what a failed sign-out means already live. */}
-          <ListRow icon="settings" tone="neutral" title="Settings" note="Units, appearance, legal and sign out" onPress={() => router.push('/(client)/settings')} />
-        </Section>
 
         {/* A photo saved before there was anywhere to put it. The member is the
             only person who can fix it and the one person for whom nothing looks
@@ -840,51 +874,6 @@ export default function Profile() {
         </Section>
 
 
-        {/* ── search, before anything else ──────────────────────────────────
-            Not a second search. It is the field Explore already owns, sitting
-            where a member looks first; tapping it opens that screen. A member
-            who knows the word for what they want should never have to know
-            which of six cards it was filed under. */}
-        <Pressable onPress={() => router.push("/(client)/explore")} accessibilityRole="button"
-          accessibilityLabel="Search anything in Repple"
-          style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginTop: sp.lg }}>
-          <Icon name="search" size={16} color={t.ink3} />
-          <Text style={{ ...ty.body, color: t.ink3 }}>Search anything in Repple</Text>
-        </Pressable>
-
-        {/* ── the six ───────────────────────────────────────────────────────
-            A card with a coloured spine, its name, and the line that says what
-            is behind it. The spine is the group's Tone through the data
-            palette — never a hex here. */}
-        <View style={{ gap: sp.sm, marginTop: sp.lg }}>
-          {groups.map((g) => (
-            <Pressable key={g.key} onPress={() => router.push({ pathname: '/(client)/me-group', params: { g: g.key } })}
-              accessibilityRole="button" accessibilityLabel={`${g.title}. ${g.note}. ${g.items.length} screens`}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface, borderRadius: radius.lg, padding: sp.lg, borderStartWidth: 4, borderStartColor: toneOf(t, g.tone).mark, ...elevation.card }}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={{ ...ty.head, color: t.ink }}>{g.title}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{g.note}</Text>
-              </View>
-              <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{g.items.length}</Text>
-              <Icon name={FORWARD_ICON} size={18} color={t.ink3} />
-            </Pressable>
-          ))}
-        </View>
-
-        {/* ── three shortcuts, and an honest heading over them ─────────────
-            ME_QUICK_TITLE is "Most people start here", not "You open these
-            most". Nothing records which screens THIS member opens, so the
-            second sentence would be a claim about them that the app has no
-            basis for. See ME_QUICK in src/lib/features.ts. */}
-        {quick.length ? (
-          <Section style={{ marginTop: sp.lg }}>
-            <SectionHead title={ME_QUICK_TITLE} />
-            {quick.map((f) => (
-              <ListRow key={f.route} icon={f.icon} tone="brand" title={f.label} note={f.note}
-                onPress={() => router.push(f.route as any)} />
-            ))}
-          </Section>
-        ) : null}
       </ScrollView>
 
       {/* edit profile sheet */}

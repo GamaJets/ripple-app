@@ -97,7 +97,7 @@ import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc,
 import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import { Rule, Section, SectionHead, PageHead, Segmented, TonedChip, IconPlate, KpiRow, ActionCard, Cta, Ghost, Spark, Expandable, Field, fig, Flag, ChipGrid, HeroCard } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Segmented, TonedChip, IconPlate, KpiRow, Cta, Ghost, Spark, Expandable, Field, fig, Flag, ChipGrid, HeroCard } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, font, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
@@ -1845,7 +1845,8 @@ export default function Scans() {
             The approved night card, off the kit: the latest reading of the
             chosen metric as the headline, `measuredNote` under it (the
             instrument, the day and the age, in that order), the movement as a
-            chip, and Add Scan as the one action. The chart, the range and the
+            chip that names its own span ("+0.5 kg since Aug 25"), so each date
+            sits with the thing it dates, and Add Scan as the one action. The chart, the range and the
             targets are the evidence, in the card under it.
 
             What it says about data it does not have. While the scans are
@@ -1878,7 +1879,7 @@ export default function Scans() {
                   : cd.scansStatus === 'partial' ? 'Scans Not Read in Full'
                   : progressMetric === 'weight' ? 'No Weight Yet' : 'No Body Fat Yet')}
               meta={figure && progressNow
-                ? `${progressWas && scansLanded ? `since ${bodyDayLabel(progressWas.at)} · ` : ''}${measuredNote(progressNow, today)}${cd.scansStatus === 'error' ? '. Your scans could not be read, so a newer reading may be missing.' : ''}`
+                ? `${measuredNote(progressNow, today)}${cd.scansStatus === 'error' ? '. Your scans could not be read, so a newer reading may be missing.' : ''}`
                 : scansReading ? 'Your latest figure is shown once your scans are read.'
                 : !scansWhole ? 'Your scans could not be read in full. This is not a body with nothing measured on it.'
                 : progressMetric === 'weight' ? 'No weight on record yet. Add a check-in or an InBody scan.'
@@ -1888,7 +1889,7 @@ export default function Scans() {
               {figure && scansLanded ? (
                 <View style={{ marginTop: sp.md }}>
                   <TonedChip tone={progressWas && progressGood ? 'brand' : 'neutral'} label={progressWas
-                    ? deltaLabel(progressDelta, { since: null, unit })
+                    ? deltaLabel(progressDelta, { since: bodyDayLabel(progressWas.at), unit })
                     : 'First Reading'} />
                 </View>
               ) : null}
@@ -2045,21 +2046,21 @@ export default function Scans() {
           ]}
         />
 
-        {/* ── the one card: the scan you can act on ───────────────────────── */}
+        {/* ── the latest scan, as information ─────────────────────────────
+            Its own Add Scan button is gone: the hero's is the screen's one
+            action, and two of them on one screen was the duplicate. */}
         <Section>
-          <ActionCard
-            title={latest ? 'Latest InBody Scan' : 'Add Your First InBody Scan'}
-            // The scan's OWN figures and the scan's OWN date. This card is the
-            // one place on the screen whose subject really is the scan, so it
-            // may differ from the Weight tile below — and it now says the date
-            // out loud so that difference reads as two measurements on two days
-            // rather than as the app contradicting itself.
-            note={latest
+          <SectionHead title={latest ? 'Latest InBody Scan' : 'Your First InBody Scan'} />
+          {/* The scan's OWN figures and the scan's OWN date. This is the one
+              place on the screen whose subject really is the scan, so it may
+              differ from the Weight tile below, and it says the date out loud
+              so that difference reads as two measurements on two days rather
+              than as the app contradicting itself. */}
+          <Text style={{ ...ty.body, color: t.ink2 }}>
+            {latest
               ? `${fig(weightLabel(latest.weightKg, wu))} · ${latest.bodyFatPct}% BF · ${bodyDayLabel(latest.takenAt)}${ago ? ` · ${ago}` : ''}`
               : 'Snap or upload your report, and the numbers are read for you.'}
-            cta={latest ? 'Add Scan' : 'Start'}
-            onPress={() => setShowAdd(true)}
-          />
+          </Text>
         </Section>
 
         {/* ── the dated list, as the board draws it under the chart ────────
