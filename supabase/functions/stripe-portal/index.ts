@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
   // nothing was charged rather than asking for a password that was never wrong.
   const { data: auth, error: authErr } = await service.auth.getUser(jwt);
   if (authErr && authReadFate(authErr) === 'unreadable') {
-    return json({ error: 'Repple could not check who you are just now — that is our end, not yours. '
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
       + 'Nothing has been changed. Try opening your billing again in a moment.' }, 503);
   }
   const userId = auth?.user?.id;

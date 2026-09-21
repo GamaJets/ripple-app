@@ -112,7 +112,7 @@ const PROMPTS: Record<string, string> = {
     'Definitions: weightKg=total body weight kg; bodyFatPct=PBF %; skeletalMuscleKg=SMM kg; visceralFat=visceral fat level (unitless); ' +
     'inbodyScore=total InBody score points; bmr=basal metabolic rate kcal; fatMassKg=body fat mass kg; leanMassKg=lean/fat-free body mass kg; ' +
     'bodyWaterL=total body water L; proteinKg and mineralsKg in kg; leanArmLKg/leanArmRKg/leanTrunkKg/leanLegLKg/leanLegRKg are the segmental lean analysis (left/right arm, trunk, left/right leg) in kg. ' +
-    'takenAt is the scan/test date. The date printed on the sheet is in DAY/MONTH/YEAR order (international format) — e.g. "05/07/2026" or "05.07.2026" means 5 July 2026, NOT 7 May. Convert it and return takenAt as YYYY-MM-DD (so 5 July 2026 -> "2026-07-05"). Use null for any field not present. Return numbers as numbers.',
+    'takenAt is the scan/test date. The date printed on the sheet is in DAY/MONTH/YEAR order (international format). E.g. "05/07/2026" or "05.07.2026" means 5 July 2026, NOT 7 May. Convert it and return takenAt as YYYY-MM-DD (so 5 July 2026 -> "2026-07-05"). Use null for any field not present. Return numbers as numbers.',
 };
 
 /** The image types the vision API accepts, and the only values that may reach
@@ -173,10 +173,10 @@ const LOAD_BEARING: Record<Mode, string | null> = {
  *  "the reader did not give a calorie figure for it" is what actually happened,
  *  and it is the sentence that leaves the member in charge of the decision. */
 const NOTHING_READ: Record<Mode, string> = {
-  meal: 'The reader looked at this photo and did not give a calorie figure for it. Nothing has been filled in — type the meal in, or try a clearer photo.',
+  meal: 'The reader looked at this photo and did not give a calorie figure for it. Nothing has been filled in. Type the meal in, or try a clearer photo.',
   physique: 'The reader looked at this photo and did not return an estimate from it. Nothing has been filled in.',
-  machine: 'The reader looked at this photo and did not name a machine in it. Nothing has been filled in — pick the exercise yourself.',
-  inbody: 'The reader looked at this sheet and did not read a single figure off it. Nothing has been filled in — type the numbers in, or try a straighter, brighter photo.',
+  machine: 'The reader looked at this photo and did not name a machine in it. Nothing has been filled in. Pick the exercise yourself.',
+  inbody: 'The reader looked at this sheet and did not read a single figure off it. Nothing has been filled in. Type the numbers in, or try a straighter, brighter photo.',
 };
 
 /** Said on every read, because every one of these figures is an ESTIMATE from
@@ -213,7 +213,7 @@ Deno.serve(async (req: Request) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Your photo has not been read and has not been sent anywhere. Try again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));

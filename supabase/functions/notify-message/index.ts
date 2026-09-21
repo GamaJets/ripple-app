@@ -134,7 +134,7 @@ Deno.serve(async (req: Request) => {
   if (recipientUnreadable) {
     console.error(
       'notify-message: could not read who thread ' + clientId + ' belongs to, so a message from '
-      + (sender || 'a client') + ' was notified to NOBODY — no inbox row and no push. '
+      + (sender || 'a client') + ' was notified to NOBODY. No inbox row and no push. '
       + 'The trigger does not retry. Reason: ' + recipientUnreadable,
     );
     return json({ error: 'recipient unreadable' }, 500);
@@ -275,7 +275,7 @@ Deno.serve(async (req: Request) => {
     // and is what the recipient finds; the banner is what was lost.
     const { data: toks, error: tokErr } = await admin.from('push_tokens').select('token').eq('user_id', recipient);
     if (tokErr) {
-      console.error('notify-message: could not read the handsets for ' + recipient + ', so no push was sent for this message — this is NOT the same as them having none:', tokErr.message);
+      console.error('notify-message: could not read the handsets for ' + recipient + ', so no push was sent for this message. This is NOT the same as them having none:', tokErr.message);
     }
     const tokens: string[] = (toks ?? []).map((r: any) => r.token).filter(Boolean);
     if (tokens.length) {

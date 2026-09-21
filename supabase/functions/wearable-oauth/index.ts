@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
   // The `catch` is the non-AuthError path — the only thing `getUser` actually
   // throws — and it establishes nothing either, so it answers the same way.
   // It used to fall through to the refusal, which was the same false sentence.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Nothing has been connected and your existing devices are untouched. Try connecting again in a moment.';
   let userId = '';
   try {
@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
       userId = data?.user?.id || '';
     }
   } catch { return fail(CANNOT_ASK); }
-  if (!userId) return fail('Not signed in — sign in to Repple and try connecting again.');
+  if (!userId) return fail('Not signed in. Sign in to Repple and try connecting again.');
 
   const redirectUri = String(body.redirect_uri || '');
   const verifier = body.code_verifier ? String(body.code_verifier) : '';
@@ -181,7 +181,7 @@ Deno.serve(async (req) => {
     if (combined.includes('invalid_grant')) {
       return fail(`WHOOP rejected the sign-in code (${combined}). Tap Connect again to start a fresh sign-in.`);
     }
-    return fail(`Token exchange failed — ${combined}`);
+    return fail(`Token exchange failed: ${combined}`);
   }
 
   const expiresAt = new Date(Date.now() + (Number(tok.expires_in) || 3600) * 1000).toISOString();

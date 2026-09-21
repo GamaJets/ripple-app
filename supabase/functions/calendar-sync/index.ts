@@ -240,7 +240,7 @@ Deno.serve(async (req) => {
   // refusal below told a SIGNED-IN coach to sign in again, in front of a Google
   // OAuth `code` that is single-use and dead by the time they come back.
   // src/lib/authReadFate.ts separates the two; `unreadable` established nothing.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Nothing has been connected and your existing calendar is untouched. Try connecting again in a moment.';
   try {
     const jwt = (req.headers.get('Authorization') || '').replace('Bearer ', '');
@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
       userId = data.user.id;
     }
   } catch { return fail(CANNOT_ASK); }
-  if (!userId) return fail('Not signed in — sign in to Repple and try connecting your calendar again.');
+  if (!userId) return fail('Not signed in. Sign in to Repple and try connecting your calendar again.');
 
   const clientId = Deno.env.get('GOOGLE_CALENDAR_CLIENT_ID') || '';
   if (!clientId) {

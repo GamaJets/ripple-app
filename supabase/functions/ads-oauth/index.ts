@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
   const clientId = Deno.env.get('META_ADS_CLIENT_ID') || '';
   const clientSecret = Deno.env.get('META_ADS_CLIENT_SECRET') || '';
   if (!clientId || !clientSecret) {
-    return fail('Ad-account connection is not configured on the server yet — the owner sets META_ADS_CLIENT_ID and META_ADS_CLIENT_SECRET as Supabase secrets.');
+    return fail('Ad-account connection is not configured on the server yet. The owner sets META_ADS_CLIENT_ID and META_ADS_CLIENT_SECRET as Supabase secrets.');
   }
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Nothing has been connected and your existing ad accounts are untouched. Try connecting again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
@@ -264,7 +264,7 @@ Deno.serve(async (req) => {
       // Named, not flattened. `ads_read` missing here is App Review, and no
       // amount of reconnecting fixes it.
       warning: /permission/i.test(accounts.error)
-        ? `Meta signed you in but would not list your ad accounts: ${accounts.error}. Reading ad spend needs the ads_read permission, which Meta only grants an app after App Review — until Repple has that, this works only for accounts with a role on the Repple Meta app.`
+        ? `Meta signed you in but would not list your ad accounts: ${accounts.error}. Reading ad spend needs the ads_read permission, which Meta only grants an app after App Review. Until Repple has that, this works only for accounts with a role on the Repple Meta app.`
         : `Meta signed you in but would not list your ad accounts: ${accounts.error}`,
       longLived: long.ok,
     });

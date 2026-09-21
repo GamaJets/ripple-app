@@ -72,7 +72,7 @@ const PROMPT =
  * app has ruled something out.
  */
 const NONE_NAMED =
-  'The reader read your description and did not name any food in it. Nothing has been filled in — try describing it differently, or type the figures in.';
+  'The reader read your description and did not name any food in it. Nothing has been filled in. Try describing it differently, or type the figures in.';
 
 /** Said on every read, because every figure below is an ESTIMATE from a
  *  description and not a measurement of anything. The screens say so too
@@ -102,7 +102,7 @@ Deno.serve(async (req: Request) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Nothing has been logged. Try again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
@@ -144,7 +144,7 @@ Deno.serve(async (req: Request) => {
     const read = readNutritionItems(answer.value);
     if (!read.ok) {
       return json({
-        error: 'The reader answered, but not with a list of foods this app could read. Nothing has been filled in — try again, or type it in.',
+        error: 'The reader answered, but not with a list of foods this app could read. Nothing has been filled in. Try again, or type it in.',
         why: read.why,
       }, 502);
     }

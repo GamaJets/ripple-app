@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Nothing has been scanned and your sheet has not been sent anywhere. Try again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
   if (!key || key === 'helloworld') {
     // Say so plainly rather than silently falling back to the demo key and
     // producing scans that fail at random.
-    return json({ ok: false, error: 'Scanning is not configured yet — no OCR key is set on the server.' });
+    return json({ ok: false, error: 'Scanning is not configured yet. No OCR key is set on the server.' });
   }
 
   let body: any = {};
@@ -101,7 +101,7 @@ Deno.serve(async (req) => {
   if (b64.length > MAX_B64) {
     return json({ ok: false, error: isPdf
       ? 'That document is too large to read. Try a shorter one, or photograph the page you need.'
-      : 'That photo is too large — try again a little further back.' });
+      : 'That photo is too large. Try again a little further back.' });
   }
 
   try {

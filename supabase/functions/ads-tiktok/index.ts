@@ -187,7 +187,7 @@ Deno.serve(async (req) => {
   const appId = Deno.env.get('TIKTOK_ADS_APP_ID') || '';
   const secret = Deno.env.get('TIKTOK_ADS_APP_SECRET') || '';
   if (!appId || !secret) {
-    return fail('Connecting a TikTok ad account is not configured on the server yet — the owner sets TIKTOK_ADS_APP_ID and TIKTOK_ADS_APP_SECRET as Supabase secrets, from an app created in the TikTok for Business developer portal.');
+    return fail('Connecting a TikTok ad account is not configured on the server yet. The owner sets TIKTOK_ADS_APP_ID and TIKTOK_ADS_APP_SECRET as Supabase secrets, from an app created in the TikTok for Business developer portal.');
   }
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -204,7 +204,7 @@ Deno.serve(async (req) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Nothing has been connected and your existing ad accounts are untouched. Try again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
@@ -232,7 +232,7 @@ Deno.serve(async (req) => {
     );
     if (!tok.ok) {
       if (/auth_code|expired|used/i.test(tok.error)) {
-        return fail(`TikTok would not accept that sign-in code (${tok.error}). A code is single-use and short-lived — tap Connect again to start a fresh sign-in.`);
+        return fail(`TikTok would not accept that sign-in code (${tok.error}). A code is single-use and short-lived. Tap Connect again to start a fresh sign-in.`);
       }
       return fail(`TikTok refused the sign-in: ${tok.error}`);
     }
@@ -360,7 +360,7 @@ Deno.serve(async (req) => {
   if (!report.ok) {
     const gated = /permission|not authoriz|scope/i.test(report.error);
     return record('failed', gated
-      ? `TikTok refused to report your ad spend: ${report.error}. Reading spend needs the Ads Reporting permission on the app the coach authorised — the owner grants it in the TikTok for Business developer portal and the coach then reconnects.`
+      ? `TikTok refused to report your ad spend: ${report.error}. Reading spend needs the Ads Reporting permission on the app the coach authorised. The owner grants it in the TikTok for Business developer portal and the coach then reconnects.`
       : `TikTok refused to report your ad spend: ${report.error}`,
       null, null, null, null, [], []);
   }

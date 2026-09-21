@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'No figures have been changed. Try syncing again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
@@ -217,7 +217,7 @@ Deno.serve(async (req) => {
   if (!insights.ok) {
     const gated = /permission|ads_read|(#|code )10\b|OAuthException/i.test(insights.error);
     return record('failed', gated
-      ? `Meta refused to report your ad spend: ${insights.error}. Reading spend needs the ads_read permission, which Meta grants an app only after App Review — until Repple has that, this works only for Meta accounts with a role on the Repple app.`
+      ? `Meta refused to report your ad spend: ${insights.error}. Reading spend needs the ads_read permission, which Meta grants an app only after App Review. Until Repple has that, this works only for Meta accounts with a role on the Repple app.`
       : `Meta refused to report your ad spend: ${insights.error}`,
       null, null, null, null, [], []);
   }

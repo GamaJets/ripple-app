@@ -887,7 +887,7 @@ Deno.serve(async (req) => {
       // A 5xx instead. The same caller then returns an empty list WITHOUT
       // claiming anything about the token, which is the honest outcome — and
       // the throw is logged, because until now nothing recorded it at all.
-      console.error('wearable-day: could not read ' + provider + ' workouts for ' + userId + ', so none are offered for import — this is NOT the same as none having been recorded:', (e as Error).message);
+      console.error('wearable-day: could not read ' + provider + ' workouts for ' + userId + ', so none are offered for import. This is NOT the same as none having been recorded:', (e as Error).message);
       return json({ workouts: [], error: 'could not read workouts' }, 502);
     }
   }

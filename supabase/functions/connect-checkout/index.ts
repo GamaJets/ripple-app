@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
   // nothing was charged rather than asking for a password that was never wrong.
   const { data: auth, error: authErr } = await service.auth.getUser(jwt);
   if (authErr && authReadFate(authErr) === 'unreadable') {
-    return json({ error: 'Repple could not check who you are just now — that is our end, not yours. '
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
       + 'Nothing has been charged. Try again in a moment.' }, 503);
   }
   const uid = auth?.user?.id;
@@ -565,7 +565,7 @@ Deno.serve(async (req) => {
     // refuses to create one for a coach on that model. Refused here rather than
     // sent to Stripe to come back as "No such promotion code".
     if (model !== 'direct') {
-      return json({ error: 'Your coach’s payment setup does not take discount codes. Nothing has been charged — buy it at the price shown, or ask them about the code.' }, 409);
+      return json({ error: 'Your coach’s payment setup does not take discount codes. Nothing has been charged. Buy it at the price shown, or ask them about the code.' }, 409);
     }
 
     let found: Stripe.PromotionCode | null = null;
@@ -578,7 +578,7 @@ Deno.serve(async (req) => {
       found = list.data[0] ?? null;
     } catch (e) { return stripeError('checking that code', e); }
     if (!found) {
-      return json({ error: 'That code is not one your coach is running, or it has stopped working. Nothing has been charged — check it with them.' }, 404);
+      return json({ error: 'That code is not one your coach is running, or it has stopped working. Nothing has been charged. Check it with them.' }, 404);
     }
     if (!codeAppliesTo(found.metadata?.repple_package_id, packageId)) {
       return json({ error: CODE_IS_FOR_ANOTHER_PACKAGE }, 400);

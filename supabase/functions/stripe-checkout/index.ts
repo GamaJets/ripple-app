@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
   // nothing was charged rather than asking for a password that was never wrong.
   const { data: auth, error: authErr } = await service.auth.getUser(jwt);
   if (authErr && authReadFate(authErr) === 'unreadable') {
-    return json({ error: 'Repple could not check who you are just now — that is our end, not yours. '
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
       + 'Nothing has been charged and your subscription is unchanged. Try again in a moment.' }, 503);
   }
   const userId = auth?.user?.id;
@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
   const allowed = allowedPrices();
   if (allowed) {
     if (!allowed.has(priceId)) {
-      console.warn('stripe-checkout: refused price ' + priceId + ' for trainer ' + userId + ' — not in STRIPE_PLAN_PRICE_IDS');
+      console.warn('stripe-checkout: refused price ' + priceId + ' for trainer ' + userId + ': not in STRIPE_PLAN_PRICE_IDS');
       return json({ error: 'That is not a plan this app sells, so nothing has been charged.' }, 400);
     }
   } else {
@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
     // stopped selling, at the price it stopped selling it at, for ever.
     if (!price.active || !price.recurring) {
       console.warn('stripe-checkout: refused price ' + priceId + ' for trainer ' + userId
-        + ' — active=' + String(price.active) + ' recurring=' + String(!!price.recurring));
+        + ': active=' + String(price.active) + ' recurring=' + String(!!price.recurring));
       return json({ error: 'That plan is not on sale, so nothing has been charged.' }, 400);
     }
   }

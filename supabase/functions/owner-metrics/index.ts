@@ -174,7 +174,7 @@ Deno.serve(async (req: Request) => {
   //    are. Refusing is still correct (this fails closed either way); the
   //    sentence and the status are not. 503 says come back, 403 says never.
   const { data: prof, error: profErr } = await admin.from('profiles').select('role, tenant_id').eq('id', uid).maybeSingle();
-  if (profErr) return json({ ok: false, error: 'Repple could not check your access just now — that is our end, not yours. Nothing has changed. Try again in a moment.' }, 503);
+  if (profErr) return json({ ok: false, error: 'Repple could not check your access just now. That is our end, not yours. Nothing has changed. Try again in a moment.' }, 503);
   if (!prof || prof.role !== 'owner') return json({ ok: false, error: 'Owner access only.' }, 403);
   const tenantId: string | null = prof.tenant_id ?? null;
   if (!tenantId) return json({ ok: false, error: 'This owner account is not attached to a gym.' }, 403);

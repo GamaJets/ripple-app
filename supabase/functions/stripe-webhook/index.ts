@@ -893,7 +893,7 @@ Deno.serve(async (req) => {
       // recording one would put the platform's own banking on a coach's money
       // screen. A payout with no connected account behind it is not a coach's.
       if (!eventAccount) {
-        console.log('stripe-webhook: platform payout ' + payout.id + ' ignored — not a coach’s');
+        console.log('stripe-webhook: platform payout ' + payout.id + ' ignored. Not a coach’s');
       } else {
         // Null when the account resolves to no coach. The row is still written:
         // a payout this database cannot attribute still happened, and dropping
@@ -1215,7 +1215,7 @@ Deno.serve(async (req) => {
                 // states no currency or no amount anywhere, and there is no
                 // honest fallback for either: a currency invented here is a
                 // permanent wrong stamp on a row an accountant files.
-                console.error('stripe-webhook: gym order ' + orderId + ' was paid and could not be written to the ledger — the session and the order both state no usable amount or currency. Session ' + sess.id + '. The entitlement stands; the money is recorded only in Stripe.');
+                console.error('stripe-webhook: gym order ' + orderId + ' was paid and could not be written to the ledger. The session and the order both state no usable amount or currency. Session ' + sess.id + '. The entitlement stands; the money is recorded only in Stripe.');
               } else {
                 const { error: payErr } = await service.from('gym_payments').insert(ledgerRow);
                 if (payErr && String(payErr.code ?? '') === '23505') {
@@ -1674,7 +1674,7 @@ Deno.serve(async (req) => {
           // accepted instead, which leaves the sale visibly wrong rather than
           // invisibly retried.
           if (refErr && String(refErr.code ?? '') === '23514') {
-            console.error('stripe-webhook: refund of ' + refunded + ' on ' + sale.table + ' ' + sale.id + ' was refused by the amount check — this app has a smaller amount recorded than Stripe refunded. Charge ' + charge.id + '. Reconcile by hand.');
+            console.error('stripe-webhook: refund of ' + refunded + ' on ' + sale.table + ' ' + sale.id + ' was refused by the amount check. This app has a smaller amount recorded than Stripe refunded. Charge ' + charge.id + '. Reconcile by hand.');
           } else if (refErr) {
             return fail(sale.table + ' refund', refErr.message);
           } else if (!refRows) {
@@ -1686,7 +1686,7 @@ Deno.serve(async (req) => {
             // way. A log and not a 500, because a retry re-runs the same lookup
             // and reaches the "REFUND WITH NO SALE TO MIRROR IT ON" branch.
             console.error(
-              'stripe-webhook: refund of ' + refunded + ' had no row left in ' + sale.table + ' to record it on — '
+              'stripe-webhook: refund of ' + refunded + ' had no row left in ' + sale.table + ' to record it on: '
               + sale.id + ' has gone. Charge ' + charge.id + ', account ' + (eventAccount ?? 'platform')
               + '. Stripe is the only record that this money went back. Reconcile by hand.',
             );

@@ -182,7 +182,7 @@ async function removeCardObject(service: any, key: string): Promise<{ removed: b
     return { removed: false, why: `storage accepted the delete without saying what it removed, and the bucket could not be listed to check: ${listing.error.message || 'no reason given'}` };
   }
   if (!cardObjectAbsent(key, listing.data)) {
-    return { removed: false, why: 'storage accepted the delete and removed nothing — the object is still in the bucket' };
+    return { removed: false, why: 'storage accepted the delete and removed nothing. The object is still in the bucket' };
   }
   return { removed: true, why: null };
 }
@@ -232,7 +232,7 @@ async function markRemoval(service: any, key: string, r: { removed: boolean; why
       + ' and share_card_objects has no row for it to be recorded on.'
       + (r.removed
         ? ' Nothing is public and nothing is owed.'
-        : ' THE OBJECT IS STILL PUBLIC AND NO SWEEP WILL FIND IT — the sweep reads this table. Remove ' + key
+        : ' THE OBJECT IS STILL PUBLIC AND NO SWEEP WILL FIND IT. The sweep reads this table. Remove ' + key
           + ' from the ' + CARD_BUCKET + ' bucket by hand.'),
     );
     return false;
@@ -311,7 +311,7 @@ Deno.serve(async (req) => {
   const clientId = Deno.env.get('INSTAGRAM_CLIENT_ID') || '';
   const clientSecret = Deno.env.get('INSTAGRAM_CLIENT_SECRET') || '';
   if (!clientId || !clientSecret) {
-    return fail('Posting to Instagram is not configured on the server yet — the owner sets INSTAGRAM_CLIENT_ID and INSTAGRAM_CLIENT_SECRET as Supabase secrets.');
+    return fail('Posting to Instagram is not configured on the server yet. The owner sets INSTAGRAM_CLIENT_ID and INSTAGRAM_CLIENT_SECRET as Supabase secrets.');
   }
 
   // Who is asking, from their JWT alone. Never from the body: a trainer id in a
@@ -325,7 +325,7 @@ Deno.serve(async (req) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Nothing has been posted and nothing about your Instagram connection has changed. Try again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
@@ -750,7 +750,7 @@ Deno.serve(async (req) => {
     // than notice later, so it is said first and the sweep note follows.
     warning: [
       ledgerErr
-        ? 'Your post is up on Instagram, but Repple could not record it, so it will not appear in your post history here. Nothing needs reposting — the post is live.'
+        ? 'Your post is up on Instagram, but Repple could not record it, so it will not appear in your post history here. Nothing needs reposting. The post is live.'
         : undefined,
       removal.removed ? undefined
         : recorded

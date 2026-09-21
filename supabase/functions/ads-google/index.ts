@@ -107,7 +107,7 @@ async function call<T>(url: string, init: RequestInit): Promise<Res<T>> {
       Array.isArray(e.details) ? e.details.map((d: any) => d?.errors?.map((x: any) => x?.message).join('; ')).filter(Boolean).join('; ') : '',
     ].filter(Boolean).join(' — ') || `HTTP ${res.status}`;
     if (res.status === 404 && /v\d+/.test(url)) {
-      return { ok: false, error: `${detail}. This build asks for Google Ads API ${VERSION}, which Google may have sunset — the owner sets GOOGLE_ADS_API_VERSION to the current one.` };
+      return { ok: false, error: `${detail}. This build asks for Google Ads API ${VERSION}, which Google may have sunset. The owner sets GOOGLE_ADS_API_VERSION to the current one.` };
     }
     return { ok: false, error: detail };
   }
@@ -233,7 +233,7 @@ Deno.serve(async (req) => {
   const clientSecret = Deno.env.get('GOOGLE_ADS_CLIENT_SECRET') || '';
   const devToken = Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN') || '';
   if (!clientId || !clientSecret || !devToken) {
-    return fail('Connecting a Google Ads account is not configured on the server yet — the owner sets GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN as Supabase secrets. The developer token is issued against a Google Ads manager account and has to be approved for Basic Access before it reads a live account.');
+    return fail('Connecting a Google Ads account is not configured on the server yet. The owner sets GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN as Supabase secrets. The developer token is issued against a Google Ads manager account and has to be approved for Basic Access before it reads a live account.');
   }
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -250,7 +250,7 @@ Deno.serve(async (req) => {
   // sign in, which is the one remedy that cannot help. src/lib/authReadFate.ts
   // is where the two are separated; `unreadable` means nothing was established.
   // The `catch` is the non-AuthError path and establishes nothing either.
-  const CANNOT_ASK = 'Repple could not check who you are just now — that is our end, not yours. '
+  const CANNOT_ASK = 'Repple could not check who you are just now. That is our end, not yours. '
     + 'Nothing has been connected and your existing ad accounts are untouched. Try again in a moment.';
   try {
     const { data, error: authErr } = await service.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
     });
     if (!tok.ok) {
       if (/invalid_grant/i.test(tok.error)) {
-        return fail(`Google would not accept that sign-in code (${tok.error}). A code is single-use and short-lived — tap Connect again to start a fresh sign-in.`);
+        return fail(`Google would not accept that sign-in code (${tok.error}). A code is single-use and short-lived. Tap Connect again to start a fresh sign-in.`);
       }
       if (/redirect_uri/i.test(tok.error)) {
         return fail(`Google rejected the redirect address (${tok.error}). It has to be listed as an Authorised redirect URI on the OAuth client in the Google Cloud console.`);
@@ -504,7 +504,7 @@ async function attach(service: any, trainerId: string, a: Acct): Promise<string 
     .update({ manager_account_id: a.manager }, { count: 'exact' })
     .eq('trainer_id', trainerId).eq('provider', PROVIDER);
   if (mErr) return `That ad account was saved but the manager account it sits under was not (${mErr.message}), so the next check will be refused. Choose it again.`;
-  if (!count) return 'That ad account was saved but the manager account it sits under was not — the saved account could not be found to write it onto, so the next check will be refused. Choose it again.';
+  if (!count) return 'That ad account was saved but the manager account it sits under was not. The saved account could not be found to write it onto, so the next check will be refused. Choose it again.';
   return null;
 }
 

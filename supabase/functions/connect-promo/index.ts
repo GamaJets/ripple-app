@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
   // nothing was charged rather than asking for a password that was never wrong.
   const { data: auth, error: authErr } = await service.auth.getUser(jwt);
   if (authErr && authReadFate(authErr) === 'unreadable') {
-    return json({ error: 'Repple could not check who you are just now — that is our end, not yours. '
+    return json({ error: 'Repple could not check who you are just now. That is our end, not yours. '
       + 'No code has been created, changed or deleted. Try again in a moment.' }, 503);
   }
   const uid = auth?.user?.id;
@@ -136,7 +136,7 @@ Deno.serve(async (req) => {
     // would do nothing — a coach printing it on a poster and clients typing it
     // into a page that shrugs.
     return json({
-      error: 'Discount codes are not available on your account yet. Your sales are taken with Repple as the merchant, and a code created on your own Stripe account would never be seen by the payment page — so it would look like it existed and would do nothing at all.',
+      error: 'Discount codes are not available on your account yet. Your sales are taken with Repple as the merchant, and a code created on your own Stripe account would never be seen by the payment page. So it would look like it existed and would do nothing at all.',
     }, 409);
   }
   const acctOpts = { stripeAccount: acct.stripe_account_id as string };
