@@ -75,15 +75,20 @@ export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWi
     case 'me':
       return S(<><Circle cx="12" cy="8" r="3.8" {...common} /><Path d="M4.5 20.5c.8-3.9 3.8-6 7.5-6s6.7 2.1 7.5 6" {...common} /></>);
     case 'people':
-      return S(<><Circle cx="9" cy="8" r="3.2" {...common} /><Path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5" {...common} /><Path d="M16 5.5a3 3 0 0 1 0 5.5M22 20c0-2.6-1.4-4.2-3.5-4.8" {...common} /></>);
+      // Redrawn with the tab set (owner, 21 Sep 2026): closed shoulders so the
+      // duotone fill reads, a second figure half behind the first.
+      return S(<><Circle cx="16.8" cy="8.6" r="2.7" {...common} /><Path d="M16.3 14.2c3.1.1 5.2 2.3 5.2 5.8h-3.6" {...common} {...(layer === 'fill' ? { fill: 'none' } : null)} /><Circle cx="9" cy="7.8" r="3.6" {...common} /><Path d="M2.5 20.2c0-3.9 2.9-6.2 6.5-6.2s6.5 2.3 6.5 6.2z" {...common} /></>);
     case 'grid':
-      return S(<><Rect x="3" y="3" width="7" height="7" rx="1" {...common} /><Rect x="14" y="3" width="7" height="7" rx="1" {...common} /><Rect x="3" y="14" width="7" height="7" rx="1" {...common} /><Rect x="14" y="14" width="7" height="7" rx="1" {...common} /></>);
+      // A dashboard, not four equal squares: tiles of different heights.
+      return S(<><Rect x="3" y="3" width="8" height="10" rx="2.2" {...common} /><Rect x="13" y="3" width="8" height="6" rx="2.2" {...common} /><Rect x="13" y="11" width="8" height="10" rx="2.2" {...common} /><Rect x="3" y="15" width="8" height="6" rx="2.2" {...common} /></>);
     case 'palette':
-      return S(<><Path d="M12 3a9 9 0 1 0 0 18c1.7 0 2-1.3 1.2-2.2-.8-.9-.3-2.3 1-2.3H17a4 4 0 0 0 4-4c0-4.9-4-7.5-9-7.5z" {...common} /><Circle cx="7.5" cy="12" r="1" fill={color} stroke="none" /><Circle cx="10" cy="8" r="1" fill={color} stroke="none" /><Circle cx="15" cy="8" r="1" fill={color} stroke="none" /></>);
+      return S(<><Path d="M12 3.2a8.8 8.8 0 1 0 0 17.6c1.6 0 2.2-1.2 1.5-2.2-.8-1.1-.2-2.6 1.2-2.6h2.4a3.9 3.9 0 0 0 3.9-3.9c0-5-4.1-8.9-9-8.9z" {...common} />{layer === 'fill' ? null : <><Circle cx="7.6" cy="12.2" r="1.35" fill={color} stroke="none" /><Circle cx="9.6" cy="8" r="1.35" fill={color} stroke="none" /><Circle cx="14.4" cy="7.8" r="1.35" fill={color} stroke="none" /><Circle cx="17.3" cy="11.4" r="1.35" fill={color} stroke="none" /></>}</>);
     case 'trending':
-      return S(<><Path d="M3 17l6-6 4 4 8-8" {...common} /><Path d="M16 7h5v5" {...common} /></>);
+      // Rising line over a shaded area and a baseline: the area is the
+      // duotone fill's alone.
+      return S(<><Path d="M3 16.5 9 10.5l4 3.5 8-8V20.5H3z" {...common} {...(layer === 'fill' ? null : { stroke: 'none' })} /><Path d="M3 16.5 9 10.5l4 3.5 8-8" {...common} {...(layer === 'fill' ? { fill: 'none' } : null)} /><Path d="M16 6h5v5" {...common} {...(layer === 'fill' ? { fill: 'none' } : null)} /><Path d="M3 20.5h18" {...common} {...(layer === 'fill' ? { fill: 'none' } : null)} /></>);
     case 'wrench':
-      return S(<Path d="M15 6a4 4 0 0 0-5 5L4 17l3 3 6-6a4 4 0 0 0 5-5l-2.5 2.5L14 8z" {...common} />);
+      return S(<Path d="M14.6 3.6a4.8 4.8 0 0 1 3.6.3l-3 3 .6 2.3 2.3.6 3-3a4.8 4.8 0 0 1-6.1 6.4l-7 7a2.1 2.1 0 0 1-3-3l7-7a4.8 4.8 0 0 1 2.6-6.6z" {...common} />);
     case 'play':
       return S(<Path d="M7 5v14l12-7z" fill={color} stroke="none" />);
     case 'plus':
@@ -91,7 +96,8 @@ export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWi
     case 'minus':
       return S(<Path d="M5 12h14" {...common} />);
     case 'calendar':
-      return S(<><Rect x="3" y="5" width="18" height="16" rx="2" {...common} /><Path d="M3 9h18M8 3v4M16 3v4" {...common} /></>);
+      // Rounded page, a header band and the days as dots.
+      return S(<><Rect x="3" y="4.5" width="18" height="16.5" rx="3" {...common} /><Path d="M3 9.5h18M8 2.8v3.4M16 2.8v3.4" {...common} {...(layer === 'fill' ? { fill: 'none' } : null)} />{layer === 'fill' ? null : <><Rect x="6.6" y="12.3" width="2.4" height="2.4" rx="0.7" fill={color} stroke="none" /><Rect x="10.8" y="12.3" width="2.4" height="2.4" rx="0.7" fill={color} stroke="none" /><Rect x="15" y="12.3" width="2.4" height="2.4" rx="0.7" fill={color} stroke="none" /><Rect x="6.6" y="16.2" width="2.4" height="2.4" rx="0.7" fill={color} stroke="none" /><Rect x="10.8" y="16.2" width="2.4" height="2.4" rx="0.7" fill={color} stroke="none" /></>}</>);
     case 'video':
       return S(<><Rect x="2" y="6" width="14" height="12" rx="2" {...common} /><Path d="M16 10l6-3v10l-6-3z" {...common} /></>);
     case 'chevron':
