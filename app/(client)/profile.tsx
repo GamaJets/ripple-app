@@ -37,7 +37,7 @@ import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel, weightToKg, readBodyWeight, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, type WeightUnit, type LengthUnit } from '../../src/lib/units';
+import { volumeIn, weightIn, weightLabel, weightToKg, readBodyWeight, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, type WeightUnit, type LengthUnit } from '../../src/lib/units';
 // The two boxes either side of the weight, which had between them one silent
 // bound and no bound at all. See src/lib/bodyEntry.ts — both refuse out loud
 // now, in the unit the figure was typed in.
@@ -511,6 +511,10 @@ export default function Profile() {
   // The row on this screen is five medals — the width of the card at the
   // mockup's 54pt — earned first, so what is drawn is what they HAVE and the
   // grey ones are what comes next. All twelve are on Achievements.
+  // Which medal's meaning is showing under the row. The medals were icons
+  // alone, and "8 of 12" told nobody what any of them was (owner, 21 Sep 2026).
+  const [medalOpen, setMedalOpen] = useState<string | null>(null);
+  const volumeLabel = (kg: number) => `${num(volumeIn(kg, wu))} ${wu}`;
   const medalRow = [...medals.filter((m) => m.state === 'earned'), ...medals.filter((m) => m.state !== 'earned')].slice(0, 5);
 
   // ── the three tiles' trends ──────────────────────────────────────────────
@@ -746,21 +750,39 @@ export default function Profile() {
             been earned. "n of 12" is the head's link and opens the full set. */}
         <Section>
           <SectionHead title="Badges" note={badgesCountable ? `${earnedCount} of ${BADGE_COUNT}` : 'See All'} onPress={() => router.push('/(client)/achievements')} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: sp.sm }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: sp.xs }}>
             {medalRow.map((m) => {
               const earned = m.state === 'earned';
               const c = medalColours(t, earned ? BADGE_LOOK[m.key].tone : 'neutral');
+              const open = medalOpen === m.key;
               return (
-                <View key={m.key} accessible accessibilityRole="image"
+                <Pressable key={m.key} onPress={() => setMedalOpen(open ? null : m.key)}
+                  accessibilityRole="button" accessibilityState={{ expanded: open }}
                   accessibilityLabel={`${m.title}, ${earned ? 'earned' : m.state === 'locked' ? 'locked' : 'not known'}`}
-                  style={{ width: 54, height: 54, borderRadius: radius.pill, backgroundColor: c.soft, alignItems: 'center', justifyContent: 'center' }}>
-                  {earned ? <Icon name={BADGE_LOOK[m.key].icon} size={26} color={c.ink} />
-                    : m.state === 'locked' ? <Icon name="lock" size={22} color={c.ink} />
-                    : <Text style={{ ...ty.head, color: c.ink }}>{fig(null)}</Text>}
-                </View>
+                  accessibilityHint="Says what this badge is for"
+                  style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+                  <View style={{ width: 54, height: 54, borderRadius: radius.pill, backgroundColor: c.soft, alignItems: 'center', justifyContent: 'center', borderWidth: open ? 2 : 0, borderColor: c.ink }}>
+                    {earned ? <Icon name={BADGE_LOOK[m.key].icon} size={26} color={c.ink} />
+                      : m.state === 'locked' ? <Icon name="lock" size={22} color={c.ink} />
+                      : <Text style={{ ...ty.head, color: c.ink }}>{fig(null)}</Text>}
+                  </View>
+                  <Text numberOfLines={2} style={{ ...ty.micro, color: earned ? t.ink : t.ink3, textAlign: 'center' }}>{m.title}</Text>
+                </Pressable>
               );
             })}
           </View>
+          {(() => {
+            const m = medalRow.find((x) => x.key === medalOpen);
+            if (!m) return <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, textAlign: 'center' }}>Tap a badge to see what it is for</Text>;
+            const how = typeof m.desc === 'function' ? m.desc(volumeLabel) : m.desc;
+            const said = m.state === 'earned' ? 'Earned' : m.state === 'locked' ? 'Not Yet Earned' : 'Not Known';
+            return (
+              <View style={{ marginTop: sp.md, padding: sp.md, borderRadius: radius.md, backgroundColor: t.surface2, gap: 2 }}>
+                <Text style={{ ...ty.head, color: t.ink }}>{m.title} · {said}</Text>
+                <Text style={{ ...ty.label, color: t.ink2 }}>{m.state === 'earned' ? `${how}. ${m.cheer}` : `To earn it: ${how}.`}</Text>
+              </View>
+            );
+          })()}
           {!badgesCountable && logStatus !== 'loading' ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Not every badge could be read, so they are not counted. Anything shown as earned really is.</Text>
           ) : null}
@@ -817,9 +839,11 @@ export default function Profile() {
             return (
               <Pressable key={mm} onPress={() => cd.setCoachingMode(mm)} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={`${COACHING_MODE_LABEL[mm]}. ${COACHING_MODE_NOTE[mm]}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 20, height: 20, borderRadius: radius.pill, borderWidth: 2, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>{on ? <View style={{ width: 10, height: 10, borderRadius: radius.pill, backgroundColor: t.brand }} /> : null}</View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{COACHING_MODE_LABEL[mm]}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{COACHING_MODE_NOTE[mm]}</Text>
+                  {/* Keyed on the selection: iOS kept the old measurement when
+                      the row was picked and cut the note off mid-word. */}
+                  <Text key={on ? 'on' : 'off'} style={{ ...ty.caption, color: t.ink3, marginTop: 2, flexShrink: 1 }}>{COACHING_MODE_NOTE[mm]}</Text>
                 </View>
               </Pressable>
             );
