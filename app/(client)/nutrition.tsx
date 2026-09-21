@@ -13,12 +13,13 @@
 // logged now — the app says it could not read the photo rather than making a
 // number up.
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { mealPhoto } from '../../src/ui/mealPhotos';
 import { CUISINES, type WireCuisine } from '../../src/lib/recipeWire';
 
 import { titleCaseName, mealTitle, mealTitleParts } from '../../src/lib/exerciseName';import { num, numUpTo } from '../../src/lib/format';
 import { fmtDay, fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
@@ -1629,6 +1630,10 @@ export default function Nutrition() {
               <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
               {real?.image ? (
                 <GuardedImage source={{ uri: real.image }} contentFit="cover" cachePolicy="memory"
+                  style={{ position: 'absolute', width: 52, height: 52 }} />
+              ) : !real && mealPhoto(m.pic) ? (
+                // The dish TYPE's photo for a meal the app built (src/ui/mealPhotos.ts).
+                <Image source={mealPhoto(m.pic)!} resizeMode="cover"
                   style={{ position: 'absolute', width: 52, height: 52 }} />
               ) : null}
             </View>

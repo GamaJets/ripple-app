@@ -60,11 +60,12 @@
 // coach their client has nothing while a week sits on the server, and invite
 // them to overwrite it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { mealPhoto } from '../../src/ui/mealPhotos';
 
 import { titleCaseName, mealTitle, mealTitleParts } from '../../src/lib/exerciseName';// The instant the energy plan's deadline is measured against, recomputed at
 // local midnight, on foreground and on focus. See the memo below.
 import { useNow } from '../../src/ui/today';
-import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, Linking } from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, Linking, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
@@ -964,6 +965,9 @@ export default function ClientNutrition() {
                                 <Text style={{ fontSize: 24 }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{m.ico}</Text>
                                 {ref?.image ? (
                                   <GuardedImage source={{ uri: ref.image }} contentFit="cover" cachePolicy="memory"
+                                    style={{ position: 'absolute', width: 48, height: 48 }} />
+                                ) : mealPhoto(m.pic) ? (
+                                  <Image source={mealPhoto(m.pic)!} resizeMode="cover"
                                     style={{ position: 'absolute', width: 48, height: 48 }} />
                                 ) : null}
                               </View>

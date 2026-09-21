@@ -620,6 +620,11 @@ const SNACK_B: Comp[] = [
 
 export interface GeneratedMeal {
   n: string; slot: Slot; ico: string;
+  /** The component the dish is photographed by: a breakfast's base, a snack's
+   *  first item, a main's protein ("overnight oats", "salmon"). The Meals list
+   *  shows that dish type's photo (src/ui/mealPhotos.ts); it is a picture of
+   *  the kind of dish, not of this exact plate. */
+  pic?: string;
   k: number; p: number; c: number; f: number;
   ing: Ing[]; steps: string[]; diet: Diet; idx: number;
   /** Set, and non-empty, when this slot cannot be made without one of these
@@ -719,7 +724,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
   // and the sentences below are written to close up around a blank.
   const EMPTY: Comp = { n: '', k: 0, p: 0, c: 0, f: 0, ing: [], d: [] };
   const at = (i: number): Comp => parts[i] ?? EMPTY;
-  let n: string, ico: string, steps: string[];
+  let n: string, ico: string, steps: string[], pic = '';
   if (slot === 'Breakfast') {
     const [base, top, boost, style] = [at(0), at(1), at(2), at(3)];
     // The style in brackets, the way a snack's prep already is. It was joined
@@ -731,6 +736,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
     // index, so nothing stored moves; only the words printed change.
     n = `${dish}${style.n && !redundantStyle(dish, style.n) ? ' (' + style.n + ')' : ''}`;
     ico = base.ico ?? '🍽️';
+    pic = base.n;
     steps = [
       base.step ?? `Prepare the ${base.n}.`,
       `Top with ${top.n}${boost.n ? ` and stir in the ${boost.n.replace('+ ', '')}` : ''}.`,
@@ -740,6 +746,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
     const [a, b, prep] = [at(0), at(1), at(2)];
     n = `${cap(a.n)} & ${b.n}${prep.n ? ' (' + prep.n + ')' : ''}`;
     ico = a.ico ?? '🍎';
+    pic = a.n;
     steps = [
       `Portion the ${a.n} into a bowl or container.`,
       `Add the ${b.n} alongside${prep.n ? ` (ideal ${prep.n})` : ''}, then enjoy.`,
@@ -748,6 +755,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
     const [pr, cb, vg, fl] = [at(0), at(1), at(2), at(3)];
     n = `${fl.n} ${pr.n} with ${cb.n} & ${vg.n}`;
     ico = pr.ico ?? '🍽️';
+    pic = pr.n;
     const cookTime = /salmon|fish|cod|prawn/i.test(pr.n) ? ' (about 3–4 min per side)' : /chicken|turkey|beef|steak/i.test(pr.n) ? ' (about 5–7 min per side)' : ' until cooked through';
     steps = [
       `Season the ${pr.n} with the ${fl.n.toLowerCase()} flavouring and rest 5 min while you prep.`,
@@ -757,7 +765,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
       `Plate the ${cb.n}, top with the ${pr.n} and ${vg.n}, spoon over any pan juices, and serve.`,
     ];
   }
-  return { n, slot, ico, k: sum('k'), p: sum('p'), c: sum('c'), f: sum('f'), ing, steps, diet, idx };
+  return { n, slot, ico, ...(pic ? { pic } : {}), k: sum('k'), p: sum('p'), c: sum('c'), f: sum('f'), ing, steps, diet, idx };
 }
 
 // ── Client shape the planner needs (subset of the full client) ──
