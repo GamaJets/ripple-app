@@ -110,7 +110,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: TabBarProps) 
                 // quiet tabs share what is left, as the mockups divide it.
                 flexGrow: focused ? 1.9 : 1, flexBasis: 0, minWidth: 0,
                 height: PILL, borderRadius: PILL / 2,
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: focused ? 12 : 0,
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: focused ? 8 : 0,
                 backgroundColor: focused ? t.night : 'transparent',
               }}>
               {options.tabBarIcon?.({ focused, color: focused ? t.brandBright : t.ink3, size: focused ? 22 : 24 })}
