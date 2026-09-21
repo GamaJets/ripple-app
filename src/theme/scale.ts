@@ -107,16 +107,17 @@ export const elevation = {
  * src/lib/typeScale.ts for the whole argument; the short version is the one
  * rule that governs everything below:
  *
- *     React Native scales fontSize for us and does NOT scale lineHeight.
+ *     React Native scales fontSize AND lineHeight for us, on both platforms.
  *
- * So a member on Larger Text at 200% was being drawn 30pt glyphs inside the
- * 21pt line this file pinned beside them — clipped descenders and overlapping
- * lines, getting worse the more legibility they asked for. Every lineHeight
- * here is now multiplied by the same number the platform is multiplying the
- * font size by, and the two agree again.
+ * So the line heights below are the design's own numbers and are written
+ * plain. They were once multiplied by `fontScale` here as well, on the belief
+ * that the platform left them alone; it does not, and every line in the app
+ * was scaled twice (a 30pt title in a line nearly five times its height at
+ * iOS accessibility-large, 21 Sep 2026). scripts/check-a11y.mjs Rule 2 now
+ * fails a line height wrapped in `grown()`.
  *
- * fontSize is deliberately NOT multiplied here. Doing it in both places is the
- * one mistake available in this file and it squares the scale.
+ * `fontScale` is still read, for the things that are layout and not text: a
+ * strip that holds one line, a ring with a figure in it, a stacked header.
  *
  * Read ONCE, at module load, rather than through a hook. Two reasons. Three
  * and a half thousand inline style objects in this app spread `ty.body` into a
@@ -133,7 +134,8 @@ export const fontScale = clampFontScale((() => {
   try { return PixelRatio.getFontScale(); } catch { return 1; }
 })());
 
-/** A pinned point measurement grown to the reader's text — a line height, a
+/** A pinned point measurement grown to the reader's text — NOT a line height
+ *  (the platform scales those; see src/lib/typeScale.ts) but a
  *  strip that holds one line, the diameter of a ring with a figure in it.
  *  Never a fontSize. Bound to the live scale so callers cannot pass the wrong
  *  one; `atScale` in src/lib/typeScale.ts is the arithmetic and is tested. */
@@ -261,27 +263,27 @@ export function fallBackToSystemFace(): void {
  * other.
  */
 export const type = {
-  hero:    step('display', '700', { fontSize: 44, letterSpacing: -1.5, lineHeight: grown(48) }),
-  display: step('display', '700', { fontSize: 30, letterSpacing: -0.7, lineHeight: grown(35) }),
-  title:   step('display', '700', { fontSize: 24, letterSpacing: -0.4, lineHeight: grown(30) }),
-  section: step('display', '700', { fontSize: 20, letterSpacing: -0.3, lineHeight: grown(26) }),
-  page:    step('display', '600', { fontSize: 19, letterSpacing: -0.2, lineHeight: grown(25) }),
-  button:  step('text', '700', { fontSize: 18, letterSpacing: 0,    lineHeight: grown(24) }),
-  head:    step('text', '700', { fontSize: 17, letterSpacing: -0.1, lineHeight: grown(23) }),
-  body:    step('text', '400', { fontSize: 16, letterSpacing: 0,    lineHeight: grown(23) }),
-  label:   step('text', '400', { fontSize: 15, letterSpacing: 0,    lineHeight: grown(21) }),
-  caption: step('text', '400', { fontSize: 14, letterSpacing: 0,    lineHeight: grown(19) }),
-  tab:     step('text', '700', { fontSize: 14, letterSpacing: 0,    lineHeight: grown(18) }),
+  hero:    step('display', '700', { fontSize: 44, letterSpacing: -1.5, lineHeight: 48 }),
+  display: step('display', '700', { fontSize: 30, letterSpacing: -0.7, lineHeight: 35 }),
+  title:   step('display', '700', { fontSize: 24, letterSpacing: -0.4, lineHeight: 30 }),
+  section: step('display', '700', { fontSize: 20, letterSpacing: -0.3, lineHeight: 26 }),
+  page:    step('display', '600', { fontSize: 19, letterSpacing: -0.2, lineHeight: 25 }),
+  button:  step('text', '700', { fontSize: 18, letterSpacing: 0,    lineHeight: 24 }),
+  head:    step('text', '700', { fontSize: 17, letterSpacing: -0.1, lineHeight: 23 }),
+  body:    step('text', '400', { fontSize: 16, letterSpacing: 0,    lineHeight: 23 }),
+  label:   step('text', '400', { fontSize: 15, letterSpacing: 0,    lineHeight: 21 }),
+  caption: step('text', '400', { fontSize: 14, letterSpacing: 0,    lineHeight: 19 }),
+  tab:     step('text', '700', { fontSize: 14, letterSpacing: 0,    lineHeight: 18 }),
   // The board's small label: bold, title case, the author's own casing. It
   // was an 11pt tracked UPPERCASE — the one typographic habit the board has
   // none of, and the reason the app read as a different face when it is the
   // same system font. scripts/check-caps.mjs still leaves micro strings to
   // their authors, so a kicker typed in sentence case stays that way.
-  micro:   step('text', '600', { fontSize: 13, letterSpacing: -0.1, lineHeight: grown(18) }),
+  micro:   step('text', '600', { fontSize: 13, letterSpacing: -0.1, lineHeight: 18 }),
   // The one tracked-capitals step, and it lives on the night hero card only:
   // "TODAY · WEEK 1 OF 12". The caller types the capitals — nothing here
   // transforms case, for the reason `micro` gives.
-  eyebrow: step('text', '700', { fontSize: 12, letterSpacing: 1.4,  lineHeight: grown(16) }),
+  eyebrow: step('text', '700', { fontSize: 12, letterSpacing: 1.4,  lineHeight: 16 }),
 } satisfies Record<string, TextStyle>;
 
 /** Values read as data, not prose: semibold + tabular figures. */

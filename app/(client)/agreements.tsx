@@ -409,7 +409,7 @@ export default function ClientGymAgreementsScreen() {
                                 Rule 2 of scripts/check-a11y.mjs exists for, and this is the
                                 one screen where not being able to read the terms means
                                 signing something unread. */}
-                            <Text style={{ ...ty.caption, color: t.ink2, lineHeight: grown(20) }}>{a.body}</Text>
+                            <Text style={{ ...ty.caption, color: t.ink2, lineHeight: 20 }}>{a.body}</Text>
                           </View>
 
                           {a.refusal ? (

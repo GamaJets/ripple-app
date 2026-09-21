@@ -1,11 +1,9 @@
 // Dynamic Type, as arithmetic. Compile with tsc, run with node.
 //
-// The defect these pin is subtle enough to be worth restating. React Native
-// scales fontSize with the phone's text setting on its own — it always has —
-// and does NOT scale `lineHeight`. src/theme/scale.ts pinned a line height
-// beside every one of its seven sizes, so a member on Larger Text at 200% was
-// handed 30pt glyphs to lay out inside a 21pt line: clipped descenders,
-// overlapping rows, and the harder they made the text to miss the worse it got.
+// React Native scales fontSize AND lineHeight with the phone's text setting
+// on its own, so the scale's line heights are written plain. What this app
+// still grows itself is layout that has to hold text: a one-line strip, a ring
+// with a figure in it. See the header of src/lib/typeScale.ts.
 //
 // So the assertions below are all one shape — a pinned point measurement grows
 // by exactly the factor the platform is growing the font by — plus the two

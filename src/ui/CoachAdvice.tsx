@@ -122,12 +122,8 @@ export function CoachAdvice({ clientId, coachName }: {
             {/* Not clipped. The four-line cap on the dashboard is what a
                 dashboard is for; this screen exists so the whole note can be
                 read, and a coaching cue truncated mid-sentence is the half of
-                it that changes what somebody does under a bar.
-
-                `grown`, never a pinned lineHeight: a paragraph of somebody
-                else's writing is the longest run of text here and so the first
-                thing to overlap itself at a large text size. */}
-            <Text style={{ ...ty.body, color: t.ink2, lineHeight: grown(22) }}>{n.body}</Text>
+                it that changes what somebody does under a bar. */}
+            <Text style={{ ...ty.body, color: t.ink2, lineHeight: 22 }}>{n.body}</Text>
           </View>
         );
       })}

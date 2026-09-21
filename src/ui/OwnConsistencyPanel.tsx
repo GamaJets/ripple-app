@@ -174,7 +174,7 @@ export function OwnConsistencyPanel({ log, status, nowMs }: {
             <View style={{ height: grown(13), marginBottom: 4 }} />
             {WEEK_DAYS.map((d, i) => (
               <Text key={d} accessibilityLabel={d}
-                style={{ ...ty.micro, color: t.ink3, height: grown(14), lineHeight: grown(14), marginBottom: i === WEEK_DAYS.length - 1 ? 0 : 4 }}>
+                style={{ ...ty.micro, color: t.ink3, height: grown(14), lineHeight: 14, marginBottom: i === WEEK_DAYS.length - 1 ? 0 : 4 }}>
                 {d[0]}
               </Text>
             ))}

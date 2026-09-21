@@ -34,18 +34,19 @@
 // the OTHER way out is. `Scrim` in src/ui/kit.tsx is the shared shape for both,
 // and src/ui/DateSheet.tsx argues the hidden case.
 //
-// ── Rule 2: a pinned lineHeight is a clipped paragraph ────────────────────
+// ── Rule 2: a line height is written ONCE, as the design's number ─────────
 //
-// src/lib/typeScale.ts states the rule it exists for: React Native scales
-// `fontSize` with the reader's text setting and never scales `lineHeight`. Every
-// step in src/theme/scale.ts now carries a line height multiplied by the same
-// number the platform is multiplying the font size by, so `...ty.caption` is
-// correct on its own.
+// React Native scales `lineHeight` with the reader's text setting itself, on
+// both platforms: iOS multiplies it by the same factor as the font
+// (RCTAttributedTextUtils.mm, `lineHeight * RCTEffectiveFontSizeMultiplier…`)
+// and Android converts it as SP (TextAttributes.kt, `toPixelFromSP`).
 //
-// A style that spreads one of those steps and then writes `lineHeight: 18` after
-// it puts the defect straight back, in the one paragraph it touches. At iOS
-// accessibility-extra-large that is 28pt glyphs laid out in an 18pt line.
-// `grown()` is the fix and it is one word.
+// This rule used to say the opposite and demand `lineHeight: grown(18)`. That
+// scaled every line height TWICE: at iOS accessibility-large a 30pt title set
+// in a line nearly five times its height, "My Program" split across half a
+// screen (seen on the simulator, 21 Sep 2026). So a line height wrapped in
+// `grown()` or `atScale()` is now the defect. `grown()` stays right for a
+// box's height, a ring's diameter, anything that is layout and not text.
 //
 // ── Rule 3: a label that is one FIELD of a row swallows the rest of it ────
 //
@@ -305,8 +306,8 @@ const TOUCHABLE = /<(Pressable|TouchableOpacity|TouchableHighlight|TouchableWith
  */
 const MIRRORING_ICON = /icon=\{(BACK_ICON|FORWARD_ICON)\}/;
 
-/** A literal `lineHeight: 18`. `lineHeight: grown(18)` and `lineHeight: h` pass. */
-const PINNED_LINE_HEIGHT = /\blineHeight\s*:\s*\d+(\.\d+)?\s*[,}]/g;
+/** `lineHeight: grown(18)` or `atScale(…)`: scaled by us AND by the platform. */
+const PINNED_LINE_HEIGHT = /\blineHeight\s*:\s*(grown|atScale)\(/g;
 
 /* ── rule 3 ──────────────────────────────────────────────────────────────── */
 
@@ -463,8 +464,7 @@ for (const file of ROOTS.flatMap((r) => walk(join(ROOT, r)))) {
     });
   }
 
-  // Rule 2 — src/theme is where the grown line heights are DEFINED.
-  if (rel.startsWith('src/theme/')) continue;
+  // Rule 2.
   PINNED_LINE_HEIGHT.lastIndex = 0;
   while ((m = PINNED_LINE_HEIGHT.exec(src))) {
     found.push({
@@ -555,10 +555,10 @@ if (fresh.length) {
       console.error('      words between its tags, or an aria-label saying what it does. The');
       console.error('      console is swept for this and nothing else — see Rule 5.\n');
     } else {
-      console.error(`  ${f.file}:${f.line}  a pinned lineHeight`);
+      console.error(`  ${f.file}:${f.line}  a line height scaled twice`);
       console.error(`    ${f.text.trim()}`);
-      console.error('    → React Native never scales lineHeight. Wrap it: lineHeight: grown(18).');
-      console.error('      See src/lib/typeScale.ts.\n');
+      console.error('    → React Native already scales lineHeight with the text. Write the plain');
+      console.error('      number: lineHeight: 18. See Rule 2 in scripts/check-a11y.mjs.\n');
     }
   }
   process.exit(1);
@@ -568,6 +568,6 @@ if (stale.length) {
   console.log(`a11y: ${stale.length} standing offence${stale.length === 1 ? '' : 's'} on the list no longer present — run with --prune to reprint the list.`);
 }
 console.log(
-  `a11y: ok — no new unnamed touchables, pinned line heights, field-only labels, mirroring-icon buttons or unnamed console buttons`
+  `a11y: ok — no new unnamed touchables, twice-scaled line heights, field-only labels, mirroring-icon buttons or unnamed console buttons`
   + (standing.length ? `, ${standing.length} standing (in ${new Set(standing.map((s) => s.file)).size} files, all listed in the gate)` : ''),
 );

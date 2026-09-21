@@ -4468,7 +4468,7 @@ export default function Builder() {
                           pinned, so at a large text size the glyph spills past it
                           rather than being cut in half by a 24pt line — a ring is
                           decoration and the character is the control. */}
-                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: grown(24) }}>×</Text>
+                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
                     </Pressable>
                   </View>
                   </>) : null}

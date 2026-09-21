@@ -63,14 +63,14 @@ type      hero 44/600 · title 26/600 · head 17/600 · body 15/400
 numeric   tabular figures
 value(n)  a metric at an arbitrary size (600 + tabular)
 fontScale the phone's own text size, clamped. Read once, at module load.
-grown(pt) a pinned point measurement at that size — a line height, a strip
-          that holds one line, a ring with a figure inside it. NEVER a
-          fontSize: React Native is already scaling those, and doing it here
-          as well squares the multiplier.
+grown(pt) a pinned point measurement at that size: a strip that holds one
+          line, a ring with a figure inside it. NEVER a fontSize or a
+          lineHeight: React Native already scales both, and doing it here as
+          well squares the multiplier.
 ```
 
-Every `lineHeight` in `type` is already `grown()`. A screen that pins its own
-box height around one line of text has to do the same, or that text clips for
+Every `lineHeight` in `type` is a plain number, scaled by the platform. A
+screen that pins its own box height around one line of text uses `grown()`, or that text clips for
 anybody on Larger Text — which is most of the people who turned it on.
 
 ## The kit — `src/ui/kit.tsx`

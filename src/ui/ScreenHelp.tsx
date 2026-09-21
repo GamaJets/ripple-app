@@ -108,7 +108,7 @@ export function ScreenHelp({ screen }: { screen: ScreenHelpKey }) {
             // text these are 28pt glyphs laid out in an 18pt line. This card is
             // the app's own explanation of the screen you are on, so the reader
             // who turned their text up is the reader it clips.
-            <Text key={l.term} style={{ ...ty.caption, color: t.ink3, lineHeight: grown(18) }}>
+            <Text key={l.term} style={{ ...ty.caption, color: t.ink3, lineHeight: 18 }}>
               <Text style={{ color: t.ink2, fontWeight: '600' }}>{l.term}</Text>
               {': '}{l.means}
             </Text>

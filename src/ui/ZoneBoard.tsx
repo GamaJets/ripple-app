@@ -201,7 +201,7 @@ export function ZoneBoard({ seconds, current, showSplat = true, elapsed }: {
         // straight back into this paragraph — at 235% text, 28pt glyphs laid
         // out in a 17pt line, which is the two-sentence explanation of what a
         // splat point IS rendered as overlapping strips.
-        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, lineHeight: grown(17) }}>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md, lineHeight: 17 }}>
           A splat point is one minute at zone 4 or above. Zones are set from an estimated
           max heart rate of 220 minus your age.
         </Text>

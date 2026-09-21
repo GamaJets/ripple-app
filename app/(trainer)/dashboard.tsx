@@ -3527,7 +3527,7 @@ export default function TrainerClients() {
                     text size the glyph spills past the ring instead of being cut
                     off by a 24pt line — and this is the dismissal for a sheet
                     drawn over the whole client record. */}
-                <Text style={{ ...ty.head, color: t.ink2, lineHeight: grown(24) }}>×</Text>
+                <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 4, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>

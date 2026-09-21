@@ -707,7 +707,7 @@ export default function ClientReport() {
                     larger letters inside the same gaps and a document that
                     overlaps itself. This is the one screen where somebody reads
                     several hundred lines in a row. */}
-                <Text selectable style={{ ...ty.label, color: t.ink2, lineHeight: grown(21) }}>
+                <Text selectable style={{ ...ty.label, color: t.ink2, lineHeight: 21 }}>
                   {preview.text}
                 </Text>
               </ScrollView>

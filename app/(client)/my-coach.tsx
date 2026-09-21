@@ -922,7 +922,7 @@ export default function MyCoach() {
                 bio is the longest run of text on this screen and so the first thing
                 to overlap itself. */}
               {coach.bio ? (
-                <Text style={{ ...ty.body, color: t.ink2, lineHeight: grown(22) }}>{coach.bio}</Text>
+                <Text style={{ ...ty.body, color: t.ink2, lineHeight: 22 }}>{coach.bio}</Text>
               ) : null}
               {/* Nothing to say about themselves yet: said, so the card is
                   not an empty box under a heading. Not a claim about them. */}
@@ -1200,11 +1200,7 @@ export default function MyCoach() {
             <View key={r.id} style={{ paddingVertical: sp.md, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: t.ring }}>
               <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{myReviewRatingLine(r)}</Text>
               {r.body ? (
-                /* `grown`, never a pinned lineHeight: this is a paragraph of
-                   the member's own writing and the longest run of text in the
-                   row, so it is the first thing to overlap itself at a large
-                   text size. */
-                <Text style={{ ...ty.body, color: t.ink2, marginTop: 6, lineHeight: grown(22) }}>{r.body}</Text>
+                <Text style={{ ...ty.body, color: t.ink2, marginTop: 6, lineHeight: 22 }}>{r.body}</Text>
               ) : null}
               {r.coachReply ? (
                 <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
