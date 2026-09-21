@@ -251,3 +251,18 @@ export function useRecipeDetail(sourceId: number | null, ctx: RecipeContext): Re
   const refresh = useCallback(() => { forced.current = true; setTick((n) => n + 1); }, []);
   return { result, loading, refresh };
 }
+
+/**
+ * One search, asked by code rather than by a screen: how Today's meals are
+ * filled with real recipes (owner, 21 Sep 2026). The same gate as the hook, so
+ * a spent quota or a missing key is not asked again, and the same single
+ * attempt: no retries, a failure is the answer.
+ */
+export async function searchRecipesOnce(p: RecipeSearchParams): Promise<RecipeSearchResult> {
+  const shutNow = gated(Date.now());
+  if (shutNow) return shutNow;
+  const ctx: RecipeContext = { slot: p.slot, diet: p.diet, avoid: p.avoid };
+  const read = readRecipeReply(await invoke(searchBody(p), new AbortController().signal), ctx);
+  if (read.status !== 'ready' && read.status !== 'partial') shut(read, Date.now());
+  return read;
+}

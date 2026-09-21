@@ -61,7 +61,7 @@ import {
   horizonDays, plannedRecipeAt, recipeDatePlanKey, readDatedRecipePlan, writeDatedRecipePlan,
   withDatedRecipeAt, withoutDatedRecipeAt, type DatedRecipePlan, type Horizon, type HorizonDay,
 } from '../../src/lib/mealHorizon';
-import { useRecipeSearch, useRecipeDetail } from '../../src/ui/useRecipeSearch';
+import { useRecipeSearch, useRecipeDetail, searchRecipesOnce } from '../../src/ui/useRecipeSearch';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { reportError } from '../../src/lib/reportError';
 import { useWearables } from '../../src/ui/wearables';
@@ -1167,6 +1167,52 @@ export default function Nutrition() {
       .filter((m) => !slotMeals.some((x) => isRecipeMeal(x) && x.sourceId === m.sourceId))
       .map((m) => portionRecipe(m, recipeLead.slotKcal ?? recipeLead.K, recipeLead.pos))
     : [];
+  // ── Today's meals are real recipes ─────────────────────────────────────
+  //
+  // The owner's call (21 Sep 2026): today's plan is real, photographed
+  // recipes; the week and month stay built by the app. Once a day, every slot
+  // of TODAY with nothing chosen for it (no recipe the member or coach planned,
+  // no meal the coach picked, no dish the member swapped in) is filled with the
+  // best-fitting recipe for its calories, diet and allergens, planned on
+  // today's date. That is one search per slot (about 2 points each) and then
+  // the ordinary read-back.
+  //
+  // The safety net is the one the plan already has: a slot whose recipe cannot
+  // be read shows the app-built meal. A failed search leaves the slot as it
+  // was and is not asked again today; the gate in useRecipeSearch already
+  // holds a spent quota until midnight UTC. The attempt is remembered per day
+  // on the phone, so a member who takes a recipe back out is not refilled.
+  const autoKey = datesKey ? `${datesKey}.auto` : null;
+  const autoBusy = useRef(false);
+  useEffect(() => {
+    if (!autoKey || !dpHydrated || autoBusy.current) return;
+    if (!hasBody || adjustUnknown || foodRulesUnknown) return;
+    if (!today.key || !plan.length) return;
+    const open = plan.filter((m) => !refAt(today, m.pos) && !coachPick(m.pos) && override[m.pos] == null);
+    if (!open.length) return;
+    autoBusy.current = true;
+    (async () => {
+      try {
+        if ((await AsyncStorage.getItem(autoKey)) === today.key) return;
+        await AsyncStorage.setItem(autoKey, today.key);
+        const taken = new Set<number>();
+        for (const m of open) {
+          const r = await searchRecipesOnce({ slot: m.slot, diet, avoid: c.avoid, targetKcal: Math.round((m.slotKcal ?? m.K) / 50) * 50, number: 5 });
+          if (r.status !== 'ready' && r.status !== 'partial') break;
+          const pick = preferNotDisliked(r.meals, c.dislikes).rows.find((x) => !taken.has(x.sourceId));
+          if (!pick) continue;
+          taken.add(pick.sourceId);
+          const dish = portionRecipe({ ...pick, slot: m.slot }, m.slotKcal ?? m.K, m.pos);
+          setRecipeLive((prev) => ({ ...prev, [dish.sourceId]: dish }));
+          setDatePlan((prev) => withDatedRecipeAt(prev, today.key, m.pos, dish));
+        }
+      } catch { /* nothing planned; the app-built meals stand */ } finally { autoBusy.current = false; }
+    })();
+    // Not cancelled on a re-render: today is already marked as tried, so a
+    // fill that stopped halfway would never finish.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoKey, dpHydrated, hasBody, adjustUnknown, foodRulesUnknown, today.key, plan.length, diet, c.avoid]);
+
   // Planned recipes in this slot whose dish is NOT in hand: still reading, or
   // the read failed. The generated row is standing in for each of them. `mine`
   // decides whether "Back to Plan's Meal" is offered — it takes out the
@@ -1502,8 +1548,12 @@ export default function Nutrition() {
   const mealQ = mealQuery.trim().toLowerCase();
   const recipeQueryShort = mealQ.length > 0 && mealQ.length < 3;
   const matchesQuery = (m: PlannedMeal) => !mealQ || m.n.toLowerCase().includes(mealQ);
-  const generatedRows: PlannedMeal[] = [
-    ...slotMeals.filter(matchesQuery),
+  // The plan's own row, then real recipes, then the app's other ideas: real,
+  // photographed recipes lead the swap list (owner, 21 Sep 2026), and the
+  // app-built dishes follow as more ideas and as the net when the library
+  // cannot answer.
+  const planRows: PlannedMeal[] = slotMeals.filter(matchesQuery);
+  const ideaRows: PlannedMeal[] = [
     ...genSlotMeals.filter((g) => todayPlan[g.pos] !== g).filter(matchesQuery),
     ...slotOptions,
   ];
@@ -2055,7 +2105,7 @@ export default function Nutrition() {
                     <Text accessibilityLiveRegion="polite" style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
                       {recipeQueryShort ? 'Type at least three letters to search real recipes.'
                         : recipes.loading ? 'Searching real recipes…'
-                        : 'Real recipes are listed under your plan’s meals.'}
+                        : 'Real recipes are listed first, under your plan’s meal.'}
                     </Text>
                     <Pressable onPress={() => setRecipeSearchOpen(false)} accessibilityRole="button" accessibilityLabel="Hide real recipes" hitSlop={hitSlopFor(24)}>
                       <Text style={{ ...ty.label, ...font('600'), color: t.brand }}>Hide</Text>
@@ -2102,7 +2152,7 @@ export default function Nutrition() {
                   </View>
                 );
               })}
-              {generatedRows.map((m, i) => mealRow(m, i > 0))}
+              {planRows.map((m, i) => mealRow(m, i > 0))}
               {/* ── real recipes, under the plan's own rows ──────────────────
                   Five outcomes and only two of them carry rows (see
                   `RecipeSearchResult`). "No recipes matched." is said ONLY of a
@@ -2113,7 +2163,7 @@ export default function Nutrition() {
                   receives. */}
               {recipeSearchOpen && found && found.status !== 'not-configured' ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Text accessibilityRole="header" style={{ ...ty.micro, color: t.ink3 }}>Recipes</Text>
+                  <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink }}>Real Recipes</Text>
                   {recipeRows.map((m, i) => mealRow(m, i > 0, recipes.loading))}
                   {found.status === 'partial' ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -2131,6 +2181,12 @@ export default function Nutrition() {
                       </View>
                     </View>
                   ) : null}
+                </View>
+              ) : null}
+              {ideaRows.length ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink }}>More Ideas</Text>
+                  {ideaRows.map((m, i) => mealRow(m, i > 0))}
                 </View>
               ) : null}
               {/* Wherever a recipe is drawn: the library's backlink, as a
