@@ -291,7 +291,7 @@ export default function Nudges() {
                   <View style={{ marginTop: sp.md }}>
                     {board.withheld.map((w) => (
                       <Flag key={w.clientId} tone={t.warn} style={{ marginTop: sp.sm }}>
-                        {(w.name ?? 'Unnamed client') + ' — ' + w.note}
+                        {(w.name ?? 'Unnamed client') + ' · ' + w.note}
                       </Flag>
                     ))}
                   </View>

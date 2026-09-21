@@ -19,7 +19,7 @@ is paid again on every turn of the session that opened it.
 | 3,313 | 50k | `app/(trainer)/client.tsx` |
 | 3,298 | 45k | `studio-web/app/close/page.tsx` |
 | 3,100 | 50k | `app/(client)/scans.tsx` |
-| 2,933 | 49k | `app/(client)/nutrition.tsx` |
+| 2,954 | 50k | `app/(client)/nutrition.tsx` |
 | 2,806 | 37k | `studio-web/app/door/page.tsx` |
 | 2,595 | 35k | `studio-web/app/payroll/page.tsx` |
 | 2,574 | 38k | `app/(trainer)/log-session.tsx` |
@@ -56,7 +56,7 @@ is paid again on every turn of the session that opened it.
 | 1,541 | 18k | `studio-web/app/revenue/page.tsx` |
 | 1,529 | 22k | `app/(trainer)/sessions.tsx` |
 
-Total: 46 files, 117,021 lines, ~1690k tokens if every one were read whole.
+Total: 46 files, 117,042 lines, ~1691k tokens if every one were read whole.
 
 ## `app/(client)/workouts.tsx`
 
@@ -1246,100 +1246,102 @@ Total: 46 files, 117,021 lines, ~1690k tokens if every one were read whole.
 
 ## `app/(client)/nutrition.tsx`
 
-2,933 lines · ~49k tokens · 91 anchors
+2,954 lines · ~50k tokens · 93 anchors
 
 ```
-148-182       §        where the calorie target came from (TF-29)
-183-187       fn       rateIn
-188-197       fn       onDate
-198-201       fn       targetBasis
-202-245       fn         w
-246-251       §        real recipes in the list
-252-254       fn       sameDish
-255-259       fn       dishKey
-260-275       fn       openLink
-276-290       type     PlannedRead
-291-299       fn       PlannedRecipeRead
-300-396       default  Nutrition
-397-420       §        real recipes
-421-444       fn         onRecipeRead
-445-465       fn         logPlanned
-466-480       §        whose shop, and which week
-481-493       fn         grocWeekKey
-494-541       §        whose swaps
-542-596       §        and whose planned recipes
-597-597       fn         saveDislikes
-598-626       fn         addDislike
-627-640       fn         pull
-641-693       fn         removeMeal
-694-718       fn         photoLog
-719-770       fn         runPhotoLog
-771-771       fn         barcodeLog
-772-790       fn         describeLog
-791-812       fn           whole
-813-814       fn             outs
-815-815       fn             refused
-816-845       fn             unsent
-846-847       fn         adjustFor
-848-856       fn         cyclingAdjust
-857-857       fn         openWeightGoal
-858-873       §        and why every one of these is memoised
-874-891       fn         energyPlan
-892-912       §        which day of the coach's week the member is standing in
-913-915       fn         coachOverride
-916-921       fn         input
-922-922       fn         snacks
-923-923       fn         planHasSnacks
-924-925       fn         planSlots
-926-949       §        the plan, with the planned recipes in it
-950-961       fn         recipeDish
-962-970       §        the days on screen
-971-983       fn         days
-984-988       fn         coachRefs
-989-992       fn         plannedSrc
-993-994       fn         refAt
-995-1005      fn         withRecipes
-1006-1008     fn         waitingIn
-1009-1010     fn         todayPlan
-1011-1011     fn         todayWaiting
-1012-1016     fn         slotMeals
-1017-1024     fn         genSlotMeals
-1025-1032     fn         choose
-1033-1049     fn         openMeal
-1050-1060     fn         planRecipe
-1061-1068     fn         unplanRecipe
-1069-1092     fn         slotOptions
-1093-1094     fn         coachPick
-1095-1109     fn         swap
-1110-1152     §        the recipe search, and only when asked
-1153-1165     fn         recipeInPlan
-1166-1167     fn         coachWeekDay
-1168-1177     fn         week
-1178-1184     fn         weekPlan
-1185-1185     fn         weekWaiting
-1186-1188     fn         weekUnread
-1189-1189     fn         recipeWeek
-1190-1207     fn         groc
-1208-1210     fn         repeatsOn
-1211-1217     §        the exclusions that could not be honoured, computed once
-1218-1223     fn         gapNote
-1224-1234     fn         dislikeNote
-1235-1241     fn         weekAllergens
-1242-1242     fn         grocCount
-1243-1243     fn         grocKeys
-1244-1244     fn         grocChecked
-1245-1252     fn         toggleGroc
-1253-1297     fn         shareGrocery
-1298-1300     fn         sharePlan
-1301-1301     fn           rows
-1302-1347     fn           labels
-1348-1380     §        and whether that burn is a CURRENT reading
-1381-1458     §        water
-1459-1466     §        today's list: the rows, and how one is drawn
-1467-1478     fn         matchesQuery
-1479-1488     fn         mealRow
-1489-1588     fn           planned
-1589-2933     §        what a horizon costs, and the bound on it
+149-183       §        where the calorie target came from (TF-29)
+184-188       fn       rateIn
+189-198       fn       onDate
+199-202       fn       targetBasis
+203-246       fn         w
+247-252       §        real recipes in the list
+253-255       fn       sameDish
+256-260       fn       dishKey
+261-278       fn       openLink
+279-293       type     PlannedRead
+294-302       fn       PlannedRecipeRead
+303-399       default  Nutrition
+400-423       §        real recipes
+424-447       fn         onRecipeRead
+448-468       fn         logPlanned
+469-483       §        whose shop, and which week
+484-496       fn         grocWeekKey
+497-544       §        whose swaps
+545-599       §        and whose planned recipes
+600-600       fn         saveDislikes
+601-629       fn         addDislike
+630-643       fn         pull
+644-696       fn         removeMeal
+697-721       fn         photoLog
+722-773       fn         runPhotoLog
+774-774       fn         barcodeLog
+775-793       fn         describeLog
+794-815       fn           whole
+816-817       fn             outs
+818-818       fn             refused
+819-848       fn             unsent
+849-850       fn         adjustFor
+851-859       fn         cyclingAdjust
+860-860       fn         openWeightGoal
+861-876       §        and why every one of these is memoised
+877-894       fn         energyPlan
+895-915       §        which day of the coach's week the member is standing in
+916-918       fn         coachOverride
+919-924       fn         input
+925-925       fn         snacks
+926-926       fn         planHasSnacks
+927-928       fn         planSlots
+929-952       §        the plan, with the planned recipes in it
+953-964       fn         recipeDish
+965-973       §        the days on screen
+974-986       fn         days
+987-991       fn         coachRefs
+992-995       fn         plannedSrc
+996-997       fn         refAt
+998-1008      fn         withRecipes
+1009-1011     fn         waitingIn
+1012-1013     fn         todayPlan
+1014-1014     fn         todayWaiting
+1015-1019     fn         slotMeals
+1020-1027     fn         genSlotMeals
+1028-1035     fn         choose
+1036-1052     fn         openMeal
+1053-1063     fn         planRecipe
+1064-1071     fn         unplanRecipe
+1072-1095     fn         slotOptions
+1096-1097     fn         coachPick
+1098-1112     fn         swap
+1113-1155     §        the recipe search, and only when asked
+1156-1168     fn         recipeInPlan
+1169-1170     fn         coachWeekDay
+1171-1180     fn         week
+1181-1187     fn         weekPlan
+1188-1188     fn         weekWaiting
+1189-1191     fn         weekUnread
+1192-1192     fn         recipeWeek
+1193-1210     fn         groc
+1211-1213     fn         repeatsOn
+1214-1220     §        the exclusions that could not be honoured, computed once
+1221-1226     fn         gapNote
+1227-1237     fn         dislikeNote
+1238-1244     fn         weekAllergens
+1245-1245     fn         grocCount
+1246-1247     fn         grocKeys
+1248-1250     fn         grocNeed
+1251-1251     fn         grocLine
+1252-1252     fn         grocChecked
+1253-1260     fn         toggleGroc
+1261-1311     fn         shareGrocery
+1312-1314     fn         sharePlan
+1315-1315     fn           rows
+1316-1361     fn           labels
+1362-1394     §        and whether that burn is a CURRENT reading
+1395-1472     §        water
+1473-1480     §        today's list: the rows, and how one is drawn
+1481-1492     fn         matchesQuery
+1493-1502     fn         mealRow
+1503-1602     fn           planned
+1603-2954     §        what a horizon costs, and the bound on it
 ```
 
 ## `studio-web/app/door/page.tsx`

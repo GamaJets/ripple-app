@@ -214,7 +214,10 @@ eq(allergenGapNote(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack']
     combos++;
     const size = catalogSize(d, s, av);
     mix(`${d}/${s}/${m}:${size};`);
-    for (let k = 0; k < 32; k++) { const x = mealAt(d, s, Math.floor((k * size) / 32), av); mix(x.n + '|' + x.k + ';'); }
+    // A breakfast's style is bracketed now where it was dashed; the digest
+    // reads it back in the old form, so a pass here says the MEAL is the same
+    // and only its punctuation moved. Anything else that moved still fails.
+    for (let k = 0; k < 32; k++) { const x = mealAt(d, s, Math.floor((k * size) / 32), av); mix((s === 'Breakfast' ? x.n.replace(/ \(([^()]*)\)$/, ' \u2014 $1') : x.n) + '|' + x.k + ';'); }
   }
   eq(combos, 1204, 'the same 1,204 combinations can be built');
   eq(h.toString(16), '7f2e797c', 'and every one of them decodes its indices exactly as before');
@@ -246,7 +249,9 @@ eq(allergenGapNote(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack']
   const week = planWeek(input, undefined, 7);
   ok(week.every((day) => day[0].unfillable && day[0].ing.length === 0), 'every day of the week has the same empty breakfast');
   const groc = groceryFromWeek(week);
-  const items = Object.values(groc.byDept).flat().map((g) => g!.item.toLowerCase());
+  const items = [...Object.values(groc.byDept).flat(), ...groc.cupboard].map((g) => g!.item.toLowerCase());
+  ok(!items.some((i) => /^no /.test(i)) && [...Object.values(groc.byDept).flat(), ...groc.cupboard].every((g) => g!.qty > 0),
+    'and the empty slot is not a line on it, nor a zero');
   ok(!items.some((i) => /tofu|soy/.test(i)), 'the grocery list buys no soy');
   eq(groc.mealCount, new Set(week.flat().filter((m) => !m.unfillable).map((m) => m.n)).size, 'and counts only meals that are served');
   eq(planWeek(input, undefined, 30).length, 30, 'a month plans through an empty slot without failing');

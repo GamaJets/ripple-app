@@ -11,7 +11,7 @@ import {
   planDayOverride, planEmptySlotsLine, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
   type CoachMealPlan,
 } from './mealPlan';
-import { buildPlan, catalogSize, excludedAllergens, mealAt, mealDislikes, planWeek, searchMeals, slotsFor, swapIndex, type Allergen, type PlanInput } from './meals';
+import { buildPlan, catalogSize, excludedAllergens, mealAt, mealDish, mealDislikes, planWeek, sameMealName, searchMeals, slotsFor, swapIndex, unfillableName, type Allergen, type PlanInput } from './meals';
 import { WEEK_DAYS, jsDayForIndex } from './weekStart';
 
 const errors: string[] = [];
@@ -407,9 +407,9 @@ for (const day of planWeek(eater)) {
   const before = mealAt('meat', 'Breakfast', 0, []);
   const after = mealAt('meat', 'Breakfast', swapIndex('meat', 'Breakfast', 0, []), []);
   ok(size > 1, 'the breakfast catalogue has something to swap to');
-  // Compared with the style suffix stripped: 'Berry oats — warm' and
-  // 'Berry oats — with vanilla' are the same breakfast, which is the bug.
-  const dish = (n: string) => n.split(' — ')[0];
+  // Compared with the style stripped: 'Berry oats (warm)' and 'Berry oats
+  // (with vanilla)' are the same breakfast, which is the bug.
+  const dish = mealDish;
   ok(dish(before.n) !== dish(after.n),
     `a swapped breakfast is a different dish — got ${before.n} then ${after.n}`);
 }
@@ -513,6 +513,99 @@ ok(searchMeals('meat', 'Dinner', 'pemmican', 40, []).length === 0,
   const built = buildPlan({ ...soyFree, mealOverride: planDayOverride(plan, 0) });
   ok(built.plan[0].unfillable?.includes('soy') === true, 'the builder draws the empty breakfast');
   ok(built.aim < built.target.kcal && built.tot.K < built.target.kcal, 'and does not total the day as if it were full');
+}
+
+/* ── protein is chosen, not only disclosed ─────────────────────────────── */
+//
+// Portioning closes calories and cannot move protein, so a fresh plan now
+// CHOOSES its meals with the day's protein share in mind (`freshPicks` in
+// src/lib/meals.ts). Measured on this exact sweep, 240 weeks, before the
+// change: mean protein error 39.6%, 16.4% of days within 10% of target, and
+// no week fewer than 5 different dinner proteins. After: 22.8%, 54.3%, 6.
+{
+  const diets = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] as const;
+  const goals = ['fatloss', 'tone', 'muscle'] as const;
+  const bodies = [[52, 30], [68, 28], [82, 20], [110, 30]] as const;
+  const errs: number[] = [];
+  const kErrs: number[] = [];
+  let fewest = Infinity, n = 0;
+  for (const diet of diets) for (const goal of goals) for (const [w, bf] of bodies) for (const mpd of [3, 5] as const) for (const avoid of [[], ['dairy']] as Allergen[][]) {
+    const c = client({ id: 'sweep-' + n++, weightKg: w, bodyFatPct: bf, goal, diet, mealsPerDay: mpd, avoid });
+    const { target } = buildPlan(c);
+    const week = planWeek(c);
+    for (const day of week) {
+      const share = day.filter((m) => !m.unfillable).length / day.length;
+      errs.push(Math.abs(day.reduce((a, m) => a + m.P, 0) / (target.protein * share) - 1));
+      kErrs.push(Math.abs(day.reduce((a, m) => a + m.K, 0) / (target.kcal * share) - 1));
+    }
+    // The dinner's lead ingredient is its protein. Seven nights of the
+    // leanest chicken is the collapse this must not cause.
+    fewest = Math.min(fewest, new Set(week.map((d) => d[d.length - 1].ing[0]?.[0])).size);
+  }
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  ok(mean(errs) < 0.26, `protein error falls: mean ${(mean(errs) * 100).toFixed(1)}%, was 39.6%`);
+  ok(errs.filter((e) => e < 0.1).length / errs.length > 0.5, 'and most days now land within 10% of their protein target, where one in six did');
+  ok(mean(kErrs) < 0.015, `and calories are still closed by portioning: mean ${(mean(kErrs) * 100).toFixed(2)}%`);
+  ok(fewest >= 5, `without variety collapsing: every week has at least 5 different dinner proteins, got ${fewest}`);
+}
+
+// A stored pick is served as stored: protein never re-chooses it. The coach's
+// day and the member's swap are indices, and an index means one meal.
+{
+  const c = client({ weightKg: 60, bodyFatPct: 25, goal: 'tone' });
+  for (const idx of [0, 7, 123, 4567]) {
+    const served = buildPlan({ ...c, mealOverride: { 0: idx, 1: idx, 2: idx, 3: idx } }).plan;
+    served.forEach((m) => {
+      const size = catalogSize(c.diet, m.slot, []);
+      eq(m.idx, idx % size, `${m.slot} ${idx} is served as the index it was stored as`);
+      eq(m.n, mealAt(c.diet, m.slot, idx % size, []).n, `and as the meal that index names`);
+    });
+  }
+  // The coach's seed is the member's week, index for index.
+  const seeded = seedPlan(c, WRITTEN);
+  const shown = planWeek(c);
+  ok(seeded.days.every((day, d) => day.meals.every((m, i) => m.idx === shown[d][i].idx)), 'the coach seeds the week the member is shown');
+}
+
+/* ── a meal name carries no dash, and an old one still reads ───────────── */
+{
+  const brek = Array.from({ length: 40 }, (_, i) => mealAt('meat', 'Breakfast', i, []).n);
+  ok(brek.every((n) => !n.includes('—')), 'no generated breakfast carries an em dash');
+  ok(brek.some((n) => / \((warm|chilled|with [a-z ]+)\)$/.test(n)), 'its style is bracketed instead');
+  eq(mealDish('Mango overnight oats + chia (chilled)'), 'Mango overnight oats + chia', 'the dish reads without its style');
+  eq(mealDish('Mango overnight oats + chia — chilled'), 'Mango overnight oats + chia', 'and so does a name stored in the old form');
+  ok(sameMealName('Berry oats — warm', 'Berry oats (warm)'), 'an old stored name is the same meal as its new spelling');
+  ok(!sameMealName('Berry oats — warm', 'Berry oats (chilled)'), 'and a different style is still a different meal');
+  const empty = unfillableName('Breakfast', ['soy']);
+  eq(mealDish(empty), empty, "an empty slot's name has no style to strip");
+  ok(!empty.includes('—') && !empty.includes('('), 'and it reads as a sentence, with no joiner in it');
+  // A coach's plan written before the change stores the dashed names. It is
+  // not a different plan because the punctuation moved.
+  const nutFree = client({ avoid: ['nuts'] });
+  const plan = seedPlan(nutFree, WRITTEN);
+  const legacy: CoachMealPlan = { ...plan, days: plan.days.map((d) => ({ meals: d.meals.map((m) => ({ ...m, n: m.n.replace(/ \(([^()]*)\)$/, m.slot === 'Breakfast' ? ' — $1' : ' ($1)') })) })) };
+  ok(legacy.days.some((d) => d.meals.some((m) => m.n.includes('—'))), 'the fixture really does carry old dashed names');
+  // Shellfish is in no breakfast, so every breakfast index still names the
+  // same meal; a strict string compare would call all seven diverged.
+  eq(planStale(legacy, 'meat', ['nuts', 'shellfish'], 4).diverged.filter((x) => x.slot === 'Breakfast').length, 0,
+    'and a breakfast that still resolves to the same meal is not reported as diverged over its spelling');
+}
+
+/* ── the protein note, on a day with an empty slot ─────────────────────── */
+{
+  const soyFree = client({ diet: 'vegan', avoid: ['soy'], mealsPerDay: 4 });
+  const built = buildPlan(soyFree);
+  const share = built.aim / built.target.kcal;
+  ok(share < 1, 'a vegan avoiding soy serves three of four slots');
+  const note = planProteinNote(built.tot.P, built.target.protein, share);
+  const vsServed = Math.abs(built.tot.P / (built.target.protein * share) - 1);
+  eq(note === null, vsServed < 0.1, 'the note is judged against what the served meals should carry');
+  if (note) ok(/empty slot/.test(note), 'and says the empty slot is why the aim is lower');
+  // The whole-day figure is what the old note read against: an empty
+  // breakfast made every such day look short of protein, with "swap a meal"
+  // as the advice.
+  ok(planProteinNote(75, 100, 0.75) === null, 'three quarters of the day, carrying three quarters of the protein, is on target');
+  ok(/below/.test(planProteinNote(75, 100) ?? ''), 'where against the whole day it would have read as short');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

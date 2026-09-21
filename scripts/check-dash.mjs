@@ -71,7 +71,12 @@ for (const f of files) {
     if (TEXT_KINDS.has(n.kind)) {
       const raw = n.getText(sf);
       if (DASH.test(raw)) {
-        const body = raw.replace(/^['"`}]|['"`]$|\$\{$/g, '').trim();
+        // Trimmed only for JSX text, whose whitespace is layout. A string's
+        // spaces are its content: ' — ' is a dash JOINING two things, and
+        // trimming it to a lone '—' let every joiner through as an unknown
+        // figure (a breakfast's name, a food-log row, found 21 Sep 2026).
+        const inner = raw.replace(/^['"`}]|['"`]$|\$\{$/g, '');
+        const body = n.kind === K.JsxText ? inner.trim() : inner;
         const start = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line;
         const end = sf.getLineAndCharacterOfPosition(n.getEnd()).line;
         let ok = LONE.test(body);

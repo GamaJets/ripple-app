@@ -49,7 +49,8 @@ const YOGURT: FoodFacts = { name: 'Greek Yogurt', kcal: 133, protein: 10, carbs:
 
   eq(scaleFood(YOGURT, 1)!.name, 'Greek Yogurt',
     'one portion is left alone: "1 ×" in front of every food is noise on the ordinary case');
-  eq(portionName('Snack', 2, null), 'Snack — 2 portions', 'with no basis the multiple is still said, in portions');
+  eq(portionName('Snack', 2, null), 'Snack · 2 portions', 'with no basis the multiple is still said, in portions');
+  eq(portionName('Greek Yogurt', 2, '100 g'), 'Greek Yogurt · 2 × 100 g', 'joined with a middle dot, not the em dash a tester read as a machine');
   eq(basisLabel('100 g'), 'per 100 g', 'the control says what one portion IS where the source said');
   eq(basisLabel(null), null, 'and claims nothing where it did not');
   eq(basisLabel('  '), null, 'including when the source handed back a blank');

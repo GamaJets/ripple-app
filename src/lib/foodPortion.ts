@@ -167,7 +167,10 @@ export function portionName(name: string, qty: number, basis: string | null): st
   const clean = (name || 'Food').trim() || 'Food';
   if (qty === 1) return clean;
   const q = Number.isInteger(qty) ? String(qty) : String(Math.round(qty * 100) / 100);
-  return basis ? `${clean} — ${q} × ${basis}` : `${clean} — ${q} portions`;
+  // A middle dot, the app's mark between a label and its detail. It was an em
+  // dash. Rows already logged keep the dash they were written with: a log is
+  // a record, and nothing reads a portion back out of a name.
+  return basis ? `${clean} · ${q} × ${basis}` : `${clean} · ${q} portions`;
 }
 
 /** The label under the quantity control: what one portion IS, when the source

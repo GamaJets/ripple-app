@@ -1108,9 +1108,12 @@ export default function ClientNutrition() {
                               lands away from the target the screen says so in
                               words rather than leaving a blue bar to disagree
                               with the number printed two sections above it. */}
-                          {planProteinNote(built.tot.P, built.target.protein) ? (
+                          {/* Against the served meals' share on a day with an
+                              empty slot: the missing protein is the missing
+                              meal, not a meal to swap. */}
+                          {planProteinNote(built.tot.P, built.target.protein, built.aim / built.target.kcal) ? (
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                              {planProteinNote(built.tot.P, built.target.protein)}
+                              {planProteinNote(built.tot.P, built.target.protein, built.aim / built.target.kcal)}
                             </Text>
                           ) : null}
                         </Section>

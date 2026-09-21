@@ -51,7 +51,7 @@
 // exists for. It is the same shape as the injury acknowledgement in
 // ./injuryGate.ts and is answered the same way: the coach is stopped by news.
 import type { Diet } from './types';
-import { allergenLabel, buildPlan, catalogSize, dislikeFreeIndex, emptySlots, mealAt, slotsFor, variantStep, type Allergen, type PlanInput, type Slot } from './meals';
+import { allergenLabel, catalogSize, emptySlots, mealAt, planWeek, sameMealName, slotsFor, type Allergen, type PlanInput, type Slot } from './meals';
 import { weekdayOfIso } from './dayPlan';
 import { WEEK_DAYS, dayIndexInWeek, jsDayForIndex } from './weekStart';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -139,31 +139,20 @@ export function capturePlanMeal(diet: Diet, slot: Slot, idx: number, avoid: read
 }
 
 /**
- * A week to start editing from: the day the client is already being shown,
- * then six variations of it.
+ * A week to start editing from: the week the client is already being shown.
  *
- * Stepping each index by `variantStep` per day is exactly what the client's
- * Meals tab does for its own week preview, so a coach who opens this screen and
- * saves without touching anything has committed the week the client could
- * already see. The step has to be the SAME step — an increment of 1 here and a
- * variant step there would be two different weeks again, which is the whole
- * reason that arithmetic lives in one function in src/lib/meals.ts. A seed that invented a different week would make "send" a change the
- * coach did not make.
+ * It IS `planWeek`, rather than the same arithmetic written out again here, so
+ * a coach who opens this screen and saves without touching anything has
+ * committed the week the client could already see. It was a copy once, and a
+ * copy is how two weeks happen: `planWeek` now chooses each later day with the
+ * day's protein and the week's variety in mind, and a seed that still only
+ * stepped the index would make "send" a change the coach did not make.
  */
 export function seedPlan(input: PlanInput, writtenAtISO: string): CoachMealPlan {
   const avoid = [...(input.avoid ?? [])];
-  const slots = slotsFor(input.mealsPerDay);
-  const day0 = buildPlan(input).plan;
-  const days: PlanDay[] = [];
-  for (let d = 0; d < PLAN_DAYS; d++) {
-    days.push({
-      meals: slots.map((slot, i) =>
-        // Day zero as drawn; every later day through `dislikeFreeIndex`, the
-        // same as `planWeek` steps the client's own preview.
-        capturePlanMeal(input.diet, slot, d === 0 ? (day0[i]?.idx ?? 0)
-          : dislikeFreeIndex(input.diet, slot, (day0[i]?.idx ?? 0) + d * variantStep(input.diet, slot, avoid), avoid, input.dislikes), avoid)),
-    });
-  }
+  const days: PlanDay[] = planWeek(input, undefined, PLAN_DAYS).map((day) => ({
+    meals: day.map((m) => capturePlanMeal(input.diet, m.slot, m.idx, avoid)),
+  }));
   return { v: PLAN_VERSION, diet: input.diet, avoid, mealsPerDay: input.mealsPerDay, days, writtenAt: writtenAtISO };
 }
 
@@ -358,7 +347,10 @@ export function planStale(
         // named row, which differs from the meal the coach chose: diverged.
         const size = catalogSize(diet, m.slot, now);
         const resolved = mealAt(diet, m.slot, size ? m.idx % size : m.idx, now);
-        if (resolved.n !== m.n) diverged.push({ dayIdx, pos, slot: m.slot, was: m.n, now: resolved.n });
+        // Through `sameMealName`: a plan written before breakfast styles were
+        // bracketed stores "Berry oats — warm", which is the meal that now
+        // reads "Berry oats (warm)". A new joiner is not a new meal.
+        if (!sameMealName(resolved.n, m.n)) diverged.push({ dayIdx, pos, slot: m.slot, was: m.n, now: resolved.n });
       });
     });
   }
@@ -528,12 +520,27 @@ export function planServingNote(servings: readonly number[], baseKcal: number, t
  *
  * Null when the day is within `TOL` of its target, because a note on every
  * plan is a note nobody reads, and a few grams is not a finding.
+ *
+ * Protein share is now a lever at meal SELECTION (`freshPicks` in ./meals.ts
+ * chooses a fresh plan's meals toward the target), but only among meals the
+ * diet, the allergens and the week's variety allow, and never over a meal a
+ * coach or member picked. Where a gap survives that, this still says so.
+ *
+ * A day with an empty slot is measured against the share of the target its
+ * SERVED meals carry (`served`, the same fraction `buildPlan` sizes them to).
+ * Against the whole day it would read as short of protein, and "swap a meal"
+ * would be the wrong advice: the missing protein is the missing meal.
  */
 const PROTEIN_NOTE_TOL = 0.1;
-export function planProteinNote(planProtein: number, targetProtein: number): string | null {
+export function planProteinNote(planProtein: number, targetProtein: number, served = 1): string | null {
   if (!Number.isFinite(planProtein) || !Number.isFinite(targetProtein) || targetProtein <= 0) return null;
-  const off = (planProtein - targetProtein) / targetProtein;
+  const share = Number.isFinite(served) && served > 0 && served < 1 ? served : 1;
+  const aim = targetProtein * share;
+  const off = (planProtein - aim) / aim;
   if (Math.abs(off) < PROTEIN_NOTE_TOL) return null;
   const dir = off > 0 ? 'above' : 'below';
-  return `The portions above are sized by calories, which is the only thing they can be sized by. This day's protein is what these particular meals contain: ${Math.round(planProtein).toLocaleString()} g, ${dir} the ${Math.round(targetProtein).toLocaleString()} g target. Swapping a meal moves it; changing the portions does not.`;
+  const against = share < 1
+    ? `the ${Math.round(aim).toLocaleString()} g the meals served should carry (the ${Math.round(targetProtein).toLocaleString()} g day target, less the empty slot's share)`
+    : `the ${Math.round(targetProtein).toLocaleString()} g target`;
+  return `The portions above are sized by calories, which is the only thing they can be sized by. This day's protein is what these particular meals contain: ${Math.round(planProtein).toLocaleString()} g, ${dir} ${against}. Swapping a meal moves it; changing the portions does not.`;
 }

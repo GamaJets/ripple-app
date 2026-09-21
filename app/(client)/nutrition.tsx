@@ -22,8 +22,8 @@ import { useTheme } from '../../src/ui/components';
 import {
   buildPlan, snackIdeas, SNACK_SHARE, swapIndex, searchMeals, mealAt, catalogSize, groceryFromWeek, planWeek, slotsFor, catalogRepeatDay,
   emptySlots, mealAllergens, allergenGapNote, allergenLabel, mealRowSpoken,
-  dislikeFreeIndex, dislikeGaps, dislikeGapNote, normaliseDislike, preferNotDisliked,
-  DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen, type Slot,
+  dislikeFreeIndex, dislikeGaps, dislikeGapNote, mealDish, normaliseDislike, preferNotDisliked,
+  DEPTS, DEPT_ICO, ALLERGENS, type GroceryItem, type PlannedMeal, type Allergen, type Slot,
 } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
 import { hitSlopFor } from '../../src/lib/a11y';
@@ -34,6 +34,7 @@ import { useToday } from '../../src/ui/today';
 import { startOfWeek, WEEK_DAY_NAMES } from '../../src/lib/weekStart';
 import { dayKeyOfDate } from '../../src/lib/entryEdit';
 import { groceryTicksKey, readGroceryTicks } from '../../src/lib/groceryTicks';
+import { CUPBOARD_HEAD, needText } from '../../src/lib/groceryPacks';
 // The member's own meal swaps, under a key with their account in it. They lived
 // under a bare `repple.mealOverride` — no account, no sign-out entry — fifteen
 // lines below the grocery ticks that were fixed for exactly that. See
@@ -269,6 +270,8 @@ const UNREAD_SHOPPING_WARNING =
 /** The heading unmeasured ingredients go under. They are shopping and belong
  *  on the list; they have no quantity, and inventing one is worse than none. */
 const UNMEASURED_HEAD = 'To Taste & As Needed';
+/** Under the store-cupboard heading: these are a check, not a shop. */
+const CUPBOARD_NOTE = 'Small amounts of flavourings. Check what you already have before buying these.';
 
 /** One planned recipe's read, as the screen holds it. `loading` rides along so
  *  "Try Again" can say it is trying — the hook keeps the old failure in
@@ -1071,8 +1074,8 @@ export default function Nutrition() {
     // An empty slot has no catalogue to offer; its way out is the recipe search.
     if (!slotSel || !lead || lead.unfillable?.length) return [];
     const q = mealQuery.trim();
-    // Neighbouring indices differ only in the last component — "Berry oats",
-    // "Berry oats — warm", "Berry oats — chilled" — so the catalogue is
+    // Neighbouring indices differ only in the last component: "Berry oats",
+    // "Berry oats (warm)", "Berry oats (chilled)". So the catalogue is
     // sampled at a stride when nothing is typed, and a search is thinned to
     // one row per base dish. Eight different breakfasts, not eight oats.
     const size = catalogSize(diet, slotSel, c.avoid);
@@ -1080,9 +1083,9 @@ export default function Nutrition() {
     const raw = q
       ? searchMeals(diet, slotSel, q, 60, c.avoid, c.dislikes)
       : Array.from({ length: 8 }, (_, i) => mealAt(diet, slotSel, dislikeFreeIndex(diet, slotSel, (lead.idx + stride * (i + 1) + i * 7) % size, c.avoid, c.dislikes), c.avoid));
-    const seen = new Set<string>([lead.n.split(' — ')[0]]);
+    const seen = new Set<string>([mealDish(lead.n)]);
     return raw
-      .filter((m) => { const base = m.n.split(' — ')[0]; if (m.idx === lead.idx || seen.has(base)) return false; seen.add(base); return true; })
+      .filter((m) => { const base = mealDish(m.n); if (m.idx === lead.idx || seen.has(base)) return false; seen.add(base); return true; })
       .slice(0, 12)
       .map((m) => ({ ...m, pos: lead.pos, servings: lead.servings,
         K: Math.round(m.k * lead.servings), P: Math.round(m.p * lead.servings), C: Math.round(m.c * lead.servings), F: Math.round(m.f * lead.servings) }));
@@ -1239,8 +1242,13 @@ export default function Nutrition() {
     }
     return [...found];
   }, [weekPlan, c.avoid]);
-  const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
-  const grocKeys = DEPTS.flatMap((d) => (groc.byDept[d] || []).map((it) => d + '|' + it.item));
+  const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0) + groc.cupboard.length;
+  const grocKeys = [...DEPTS.flatMap((d) => (groc.byDept[d] || []).map((it) => d + '|' + it.item)), ...groc.cupboard.map((it) => 'cupboard|' + it.item)];
+  // What the plan needs, as a person reads an amount: "810 g", "1.26 kg".
+  const grocNeed = (it: GroceryItem) => needText(it.qty, it.unit, numUpTo);
+  // A line is the pack to pick up with the exact need beside it, or the need
+  // alone where there is no honest pack (loose produce, meat by weight).
+  const grocLine = (it: GroceryItem) => it.buy ? `${it.buy} (plan uses ${grocNeed(it)})` : grocNeed(it);
   const grocChecked = grocKeys.filter((k) => checked[k]).length;
   const toggleGroc = (k: string) => setChecked((prev) => {
     const n = { ...prev, [k]: !prev[k] };
@@ -1276,9 +1284,15 @@ export default function Nutrition() {
     DEPTS.filter((d) => groc.byDept[d]?.length).forEach((d) => {
       lines.push(d.toUpperCase());
       html += '<h3>' + d + '</h3><ul>';
-      groc.byDept[d]!.forEach((it) => { const q = it.qty + (it.unit ? ' ' + it.unit : ''); lines.push('- ' + it.item + ': ' + q); html += '<li>' + it.item + ': ' + q + '</li>'; });
+      groc.byDept[d]!.forEach((it) => { const q = grocLine(it); lines.push('- ' + it.item + ': ' + q); html += '<li>' + it.item + ': ' + q + '</li>'; });
       html += '</ul>'; lines.push('');
     });
+    if (groc.cupboard.length) {
+      lines.push(CUPBOARD_HEAD.toUpperCase(), CUPBOARD_NOTE);
+      html += '<h3>' + CUPBOARD_HEAD + '</h3><p>' + CUPBOARD_NOTE + '</p><ul>';
+      groc.cupboard.forEach((it) => { const q = grocLine(it); lines.push('- ' + it.item + ': ' + q); html += '<li>' + it.item + ': ' + q + '</li>'; });
+      html += '</ul>'; lines.push('');
+    }
     // Named, never quantified: a recipe asked for salt to taste, and "0 g salt"
     // on a shopping list is a figure nobody wrote.
     if (groc.unmeasured.length) {
@@ -2720,20 +2734,27 @@ export default function Nutrition() {
               </View>
               <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{grocChecked}/{grocCount} in cart</Text>
             </View>
-            {DEPTS.filter((d) => groc.byDept[d]?.length).map((d) => (
-              <View key={d} style={{ marginBottom: sp.lg }}>
-                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{DEPT_ICO[d]} {d}</Text>
-                {groc.byDept[d]!.map((it, i) => { const k = d + '|' + it.item; const on = !!checked[k]; return (
+            {[...DEPTS.filter((d) => groc.byDept[d]?.length).map((d) => ({ key: d, head: `${DEPT_ICO[d]} ${d}`, note: null as string | null, items: groc.byDept[d]! })),
+              ...(groc.cupboard.length ? [{ key: 'cupboard', head: `🫙 ${CUPBOARD_HEAD}`, note: CUPBOARD_NOTE as string | null, items: groc.cupboard }] : [])].map((g) => (
+              <View key={g.key} style={{ marginBottom: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{g.head}</Text>
+                {g.note ? <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{g.note}</Text> : null}
+                {g.items.map((it, i) => { const k = g.key + '|' + it.item; const on = !!checked[k]; const need = grocNeed(it); return (
                   <Pressable key={i} onPress={() => toggleGroc(k)} accessibilityRole="checkbox" accessibilityState={{ checked: on }}
                     // With the quantity. A shopping list read out as bare
                     // nouns is a list you cannot shop from.
-                    accessibilityLabel={`${it.item}, ${it.qty}${it.unit ? ' ' + it.unit : ''}`}
+                    accessibilityLabel={`${it.item}, ${grocLine(it)}`}
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1 }}>
                       <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: on ? 0 : 1, borderColor: t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={13} color={t.brandInk} /> : null}</View>
-                      <Text style={{ ...ty.body, color: on ? t.ink3 : t.ink2, textDecorationLine: on ? 'line-through' : 'none', flex: 1 }}>{it.item}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.body, color: on ? t.ink3 : t.ink2, textDecorationLine: on ? 'line-through' : 'none' }}>{it.item}</Text>
+                        {/* The exact amount stays visible under the pack, so
+                            rounding up to a bag hides nothing. */}
+                        {it.buy ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Plan uses {need}</Text> : null}
+                      </View>
                     </View>
-                    <Text style={{ ...ty.label, ...numeric, ...font('500'), color: on ? t.ink3 : t.ink, textDecorationLine: on ? 'line-through' : 'none' }}>{it.qty}{it.unit ? ' ' + it.unit : ''}</Text>
+                    <Text style={{ ...ty.label, ...numeric, ...font('500'), color: on ? t.ink3 : t.ink, textDecorationLine: on ? 'line-through' : 'none' }}>{it.buy ?? need}</Text>
                   </Pressable>
                 ); })}
               </View>

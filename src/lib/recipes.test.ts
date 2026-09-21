@@ -202,7 +202,7 @@ eq(portionRecipe(meal, 100, 0).servings, 0.5, 'never under half a serving, as bu
 eq(portionRecipe(meal, 5000, 0).servings, 8.5, 'and upward without a cap, as buildPlan is');
 same([portionRecipe(meal, null, 0).servings, portionRecipe(meal, 0, 0).servings], [1, 1], 'no target is one serving as written, not a division by nothing');
 const bought = groceryFromWeek([[portionRecipe(meal, meal.k * 2, 0)]]);
-same(bought.byDept['Grains & Bread'], [{ item: 'Pasta', qty: 170, unit: 'g' }], 'a portioned recipe is a PlannedMeal to the grocery list: two servings, 170 g');
+same(bought.byDept['Grains & Bread'], [{ item: 'Pasta', qty: 170, unit: 'g', buy: null }], 'a portioned recipe is a PlannedMeal to the grocery list: two servings, 170 g');
 // The per-serving trap, shopped: `ing` is per serving and so is `k`, from the
 // same divisor, which is the only reason multiplying one by `servings` and
 // adding the other to a day total describe the same plate.

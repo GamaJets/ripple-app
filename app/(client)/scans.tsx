@@ -919,7 +919,7 @@ export default function Scans() {
         // was read — no signed-in user, no image — and it is more specific than
         // the reader's silence. The old wording is the fallback it always was.
         setOcrMsg(read.error
-          || ((r.error || 'Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '')) + ' Please type the numbers in.'));
+          || ((r.error || 'Could not read automatically' + (lastVisionError ? ': ' + lastVisionError + '.' : '.')) + ' Please type the numbers in.'));
       }
     }
   };

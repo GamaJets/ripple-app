@@ -9,6 +9,7 @@
 import type { Diet, BodyStats } from './types';
 import { macrosFor, applyCoachAdjust, type CoachAdjust } from './nutrition';
 import type { EnergyPlan } from './goalEnergy';
+import { isCupboard, packFor, roundNeed } from './groceryPacks';
 
 export type Slot = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack';
 export const DEPTS = [
@@ -645,6 +646,24 @@ export function catalogSize(diet: Diet, slot: Slot, avoid: Allergen[] = []): num
   return dims(diet, slot, avoid).reduce((a, p) => a * Math.max(1, p.length), 1);
 }
 
+/**
+ * A generated meal's name without its style: "Berry oats (warm)" and "Berry
+ * oats (chilled)" are one dish. Reads the old form too, "Berry oats — warm",
+ * because names are stored: a coach's plan snapshots them (`PlanMeal.n`) and
+ * a food log keeps what was logged. Nothing stored is rewritten; it is read.
+ */
+export function mealDish(name: string): string {
+  return name.replace(LEGACY_STYLE, '').replace(/ \([^()]*\)$/, '');
+}
+/** The em dash a breakfast's style was once joined with. Read, never written. */
+const LEGACY_STYLE = / \u2014 .*$/;
+/** Whether two names are the same generated meal, either side possibly
+ *  written in the old dashed form. */
+export function sameMealName(a: string, b: string): boolean {
+  const canon = (n: string) => n.replace(/ \u2014 (.*)$/, ' ($1)');
+  return canon(a) === canon(b);
+}
+
 /** Deterministic index → concrete meal (macros, ingredients, method). */
 export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = []): GeneratedMeal {
   // A slot that cannot be made safely is served EMPTY, never as the nearest
@@ -685,7 +704,10 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
   let n: string, ico: string, steps: string[];
   if (slot === 'Breakfast') {
     const [base, top, boost, style] = [at(0), at(1), at(2), at(3)];
-    n = `${cap(top.n)} ${base.n}${boost.n ? ' ' + boost.n : ''}${style.n ? ' — ' + style.n : ''}`;
+    // The style in brackets, the way a snack's prep already is. It was joined
+    // with an em dash, which a tester read as the app being written by a
+    // machine. `mealDish` strips either form.
+    n = `${cap(top.n)} ${base.n}${boost.n ? ' ' + boost.n : ''}${style.n ? ' (' + style.n + ')' : ''}`;
     ico = base.ico ?? '🍽️';
     steps = [
       base.step ?? `Prepare the ${base.n}.`,
@@ -765,14 +787,15 @@ export function buildPlan(c: PlanInput): {
   const slots = slotsFor(c.mealsPerDay);
   const override = c.mealOverride ?? {};
   const avoid = c.avoid ?? [];
+  // `+ i * variantStep` for the same reason the week steps by it: `mealSeed`
+  // spaces the slots by 7, which is a FINE dimension, so Lunch and Dinner —
+  // which draw from the same pools — came out as the same protein twice a
+  // day with a different sauce on it. The seed is where a fresh pick STARTS;
+  // `freshPicks` chooses near it with the day's protein in mind.
+  const picks = freshPicks(c, slots, 0, (i) => mealSeed(c, i) + i * variantStep(c.diet, slots[i], avoid), override, newPickMemory());
   let plan: PlannedMeal[] = slots.map((slot, i) => {
     const size = catalogSize(c.diet, slot, avoid);
-    // `+ i * variantStep` for the same reason the week steps by it: `mealSeed`
-    // spaces the slots by 7, which is a FINE dimension, so Lunch and Dinner —
-    // which draw from the same pools — came out as the same protein twice a
-    // day with a different sauce on it.
-    const seeded = dislikeFreeIndex(c.diet, slot, mealSeed(c, i) + i * variantStep(c.diet, slot, avoid), avoid, c.dislikes);
-    const raw = override[i] != null ? override[i] : seeded;
+    const raw = picks[i];
     // An unfillable slot has no catalogue to take the index modulo; its pick
     // is carried through as it was (see `mealAt`).
     const idx = size ? raw % size : raw;
@@ -814,9 +837,10 @@ export function buildPlan(c: PlanInput): {
   // cannot be made into one: scaling multiplies every macro by the same
   // number, so the plan's protein-per-calorie is whatever the meals that were
   // chosen happen to contain, and no portion size moves it toward the target.
-  // That gap belongs to meal SELECTION. `planProteinNote` in ./mealPlan.ts is
-  // what says so on the screen rather than letting a meter disagree with the
-  // number printed above it in silence.
+  // That gap belongs to meal SELECTION, which `freshPicks` below now does for
+  // every slot nobody has picked. What it cannot close, `planProteinNote` in
+  // ./mealPlan.ts says on the screen rather than letting a meter disagree with
+  // the number printed above it in silence.
   const QUARTER = 0.25;
   const MIN_SERVING = 0.5;
   const serv = plan.map((x) => x.unfillable ? 0 : Math.max(MIN_SERVING, Math.round((aim / base) * 4) / 4));
@@ -1083,6 +1107,9 @@ export function planWeek(
   // swaps included — the week steps from what is on screen rather than from a
   // seed nobody can see.
   const today = buildPlan(c).plan;
+  const slots = today.map((m) => m.slot);
+  const avoid = c.avoid ?? [];
+  const memory = newPickMemory();
   const out: PlannedMeal[][] = [];
   // `days` is how far ahead the member is looking — one day, a week, a month
   // (src/lib/mealHorizon.ts). It was seven and only seven, and a horizon longer
@@ -1098,22 +1125,179 @@ export function planWeek(
   const span = Number.isInteger(days) && days > 0 ? days : PLAN_WEEK_DAYS;
   for (let d = 0; d < span; d++) {
     const written = coachDay ? coachDay(d % PLAN_WEEK_DAYS) : null;
+    // Day zero is left alone: it is today, including a meal they picked by
+    // hand. Every later day STARTS from today's meal `d * variantStep` along
+    // (not `+ d`, see its comment: day 3 is a different protein, not the same
+    // chicken under a different sauce) and `freshPicks` chooses near there
+    // with the day's protein, and the week so far, in mind.
+    if (d === 0) remember(c, today, 0, memory);
+    const ov = d === 0 ? null
+      : freshPicks(c, slots, d, (i) => today[i].idx + d * variantStep(c.diet, slots[i], avoid), {}, memory);
+    // The generated week is chosen as if the coach had written nothing, so a
+    // day they left blank is the same generated day whichever days they did
+    // write. `freshPicks` has already remembered it; a written day replaces it
+    // on screen and nothing else.
     if (written) { out.push(buildPlan({ ...c, mealOverride: written }).plan); continue; }
-    const ov: Record<number, number> = {};
-    // `variantStep`, not `+ d` — see its comment. Day 3 is a different protein,
-    // not the same chicken under a different sauce.
-    // Through `dislikeFreeIndex`, because a step along the catalogue can land
-    // on a component they do not want even where today's meal had none. Day
-    // zero is left alone: it is today, including a meal they picked by hand.
-    today.forEach((m) => { ov[m.pos] = d === 0 ? m.idx : dislikeFreeIndex(c.diet, m.slot, m.idx + d * variantStep(c.diet, m.slot, c.avoid ?? []), c.avoid ?? [], c.dislikes); });
-    out.push(buildPlan({ ...c, mealOverride: ov }).plan);
+    out.push(ov ? buildPlan({ ...c, mealOverride: ov }).plan : today);
   }
   return out;
 }
 
-export interface GroceryItem { item: string; qty: number; unit: string; }
+// ── choosing a fresh meal, with protein in mind ─────────────────────────────
+//
+// `buildPlan` sizes plates to hit CALORIES, and a portion multiplies every
+// macro alike, so a day's protein-per-calorie is decided by WHICH meals are on
+// it. Choosing by the seed alone put a day wherever its meals happened to
+// land: measured over a sweep of bodies, goals and diets, two days in three
+// sat more than 10% over their protein target, a fifth of them more than 80%
+// over, with a note on screen saying so and nothing that could fix it.
+//
+// So a fresh pick looks at a few meals along the variety walk and takes the
+// one that brings the day's protein share nearest the target's; portioning
+// then closes calories exactly as before. This changes which index is CHOSEN
+// for a slot nobody has picked. It never changes what an index MEANS: every
+// candidate is an ordinary index into the same pools, and a pick that is
+// stored (a swap, a coach's day) is served as stored and never re-chosen.
+//
+// Protein never outranks anything that filters: the candidates are drawn
+// through `dims` (the diet and allergens) and `dislikeFreeIndex`, and an
+// empty slot is not a meal to pick.
+//
+// And it must not undo the variety fix. Asked only about protein, a week
+// would be the leanest chicken seven nights running. So a candidate that
+// repeats a meal already served in this horizon, or the lead component
+// (the protein, the breakfast base, the snack) of one served in the last
+// few days, loses to one that does not, and protein decides among the rest.
+
+/** How many meals along the walk a fresh pick chooses among. */
+const PICK_CANDIDATES = 16;
+/** Candidates sit this many days' steps apart, the longest horizon a member
+ *  can look at (src/lib/mealHorizon.ts), so no candidate is another day's
+ *  starting point inside it. */
+const PICK_SPREAD = 31;
+/** How many days back a lead component's servings are counted. */
+const LEAD_WINDOW = 7;
+
+interface PickMemory { meals: Set<string>; lead: Map<string, number[]> }
+const newPickMemory = (): PickMemory => ({ meals: new Set(), lead: new Map() });
+
+/** Lunch and Dinner draw from the same pools, so the same index is the same meal. */
+const poolGroup = (slot: Slot) => (slot === 'Lunch' || slot === 'Dinner' ? 'main' : slot);
+
+/** The meal's key and its lead component's key, for the repeat checks. */
+function pickKeys(diet: Diet, slot: Slot, idx: number, avoid: Allergen[]): [string, string] {
+  const sizes = dims(diet, slot, avoid).map((p) => Math.max(1, p.length));
+  const total = sizes.reduce((a, b) => a * b, 1);
+  const i = ((idx % total) + total) % total;
+  return [`${poolGroup(slot)}:${i}`, String(Math.floor(i / (total / sizes[0])))];
+}
+
+function served(mem: PickMemory, slot: Slot, lead: string, d: number): void {
+  for (const k of [`${slot}#${lead}`, `${poolGroup(slot)}#${lead}`]) mem.lead.set(k, [...(mem.lead.get(k) ?? []), d]);
+}
+
+function remember(c: PlanInput, day: readonly PlannedMeal[], d: number, mem: PickMemory): void {
+  for (const m of day) {
+    if (m.unfillable) continue;
+    const [meal, lead] = pickKeys(c.diet, m.slot, m.idx, c.avoid ?? []);
+    mem.meals.add(meal);
+    served(mem, m.slot, lead, d);
+  }
+}
+
+/**
+ * One day's indices: `pinned` positions as given, every other position chosen
+ * from `PICK_CANDIDATES` meals along the walk from `base(i)`. Candidate 0 is
+ * the walk's own meal and wins every tie, so a day already on target is the
+ * day it always was.
+ *
+ * Two passes. The first chooses in slot order against what is already on the
+ * day; the second chooses each slot again against the WHOLE rest of the day,
+ * because breakfast chosen first cannot know that dinner will be salmon.
+ */
+function freshPicks(
+  c: PlanInput, slots: readonly Slot[], d: number, base: (i: number) => number,
+  pinned: Record<number, number>, mem: PickMemory,
+): Record<number, number> {
+  // Every position pinned (a coach's day, a week day already chosen) is
+  // nothing to choose, and `buildPlan` is called that way on every day of a
+  // horizon.
+  if (slots.every((_, i) => pinned[i] != null)) return { ...pinned };
+  const avoid = c.avoid ?? [];
+  const target = applyCoachAdjust(macrosFor(c), c.coachAdjust);
+  const want = target.kcal > 0 ? target.protein / target.kcal : 0;
+  type Pick = { idx: number; p: number; k: number; meal: string; lead: string } | null;
+  const at = (i: number, idx: number): Pick => {
+    const m = mealAt(c.diet, slots[i], idx, avoid);
+    if (m.unfillable) return null;
+    const [meal, lead] = pickKeys(c.diet, slots[i], idx, avoid);
+    return { idx, p: m.p, k: m.k, meal, lead };
+  };
+  const idxs: number[] = [];
+  const day: Pick[] = [];
+  // An empty slot has nothing to choose between, and without a target there
+  // is nothing to choose by: the walk's own meal, as it always was.
+  const free = slots.map((slot, i) => pinned[i] == null && !!want && catalogSize(c.diet, slot, avoid) > 0);
+  slots.forEach((slot, i) => {
+    idxs[i] = pinned[i] != null ? pinned[i] : dislikeFreeIndex(c.diet, slot, base(i), avoid, c.dislikes);
+    // What is pinned is on the plate whatever is chosen, so it counts first.
+    day[i] = free[i] ? null : at(i, idxs[i]);
+  });
+  const candidates = slots.map((slot, i) => {
+    if (!free[i]) return [];
+    const step = variantStep(c.diet, slot, avoid);
+    return Array.from({ length: PICK_CANDIDATES }, (_, j) =>
+      at(i, dislikeFreeIndex(c.diet, slot, base(i) + j * PICK_SPREAD * step, avoid, c.dislikes))!);
+  });
+  for (let pass = 0; pass < 2; pass++) {
+    slots.forEach((slot, i) => {
+      if (!free[i]) return;
+      const others = slots.flatMap((s2, o) => (o !== i && day[o] ? [{ ...day[o]!, group: poolGroup(s2) }] : []));
+      const P = others.reduce((a, x) => a + x.p, 0);
+      const K = others.reduce((a, x) => a + x.k, 0);
+      let best: Pick = null, bestScore = Infinity;
+      for (const cand of candidates[i]) {
+        // A meal already served in this horizon or on this day, then how
+        // often its lead component was served in the window: per SLOT, so
+        // each slot's week rotates on its own, plus today's same-pool plate
+        // (lunch's chicken, for dinner). The least-served lead wins, so the
+        // leads rotate rather than the leanest one coming back as soon as
+        // the window lets it.
+        const repeat = mem.meals.has(cand.meal) || others.some((x) => x.meal === cand.meal);
+        const recent = (mem.lead.get(`${slot}#${cand.lead}`) ?? []).filter((x) => d - x < LEAD_WINDOW).length
+          + others.filter((x) => x.lead === cand.lead && x.group === poolGroup(slot)).length;
+        const off = Math.abs((P + cand.p) / Math.max(1, K + cand.k) - want) / want;
+        // Repeats first, then protein. Strictly less, so candidate 0 keeps a tie.
+        const score = (repeat ? 100 : 0) + recent * 10 + off;
+        if (score < bestScore) { bestScore = score; best = cand; }
+      }
+      day[i] = best;
+      idxs[i] = best!.idx;
+    });
+  }
+  const out: Record<number, number> = {};
+  slots.forEach((slot, i) => {
+    out[i] = idxs[i];
+    const x = day[i];
+    if (x) { mem.meals.add(x.meal); served(mem, slot, x.lead, d); }
+  });
+  return out;
+}
+
+export interface GroceryItem {
+  item: string;
+  /** Exactly what the plan needs, rounded only as far as anybody measures. */
+  qty: number; unit: string;
+  /** What to put in the basket for it, whole packs rounded up ("1 kg bag"),
+   *  or null where there is no honest pack and `qty` is the line
+   *  (src/lib/groceryPacks.ts). */
+  buy: string | null;
+}
 export interface GroceryData {
   byDept: Partial<Record<Dept, GroceryItem[]>>;
+  /** The small flavourings, a store-cupboard check rather than a shop. Out of
+   *  `byDept`, never out of the list. */
+  cupboard: GroceryItem[];
   mealCount: number;
   /** Things a real recipe names without an amount — "salt, to taste", "butter,
    *  for greasing". They belong on the list, because they are shopping; they do
@@ -1139,7 +1323,9 @@ export function groceryFromWeek(week: readonly (readonly GroceryRow[])[]): Groce
       // An empty slot is not a meal and has nothing to buy.
       if (meal.unfillable?.length) continue;
       meals.add(meal.n);
-      meal.ing.forEach(([item, qty, unit, dept]) => {
+      meal.ing.forEach(([name, qty, unit, dept]) => {
+        // One box of eggs, not an "Egg" line under an "Eggs" line.
+        const item = name === 'Egg' ? 'Eggs' : name;
         const key = `${dept}||${item}||${unit}`;
         agg[key] = (agg[key] || 0) + qty * meal.servings;
       });
@@ -1147,16 +1333,17 @@ export function groceryFromWeek(week: readonly (readonly GroceryRow[])[]): Groce
     }
   }
   const byDept: Partial<Record<Dept, GroceryItem[]>> = {};
+  const cupboard: GroceryItem[] = [];
   Object.entries(agg).forEach(([key, q]) => {
     const [dept, item, unit] = key.split('||') as [Dept, string, string];
-    let qty: number;
-    if (unit === 'g' || unit === 'ml') qty = Math.round(q / 10) * 10;
-    else if (['', 'piece', 'slice', 'clove', 'rasher', 'scoop', 'cup', 'pinch'].includes(unit)) qty = Math.ceil(q);
-    else qty = Math.round(q * 10) / 10;
-    (byDept[dept] = byDept[dept] || []).push({ item, qty, unit });
+    // Packed from the unrounded sum, so a pack is never a rounding short.
+    const row: GroceryItem = { item, qty: roundNeed(q, unit), unit, buy: packFor(item, q, unit) };
+    if (isCupboard(item)) cupboard.push(row);
+    else (byDept[dept] = byDept[dept] || []).push(row);
   });
-  (Object.values(byDept) as GroceryItem[][]).forEach((list) => list.sort((a, b) => a.item.localeCompare(b.item)));
-  return { byDept, mealCount: meals.size, unmeasured: [...loose].sort((a, b) => a.localeCompare(b)) };
+  const byName = (a: GroceryItem, b: GroceryItem) => a.item.localeCompare(b.item);
+  (Object.values(byDept) as GroceryItem[][]).forEach((list) => list.sort(byName));
+  return { byDept, cupboard: cupboard.sort(byName), mealCount: meals.size, unmeasured: [...loose].sort((a, b) => a.localeCompare(b)) };
 }
 
 /** The shopping list for the week this client is shown. */

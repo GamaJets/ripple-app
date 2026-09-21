@@ -879,6 +879,7 @@
     "src/lib/recipePlan.test.ts",
     "src/lib/mealHorizon.ts",
     "src/lib/mealHorizon.test.ts",
+    "src/lib/groceryPacks.test.ts",
     "src/lib/coachRecipeRefs.ts",
     "src/lib/coachRecipeRefs.test.ts"
   ]
