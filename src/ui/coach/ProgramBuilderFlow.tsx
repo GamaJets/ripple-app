@@ -245,6 +245,7 @@ export function ProgramWorkflowFooter({
   secondaryLabel,
   onSecondary,
   onHeight,
+  inline = false,
 }: {
   /** Who receives it, or that nobody has been chosen. Always said. */
   who: string;
@@ -261,6 +262,10 @@ export function ProgramWorkflowFooter({
   onSecondary: () => void;
   /** The bar's measured height, so the page can pad its scroll by exactly it. */
   onHeight?: (h: number) => void;
+  /** Drawn in the page's flow instead of pinned over it. The builder does this
+   *  at the large text sizes, where a pinned bar grew to half the screen and
+   *  covered the program (simulator, 21 Sep 2026). */
+  inline?: boolean;
 }) {
   const t = useTheme();
   const stacked = fontScale >= 1.35;
@@ -269,8 +274,10 @@ export function ProgramWorkflowFooter({
     <View pointerEvents="box-none"
       onLayout={(ev: LayoutChangeEvent) => onHeight?.(ev.nativeEvent.layout.height)}
       style={{
-        position: 'absolute', start: 0, end: 0, bottom: 0,
-        paddingHorizontal: layout.gutter, paddingTop: sp.sm, paddingBottom: sp.md,
+        ...(inline ? { marginTop: sp.lg, borderRadius: radius.lg, padding: sp.md } : {
+          position: 'absolute' as const, start: 0, end: 0, bottom: 0,
+          paddingHorizontal: layout.gutter, paddingTop: sp.sm, paddingBottom: sp.md,
+        }),
         // White over the grey ground, as the mockup draws it: the bar is a
         // surface the page scrolls under, not more of the page.
         backgroundColor: t.surface, borderTopWidth: hairline, borderTopColor: t.ring,

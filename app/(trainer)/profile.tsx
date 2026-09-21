@@ -466,7 +466,7 @@ export default function CoachProfile() {
             // colour cannot be read on its plate).
             <View style={{ width: 96, height: 96, borderRadius: radius.pill, backgroundColor: initials ? t.brandSoft : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
               {initials
-                ? <Text style={{ ...value(34), color: t.brandText }}>{initials}</Text>
+                ? <Text maxFontSizeMultiplier={1.3} style={{ ...value(34), color: t.brandText }}>{initials}</Text>
                 : <Icon name="me" size={40} color={t.ink3} />}
             </View>
           )}

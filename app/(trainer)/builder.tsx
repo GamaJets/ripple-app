@@ -2565,6 +2565,9 @@ export default function Builder() {
      looking at, said as exactly that. First names, and a count past three: the
      bar is one line on a phone. */
   const [footH, setFootH] = useState(112);
+  // At the large text sizes the pinned footer is drawn at the end of the page
+  // instead: pinned, it grew to half the screen (see ProgramWorkflowFooter).
+  const footInline = fontScale >= 1.35;
   const footWho = (() => {
     const names = pickedIds.map((id) => roster.find((r) => r.id === id)?.name.split(' ')[0]).filter((n): n is string => !!n);
     if (pickedIds.length) return names.length === pickedIds.length && names.length <= 3 ? `For ${listNames(names)}` : `For ${num(pickedIds.length)} clients`;
@@ -2590,13 +2593,34 @@ export default function Builder() {
   const scrim = { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' };
   const G = layout.gutter;
 
+  const workflowFooter = (inline: boolean) => (
+  <ProgramWorkflowFooter inline={inline}
+      who={footWho}
+      where={footWhere}
+      outstanding={footOutstanding}
+      draftNote={draftLoaded && draftKey && hasDraft ? 'Draft kept on this phone' : null}
+      primaryLabel={assignCtaLabel({
+        busy: assignBusy,
+        picked: pickedIds.length,
+        exercises: blockExercises,
+        planLabel: plan.label,
+        soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
+      })}
+      onPrimary={assign}
+      primaryEnabled={canAssign && !assignBusy}
+      secondaryLabel="Save as Template"
+      onSecondary={() => { setTplName(tplName || title); setSaveOpen(true); }}
+      onHeight={inline ? undefined : setFootH}
+    />
+  );
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       {/* Scrolling is off while a row is held. Without this the ScrollView and
           the drag both claim the same vertical movement, and the list scrolls
           under the finger while the row tries to follow it — which reads as
           the drag being broken rather than as two gestures competing. */}
-      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: footH + sp.lg }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
+      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: (footInline ? 0 : footH) + sp.lg }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header: the board's compact opening ──────────────────────────
             The kit's `PageHead` — a round back control at the leading edge,
@@ -4888,6 +4912,7 @@ export default function Builder() {
           ) : null}
         </Section>
 
+        {footInline ? workflowFooter(true) : null}
       </ScrollView>
 
       {/* ── the workflow footer, always in reach ─────────────────────────
@@ -4901,24 +4926,7 @@ export default function Builder() {
           test, answerable without scrolling. The scroll pads by the bar's
           measured height, so nothing on the page hides underneath at any
           type size. See src/ui/coach/ProgramBuilderFlow.tsx. */}
-      <ProgramWorkflowFooter
-        who={footWho}
-        where={footWhere}
-        outstanding={footOutstanding}
-        draftNote={draftLoaded && draftKey && hasDraft ? 'Draft kept on this phone' : null}
-        primaryLabel={assignCtaLabel({
-          busy: assignBusy,
-          picked: pickedIds.length,
-          exercises: blockExercises,
-          planLabel: plan.label,
-          soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
-        })}
-        onPrimary={assign}
-        primaryEnabled={canAssign && !assignBusy}
-        secondaryLabel="Save as Template"
-        onSecondary={() => { setTplName(tplName || title); setSaveOpen(true); }}
-        onHeight={setFootH}
-      />
+      {footInline ? null : workflowFooter(false)}
 
       {/* ── the start day, as a month ─────────────────────────────────────
           Dismissing it is a cancel and writes nothing: a picker that committed
