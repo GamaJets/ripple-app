@@ -13,6 +13,7 @@
 // logged now — the app says it could not read the photo rather than making a
 // number up.
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { CUISINES, type WireCuisine } from '../../src/lib/recipeWire';
 
 import { titleCaseName, mealTitle, mealTitleParts } from '../../src/lib/exerciseName';import { num, numUpTo } from '../../src/lib/format';
 import { fmtDay, fmtFullDay } from '../../src/lib/format';
@@ -597,6 +598,22 @@ export default function Nutrition() {
   // button that says what it does. It writes through the same setters, so the
   // plan it shows is the one the screen already builds from them.
   const [buildOpen, setBuildOpen] = useState(false);
+  // Cuisines the member wants their real recipes from (owner, 21 Sep 2026:
+  // "choose recipes based on type, such as American and Asian, Indian").
+  // Empty is any. Kept on this phone, per account, like the recipe plan.
+  const [cuisines, setCuisines] = useState<WireCuisine[]>([]);
+  const cuisineKey = datesKey ? `${datesKey}.cuisines` : null;
+  useEffect(() => {
+    if (!cuisineKey) return;
+    AsyncStorage.getItem(cuisineKey).then((r) => {
+      try { const v = JSON.parse(r ?? '[]'); if (Array.isArray(v)) setCuisines(CUISINES.filter((x) => v.includes(x))); } catch { /* none kept */ }
+    }).catch(() => {});
+  }, [cuisineKey]);
+  const toggleCuisine = (x: WireCuisine) => setCuisines((prev) => {
+    const next = prev.includes(x) ? prev.filter((y) => y !== x) : [...prev, x];
+    if (cuisineKey) AsyncStorage.setItem(cuisineKey, JSON.stringify(next)).catch(() => {});
+    return next;
+  });
   // The board's meal list is one slot at a time — Breakfast, Lunch, Dinner
   // segments over the rows. null is "the first slot of the plan", so a plan
   // rebuilt with fewer meals never points at a slot it no longer has.
@@ -1152,7 +1169,7 @@ export default function Nutrition() {
   // `avoid: []` because the profile read failed is the defect they exist for.
   const recipeLead = genSlotMeals[0] ?? null;
   const recipes = useRecipeSearch(recipeSearchOpen && hasBody && !adjustUnknown && !foodRulesUnknown && slotSel && recipeLead
-    ? { slot: slotSel, diet, avoid: c.avoid, query: mealQuery, targetKcal: Math.round((recipeLead.slotKcal ?? recipeLead.K) / 50) * 50, number: 8 }
+    ? { slot: slotSel, diet, avoid: c.avoid, query: mealQuery, targetKcal: Math.round((recipeLead.slotKcal ?? recipeLead.K) / 50) * 50, number: 8, cuisines }
     : null);
   const found = recipeSearchOpen ? recipes.result : null;
   // Spoonacular is sent the allergens (`c.avoid`, the union); dislikes are
@@ -1197,7 +1214,7 @@ export default function Nutrition() {
         await AsyncStorage.setItem(autoKey, today.key);
         const taken = new Set<number>();
         for (const m of open) {
-          const r = await searchRecipesOnce({ slot: m.slot, diet, avoid: c.avoid, targetKcal: Math.round((m.slotKcal ?? m.K) / 50) * 50, number: 5 });
+          const r = await searchRecipesOnce({ slot: m.slot, diet, avoid: c.avoid, targetKcal: Math.round((m.slotKcal ?? m.K) / 50) * 50, number: 5, cuisines });
           if (r.status !== 'ready' && r.status !== 'partial') break;
           const pick = preferNotDisliked(r.meals, c.dislikes).rows.find((x) => !taken.has(x.sourceId));
           if (!pick) continue;
@@ -1717,6 +1734,22 @@ export default function Nutrition() {
   }
   const recipesUnread = seenRefs.size - recipesToRead.length;
 
+  const cuisinePills = (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+      <Pressable onPress={() => { setCuisines([]); if (cuisineKey) AsyncStorage.setItem(cuisineKey, '[]').catch(() => {}); }}
+        accessibilityRole="button" accessibilityState={{ selected: cuisines.length === 0 }} accessibilityLabel="Any cuisine"
+        style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: cuisines.length === 0 ? t.brand : t.surface2 }}>
+        <Text style={{ ...ty.label, ...font(cuisines.length === 0 ? '600' : '400'), color: cuisines.length === 0 ? t.brandInk : t.ink2 }}>Any</Text>
+      </Pressable>
+      {CUISINES.map((x) => { const on = cuisines.includes(x); return (
+        <Pressable key={x} onPress={() => toggleCuisine(x)}
+          accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`${x} cuisine`}
+          style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+          <Text style={{ ...ty.label, ...font(on ? '600' : '400'), color: on ? t.brandInk : t.ink2 }}>{x}</Text>
+        </Pressable>
+      ); })}
+    </View>
+  );
   const dietPills = (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
       {DIETS.map((d) => { const on = diet === d; return (
@@ -2152,6 +2185,12 @@ export default function Nutrition() {
                   </View>
                 );
               })}
+              {recipeSearchOpen ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Cuisine</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>{cuisinePills}</ScrollView>
+                </View>
+              ) : null}
               {planRows.map((m, i) => mealRow(m, i > 0))}
               {/* ── real recipes, under the plan's own rows ──────────────────
                   Five outcomes and only two of them carry rows (see
@@ -2851,6 +2890,11 @@ export default function Nutrition() {
             <View>
               <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>2 · Diet Style</Text>
               {dietPills}
+            </View>
+            <View>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>Cuisine</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>For the real recipes in today’s plan and in Swap or Search. Pick any number.</Text>
+              {cuisinePills}
             </View>
             <View>
               <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>3 · Anything to Avoid</Text>

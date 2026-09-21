@@ -114,6 +114,19 @@ export function typeParam(slot: WireSlot): string {
   return 'main course';
 }
 
+/**
+ * The cuisines a member can narrow recipes to, spelled as Spoonacular's
+ * `cuisine` parameter takes them. Closed, like the diets: a value outside it
+ * is refused rather than passed through (owner, 21 Sep 2026: "choose recipes
+ * based on type, such as American and Asian, Indian").
+ */
+export const CUISINES = [
+  'American', 'Asian', 'British', 'Caribbean', 'Chinese', 'French', 'German', 'Greek',
+  'Indian', 'Irish', 'Italian', 'Japanese', 'Korean', 'Latin American', 'Mediterranean',
+  'Mexican', 'Middle Eastern', 'Nordic', 'Southern', 'Spanish', 'Thai', 'Vietnamese',
+] as const;
+export type WireCuisine = typeof CUISINES[number];
+
 export interface RecipeSearchRequest {
   action: 'search';
   slot: WireSlot;
@@ -124,6 +137,8 @@ export interface RecipeSearchRequest {
    *  Setting it costs a whole extra point a search — see `searchParams`. */
   targetKcal: number | null;
   number: number;
+  /** One or more cuisines; absent or empty is any. */
+  cuisines?: WireCuisine[];
 }
 export interface RecipeDetailRequest { action: 'detail'; id: number }
 export type RecipeRequest = RecipeSearchRequest | RecipeDetailRequest;
@@ -159,7 +174,11 @@ export function readRecipeRequest(body: unknown): { ok: true; req: RecipeRequest
   const targetKcal = b.targetKcal != null && Number.isFinite(t) && t >= 50 && t <= 3000 ? Math.round(t) : null;
   const n = Number(b.number);
   const number = b.number != null && Number.isFinite(n) ? Math.min(MAX_RESULTS, Math.max(1, Math.round(n))) : DEFAULT_RESULTS;
-  return { ok: true, req: { action: 'search', slot: b.slot as WireSlot, diet: b.diet as WireDiet, avoid, query, targetKcal, number } };
+  const rawCuisines = b.cuisines == null ? [] : b.cuisines;
+  if (!Array.isArray(rawCuisines)) return { ok: false, error: 'cuisines must be a list' };
+  for (const x of rawCuisines) if (!CUISINES.includes(x as WireCuisine)) return { ok: false, error: 'cuisines names one Repple does not offer' };
+  const cuisines = CUISINES.filter((x) => rawCuisines.includes(x));
+  return { ok: true, req: { action: 'search', slot: b.slot as WireSlot, diet: b.diet as WireDiet, avoid, query, targetKcal, number, cuisines } };
 }
 
 /**
@@ -194,6 +213,7 @@ export function searchParams(req: RecipeSearchRequest): Record<string, string> {
     fillIngredients: 'true',
   };
   if (req.query) p.query = req.query;
+  if (req.cuisines?.length) p.cuisine = req.cuisines.join(',');
   const diet = dietParam(req.diet);
   if (diet) p.diet = diet;
   const intolerances = intolerancesParam(req.avoid);
@@ -212,7 +232,7 @@ export function searchParams(req: RecipeSearchRequest): Record<string, string> {
  *  deliberately nothing about the caller in it. */
 export function requestKey(req: RecipeRequest): string {
   if (req.action === 'detail') return `detail|${req.id}`;
-  return ['search', req.slot, req.diet, [...req.avoid].sort().join('+'), req.query.toLowerCase(), req.targetKcal ?? '', req.number].join('|');
+  return ['search', req.slot, req.diet, [...req.avoid].sort().join('+'), req.query.toLowerCase(), req.targetKcal ?? '', req.number, (req.cuisines ?? []).join('+')].join('|');
 }
 
 // ── the trimmed payload ─────────────────────────────────────────────────────

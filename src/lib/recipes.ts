@@ -38,7 +38,7 @@
 // lives in memory for as long as the screen does.
 import type { Diet } from './types';
 import { mealAllergens, type Allergen, type Dept, type GeneratedMeal, type PlannedMeal, type Slot } from './meals';
-import type { RecipeWire, RecipeIngredientWire, RecipeErrorCode, RecipeSearchRequest } from './recipeWire';
+import type { RecipeWire, RecipeIngredientWire, RecipeErrorCode, RecipeSearchRequest, WireCuisine } from './recipeWire';
 import type { LoadStatus } from '../ui/loadStatus';
 
 // ── attribution and disclaimer: the screens render these ───────────────────
@@ -330,6 +330,8 @@ export interface RecipeSearchParams {
    *  extra Spoonacular point per search — see src/lib/recipeWire.ts. */
   targetKcal?: number | null;
   number?: number;
+  /** Cuisines to narrow to; empty or absent is any. */
+  cuisines?: readonly WireCuisine[];
 }
 
 /** The body `supabase.functions.invoke('recipes', …)` sends. Typed against the
@@ -343,6 +345,7 @@ export function searchBody(p: RecipeSearchParams): Omit<RecipeSearchRequest, 'nu
     query: (p.query ?? '').trim(),
     ...(p.targetKcal != null && p.targetKcal > 0 ? { targetKcal: Math.round(p.targetKcal) } : {}),
     ...(p.number != null ? { number: p.number } : {}),
+    ...(p.cuisines?.length ? { cuisines: [...p.cuisines] as WireCuisine[] } : {}),
   };
 }
 

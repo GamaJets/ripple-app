@@ -84,6 +84,12 @@ if (bare.ok && bare.req.action === 'search') {
   ok(!('diet' in p) && !('intolerances' in p) && !('query' in p), 'and nothing is sent that was not asked for');
 }
 ok(!readRecipeRequest({ action: 'search', slot: 'Lunch', diet: 'vegann' }).ok, "a misspelled diet is REFUSED — read as 'no restriction' it is a vegan shown chicken");
+
+// Cuisine: a closed list, passed to Spoonacular joined, refused when unknown.
+const indian = readRecipeRequest({ action: 'search', slot: 'Dinner', diet: 'meat', cuisines: ['Thai', 'Indian'] });
+ok(indian.ok && indian.req.action === 'search' && searchParams(indian.req).cuisine === 'Indian,Thai', 'chosen cuisines reach the search, in the list\'s order');
+ok(!readRecipeRequest({ action: 'search', slot: 'Dinner', diet: 'meat', cuisines: ['Martian'] }).ok, 'a cuisine outside the list is refused, not passed through');
+ok(bare.ok && bare.req.action === 'search' && searchParams(bare.req).cuisine === undefined, 'no cuisine chosen is any cuisine');
 ok(!readRecipeRequest({ action: 'search', slot: 'Lunch', diet: 'vegan', avoid: ['sesame'] }).ok, 'an exclusion that cannot be translated is refused, never dropped');
 ok(!readRecipeRequest({ action: 'search', slot: 'Brunch', diet: 'vegan' }).ok, 'so is a slot Repple does not plan');
 ok(!readRecipeRequest({ action: 'search', slot: 'Lunch', diet: 'vegan', avoid: 'dairy' }).ok, 'and an avoid that is not a list');
