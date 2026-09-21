@@ -60,7 +60,8 @@
 // coach their client has nothing while a week sits on the server, and invite
 // them to overwrite it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-// The instant the energy plan's deadline is measured against, recomputed at
+
+import { titleCaseName } from '../../src/lib/exerciseName';// The instant the energy plan's deadline is measured against, recomputed at
 // local midnight, on foreground and on focus. See the memo below.
 import { useNow } from '../../src/ui/today';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, Linking } from 'react-native';
@@ -968,7 +969,7 @@ export default function ClientNutrition() {
                               </View>
                               <View style={{ flex: 1, minWidth: 0 }}>
                                 <Text style={{ ...ty.body, ...font('600'), color: t.ink }}>{m.slot}</Text>
-                                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{ref ? ref.title : m.n}</Text>
+                                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{ref ? ref.title : titleCaseName(m.n)}</Text>
                                 {ref ? (
                                   // No macros on a recipe row. They are not
                                   // stored — the client's app reads them from
@@ -1360,7 +1361,7 @@ export default function ClientNutrition() {
                           ) : null}
                         </View>
                         <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{m.n}</Text>
+                          <Text style={{ ...ty.body, ...font('600'), color: t.ink }} numberOfLines={2}>{titleCaseName(m.n)}</Text>
                           {pinnedHere ? <Text style={{ ...ty.caption, ...font('600'), color: t.brand, marginTop: 2 }}>In the Plan</Text> : null}
                           <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                             {num(m.K)} kcal · P{num(m.P)} · C{num(m.C)} · F{num(m.F)} · at {m.servings}× serving

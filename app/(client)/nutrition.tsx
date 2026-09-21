@@ -13,7 +13,8 @@
 // logged now — the app says it could not read the photo rather than making a
 // number up.
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { num, numUpTo } from '../../src/lib/format';
+
+import { titleCaseName } from '../../src/lib/exerciseName';import { num, numUpTo } from '../../src/lib/format';
 import { fmtDay, fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
@@ -103,7 +104,7 @@ import type { FoodFacts } from '../../src/lib/foodPortion';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
-import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, ListRow, Segmented, HeroCard, HeroRing, Meter, PageHead, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, Cta, Ghost, Flag, QuickRow, ListRow, Segmented, Ring, Meter, PageHead, TonedChip, Expandable, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
 // The words of the help row, read straight from their source. Round five moves
@@ -1534,7 +1535,7 @@ export default function Nutrition() {
             ) : null}
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{m.n}</Text>
+            <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{titleCaseName(m.n)}</Text>
             {/* The slot is the caption, as the mockup draws it, with the macros
                 beside it — the kcal went to the chip. The ingredients are one
                 tap away on the sheet, which is where they can be read whole. */}
@@ -1671,54 +1672,49 @@ export default function Nutrition() {
             { key: 'recipes', label: 'Recipes', disabled: plan.length === 0, onPress: () => { if (todayPlan[0]) openMeal(todayPlan[0], today); } },
           ]} />
 
-        {/* ── the hero: what is left to eat today ──────────────────────────
-            The approved night card, off the kit. `Calories Left` is
-            `target − eaten`, so an unread log does not make it blank, it makes
-            it BIGGER: the safest-looking direction and the wrong one. So the
-            headline, the ring and the macros under it wait for a whole read,
-            and until then the headline says in words which read is short and
-            the ring is a track and a dash, never an empty arc round a full
-            allowance. The label goes neutral with it: "Calories Over" over an
-            unread day would be a claim in itself. The ring opens the log; the
-            one button logs. */}
-        <HeroCard
-          eyebrow="TODAY · CALORIES"
-          title={dayWhole ? `${num(Math.abs(cal.net))} kcal ${cal.net >= 0 ? 'Left' : 'Over'}`
-            : fl.status === 'loading' ? 'Reading Today’s Log'
-            : 'Calories Not Counted'}
-          // One line: the burn clause when the day is whole, and otherwise
-          // WHY the figure is withheld, which is data, not prose.
-          meta={dayWhole ? caloriesNote(cal)
-            : fl.status === 'loading' ? 'What is left is worked out once your food log is read.'
-            : fl.status === 'partial' ? 'More is logged today than can be read in one go, so what is left is unknown.'
-            : 'Today’s food log could not be read, so what is left is unknown. It is not your whole allowance.'}
-          ring={
+        {/* ── today, as the board draws it ──────────────────────────────────
+            One white card: the calorie ring on the left, the three macros
+            beside it, Log Meal under both. It was a night hero headed
+            "2,480 kcal Left" over a separate macro card, which is not what the
+            approved Meals board shows (owner, 21 Sep 2026).
+
+            The ring and the macros still wait for a whole read: an unread log
+            is a track and a dash, never an empty arc round a full allowance,
+            and the line under them says which read is short. */}
+        <Section>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}>
             <Pressable onPress={() => router.push('/(client)/foodlog')} accessibilityRole="button"
               accessibilityLabel={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today. Open the food log` : 'Today’s calories are not counted. Open the food log'}
               hitSlop={8}>
-              <HeroRing
+              <Ring
                 value={dayWhole && target.kcal ? eaten.kcal / target.kcal : null}
                 figure={dayWhole ? num(eaten.kcal) : null}
-                sub={`of ${num(target.kcal)}`}
+                sub={`of ${num(target.kcal)} kcal`}
                 spoken={dayWhole ? `${num(eaten.kcal)} of ${num(target.kcal)} calories eaten today` : 'Today’s calories are not counted'} />
             </Pressable>
-          }
-          cta={{ label: 'Log Meal', onPress: () => router.push('/(client)/foodlog') }}
-        />
-
-        {/* The evidence under the hero: the three macros against target, and
-            where the targets came from. `null` while the day is not whole: no
-            fill and a dash over the target, spoken as "not read", not an empty
-            bar, which would say nothing had been eaten. Rounded HERE; the
-            meter prints what it is handed. */}
-        <Section>
-          <Meter label="Protein" tone="blue" val={dayWhole ? Math.round(eaten.protein) : null} target={target.protein} />
-          <Meter label="Carbs" tone="orange" val={dayWhole ? Math.round(eaten.carbs) : null} target={target.carbs} />
-          <Meter label="Fat" tone="purple" val={dayWhole ? Math.round(eaten.fat) : null} target={target.fat} />
-          {/* Where the targets came from, in one line beside them: a target
-              with no source reads as a rule nobody set. The long form, with
-              the figures, is "Why This Target" further down. A coach-adjusted
-              plan is marked, not shouted: a coloured dot beside ink text. */}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Meter label="Protein" tone="blue" val={dayWhole ? Math.round(eaten.protein) : null} target={target.protein} />
+              <Meter label="Carbs" tone="orange" val={dayWhole ? Math.round(eaten.carbs) : null} target={target.carbs} />
+              <Meter label="Fat" tone="purple" val={dayWhole ? Math.round(eaten.fat) : null} target={target.fat} />
+            </View>
+          </View>
+          {/* What is left, and the burn it counts: the sentence the stale
+              burn warning below refers to. */}
+          {dayWhole ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md, textAlign: 'center' }}>{caloriesNote(cal)}</Text>
+          ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {fl.status === 'loading' ? 'Reading today’s food log…'
+                : fl.status === 'partial' ? 'More is logged today than can be read in one go, so what is left is unknown.'
+                : 'Today’s food log could not be read, so what is left is unknown. It is not your whole allowance.'}
+            </Text>
+          )}
+          <View style={{ marginTop: sp.lg }}>
+            <Cta label="Log Meal" wide onPress={() => router.push('/(client)/foodlog')} />
+          </View>
+          {/* Where the targets came from, in one line: a target with no
+              source reads as a rule nobody set. A coach-adjusted plan is
+              marked with a coloured dot beside ink text. */}
           <View accessible accessibilityLabel={`${coachAdjust ? 'Coach-adjusted. ' : ''}${targetSource}`}
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: sp.md }}>
             {coachAdjust ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} /> : null}
@@ -1891,7 +1887,7 @@ export default function Nutrition() {
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
-                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{m.n}</Text>
+                      <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{titleCaseName(m.n)}</Text>
                       {inIt.length ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
@@ -2259,7 +2255,7 @@ export default function Nutrition() {
                     accessibilityLabel={mealRowSpoken({ name: m.n, allergens: inIt, kcal: num(m.K) })}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{m.n}</Text>
+                      <Text style={{ ...ty.head, color: t.ink }} numberOfLines={2}>{titleCaseName(m.n)}</Text>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
                       {inIt.length ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
