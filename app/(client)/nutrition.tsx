@@ -1648,6 +1648,33 @@ export default function Nutrition() {
       ); })}
     </View>
   );
+  const dislikeEditor = (
+    <>
+            {c.dislikes.length ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.sm }}>
+          {c.dislikes.map((w) => (
+            <Pressable key={w} onPress={() => { void saveDislikes(c.dislikes.filter((x) => x !== w)); }}
+              accessibilityRole="button" accessibilityLabel={`Remove ${w}`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+              <Text style={{ ...ty.label, color: t.ink }}>{w}</Text>
+              <Icon name="minus" size={12} color={t.ink3} />
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+        <TextInput value={dislikeDraft} onChangeText={setDislikeDraft} placeholder="e.g. mushrooms" placeholderTextColor={t.ink3}
+          accessibilityLabel="Add a food you dislike" returnKeyType="done" autoCorrect={false} autoCapitalize="none"
+          onSubmitEditing={addDislike}
+          style={{ ...ty.body, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+        <Pressable onPress={addDislike} disabled={!normaliseDislike(dislikeDraft)}
+          accessibilityRole="button" accessibilityLabel="Add dislike"
+          style={{ paddingHorizontal: sp.lg, paddingVertical: 10, borderRadius: radius.pill, backgroundColor: normaliseDislike(dislikeDraft) ? t.brand : t.surface2 }}>
+          <Text style={{ ...ty.label, ...font('600'), color: normaliseDislike(dislikeDraft) ? t.brandInk : t.ink3 }}>Add</Text>
+        </Pressable>
+      </View>
+    </>
+  );
   const avoidPills = (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
       {ALLERGENS.map((al) => { const on = c.ownAvoid.includes(al.id); return (
@@ -2372,29 +2399,7 @@ export default function Nutrition() {
             ) : null}
             <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Foods You Dislike</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Left out of your meals where there is another option. Not an allergy: if a meal can only be made with one, it stays in and we tell you.</Text>
-            {c.dislikes.length ? (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.sm }}>
-                {c.dislikes.map((w) => (
-                  <Pressable key={w} onPress={() => { void saveDislikes(c.dislikes.filter((x) => x !== w)); }}
-                    accessibilityRole="button" accessibilityLabel={`Remove ${w}`}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
-                    <Text style={{ ...ty.label, color: t.ink }}>{w}</Text>
-                    <Icon name="minus" size={12} color={t.ink3} />
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-            <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
-              <TextInput value={dislikeDraft} onChangeText={setDislikeDraft} placeholder="e.g. mushrooms" placeholderTextColor={t.ink3}
-                accessibilityLabel="Add a food you dislike" returnKeyType="done" autoCorrect={false} autoCapitalize="none"
-                onSubmitEditing={addDislike}
-                style={{ ...ty.body, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
-              <Pressable onPress={addDislike} disabled={!normaliseDislike(dislikeDraft)}
-                accessibilityRole="button" accessibilityLabel="Add dislike"
-                style={{ paddingHorizontal: sp.lg, paddingVertical: 10, borderRadius: radius.pill, backgroundColor: normaliseDislike(dislikeDraft) ? t.brand : t.surface2 }}>
-                <Text style={{ ...ty.label, ...font('600'), color: normaliseDislike(dislikeDraft) ? t.brandInk : t.ink3 }}>Add</Text>
-              </Pressable>
-            </View>
+            {dislikeEditor}
             {dislikeError ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{dislikeError}</Flag> : null}
             </View>
           ) : null}
@@ -2717,7 +2722,7 @@ export default function Nutrition() {
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBuildOpen(false)}
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '86%', ...elevation.e2 }}>
-          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30, gap: sp.xl }}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30, gap: sp.xl }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <View>
               <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink }}>Build My Plan</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
@@ -2744,10 +2749,16 @@ export default function Nutrition() {
             <View>
               <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>3 · Anything to Avoid</Text>
               {avoidPills}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Allergens are never in your meals. Foods you just dislike go under Diet and Exclusions on the Meals screen.</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Allergens are never in your meals.</Text>
             </View>
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>4 · How Far Ahead</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>4 · Foods You Dislike</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Left out where there is another option. Not an allergy.</Text>
+              {dislikeEditor}
+              {dislikeError ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{dislikeError}</Flag> : null}
+            </View>
+            <View>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>5 · How Far Ahead</Text>
               <Segmented value={view} onChange={(v) => setView(v)}
                 options={[
                   { key: 'today', label: 'Today' },
