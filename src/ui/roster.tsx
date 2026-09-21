@@ -25,6 +25,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RosterClient } from '../lib/trainerMock';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
+import { excludedAllergens, readAllergenColumn } from '../lib/meals';
 import {
   clientModesKey, readClientModes, writeClientModes, LEGACY_CLIENT_MODES_KEY,
 } from '../lib/clientModeOverrides';
@@ -372,7 +373,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         // refreshes with nothing wrong on the server. `clients` carries no
         // created_at (see the join-date note below), so id is the stable key.
         const { data: cls, error } = await supabase.from('clients')
-          .select('id, goal, diet, meals_per_day, avoid, mode, injuries').eq('trainer_id', uid)
+          .select('id, goal, diet, meals_per_day, avoid, coach_avoid, mode, injuries').eq('trainer_id', uid)
           .order('id', { ascending: true }).limit(capLimit());
         if (cancelled()) return;
         // Split apart what used to be one branch. A refused read is 'error'
@@ -592,7 +593,7 @@ export function RosterProvider({ children }: { children: ReactNode }) {
         //     not produce a smaller number, it produces a wrong one — often the
         //     wrong sign. Null, and the screen already renders that as no change
         //     recorded rather than as zero.
-        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', handAdded: false, goal: goalMap[c.goal] || 'General', weightDelta: weightDeltaCell(sc.wDelta, scansReach), adherence: sc.adh != null ? sc.adh : null, lastActive: lastActiveCell(sc.last ? ago(sc.last) : null, statsReach), next: '—', unread: null, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: Array.isArray(c.avoid) ? c.avoid : undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })), pastInjuries: (Array.isArray(c.injuries) ? c.injuries : []).filter((i: Injury) => i.status === 'recovered').map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note })) }; });
+        const real: RosterClient[] = linked.map((c: any) => { const sc = st[c.id]; return { id: c.id, name: names[c.id] || 'Client', handAdded: false, goal: goalMap[c.goal] || 'General', weightDelta: weightDeltaCell(sc.wDelta, scansReach), adherence: sc.adh != null ? sc.adh : null, lastActive: lastActiveCell(sc.last ? ago(sc.last) : null, statsReach), next: '—', unread: null, mode: readCoachedMode(c.mode), metrics: sc.mx ?? undefined, diet: c.diet ?? undefined, mealsPerDay: c.meals_per_day ?? undefined, avoid: excludedAllergens(readAllergenColumn(c.avoid), readAllergenColumn(c.coach_avoid)) ?? undefined, joinedAt: joined[c.id] ?? null, injuries: activeInjuries(Array.isArray(c.injuries) ? c.injuries : []).map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note, isNew: isRecent(i.at) })), pastInjuries: (Array.isArray(c.injuries) ? c.injuries : []).filter((i: Injury) => i.status === 'recovered').map((i: Injury) => ({ area: i.area, severity: i.severity, note: i.note })) }; });
         // ── One row per person, not one row per table ──────────────────────
         //
         // These two lists used to be concatenated, on the assumption that a

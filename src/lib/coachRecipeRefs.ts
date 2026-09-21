@@ -37,7 +37,7 @@
 // client with no allergies, and the hook must be handed `null` rather than an
 // empty `avoid` list. See its own comment.
 import { readRecipeRef, recipeRef, type RecipeMeal, type RecipeRef, type RecipeSearchParams } from './recipes';
-import type { Allergen, Slot } from './meals';
+import { excludedAllergens, type Allergen, type Slot } from './meals';
 import type { Diet } from './types';
 import { isWhole, type LoadStatus } from '../ui/loadStatus';
 
@@ -191,14 +191,22 @@ export function coachRecipeSearch(input: {
   /** The slot being filled, null when no sheet is open. */
   slot: Slot | null;
   diet: Diet | null;
-  /** Null means unread. Empty means read, and they avoid nothing. */
+  /** The member's OWN list. Null means unread. Empty means read, and they
+   *  declared nothing. */
   avoid: readonly Allergen[] | null;
+  /** What the client told this coach, `clients.coach_avoid`. Null means
+   *  unread, and an unread half makes the whole exclusion list unknown: the
+   *  search is refused exactly as it is for an unread `avoid`. Spoonacular is
+   *  sent the UNION of the two, so a coach's note reaches the recipe filter
+   *  and can never take the member's own entry out of it. */
+  coachAvoid: readonly Allergen[] | null;
   query: string;
   /** The `K` of the row being replaced, so results can be portioned to it. */
   targetKcal: number | null;
   number?: number;
 }): RecipeSearchParams | null {
-  const { open, profileStatus, slot, diet, avoid, query, targetKcal } = input;
+  const { open, profileStatus, slot, diet, query, targetKcal } = input;
+  const avoid = excludedAllergens(input.avoid, input.coachAvoid);
   if (!open || !slot || !diet || avoid == null) return null;
   if (!isWhole(profileStatus)) return null;
   return {

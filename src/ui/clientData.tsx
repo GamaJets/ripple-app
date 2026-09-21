@@ -38,7 +38,7 @@ import { manualBeatsScan } from '../lib/bodyFigures';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { readCoachingMode, readDiet, type CoachingMode, type Goal, type Diet } from '../lib/types';
-import type { Allergen } from '../lib/meals';
+import { excludedAllergens, readAllergenColumn, readDislikes, type Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
 import { isDeviceAvatar } from '../lib/avatarImage';
@@ -114,7 +114,23 @@ interface Value {
    *  than answered by it. */
   trainerId: string | null;
   diet: Diet; setDiet: (v: Diet) => void;
-  avoid: Allergen[]; setAvoid: (v: Allergen[]) => void;
+  /** EVERYTHING kept away from this member: their own list and what they told
+   *  their coach (`excludedAllergens`). This is what every meal, recipe search
+   *  and dish mark filters by. It is whole only when `profileStatus` is: both
+   *  halves come off the one `clients` row, and a row whose `coach_avoid`
+   *  could not be read is a failed read, never an empty coach list. */
+  avoid: Allergen[];
+  /** The member's own declared list, the only one they edit. Member-only in
+   *  the database (clients_avoid_is_the_clients). */
+  ownAvoid: Allergen[]; setOwnAvoid: (v: Allergen[]) => void;
+  /** What their coach recorded for them, `clients.coach_avoid`. Read-only
+   *  here: shown so the member can see what was added on their behalf. */
+  coachAvoid: Allergen[];
+  /** Ingredient words they would rather not eat. A preference, not safety. */
+  dislikes: string[];
+  /** Writes the whole list straight away and answers with why it did not
+   *  land, or null when it did. State moves only on a write that landed. */
+  setDislikes: (v: string[]) => Promise<string | null>;
   injuries: Injury[]; addInjury: (v: Injury) => void; updateInjury: (id: string, patch: Partial<Injury>) => void; removeInjury: (id: string) => void;
   focusAreas: string[]; setFocusAreas: (v: string[]) => void;
   activity: number;
@@ -265,7 +281,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [goal, setGoal] = useState<Goal>('muscle');
   const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
   const [diet, setDiet] = useState<Diet>('meat');
-  const [avoid, setAvoid] = useState<Allergen[]>([]);
+  const [ownAvoid, setOwnAvoid] = useState<Allergen[]>([]);
+  const [coachAvoid, setCoachAvoid] = useState<Allergen[]>([]);
+  const [dislikes, setDislikesState] = useState<string[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [mealsPerDay, setMealsPerDay] = useState<3 | 4 | 5>(3);
@@ -363,7 +381,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     // the recurring shape: four fields cleared and the fifth left standing.
     setSex(null);
     setGoal('muscle'); setCoachingMode('online'); setDiet('meat');
-    setAvoid([]); setInjuries([]); setFocusAreas([]); setMealsPerDay(3);
+    setOwnAvoid([]); setCoachAvoid([]); setDislikesState([]); setInjuries([]); setFocusAreas([]); setMealsPerDay(3);
     setCoachLinked(null); setTrainerId(null);
     setStepGoal(null); setSleepGoalHours(null); setWaterGoalGlasses(null);
     setScans([]); setManualWeight(null); setManualBodyFat(null); setManualAt(null);
@@ -386,7 +404,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.goal === 'string') setGoal(p.goal);
           setCoachingMode(readCoachingMode(p.coachingMode));
           if (typeof p.diet === 'string') setDiet(readDiet(p.diet));
-          if (Array.isArray(p.avoid)) setAvoid(p.avoid);
+          if (Array.isArray(p.avoid)) setOwnAvoid(p.avoid);
+          { const d = readDislikes(p.dislikes); if (d) setDislikesState(d); }
           if (Array.isArray(p.injuries)) setInjuries(p.injuries);
           if (Array.isArray(p.focusAreas)) setFocusAreas(p.focusAreas);
           if (typeof p.weightKg === 'number') setManualWeight(p.weightKg);
@@ -441,8 +460,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     // those defaults as fact: `profileStatus` is 'error', which is what
     // `isWhole` gates on.
     if (!cacheRead.current) return;
-    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
-  }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, manualWeight, manualBodyFat, manualAt, photo]);
+    AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid: ownAvoid, dislikes, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
+  }, [hydrated, name, dob, heightCm, goal, diet, ownAvoid, dislikes, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, manualWeight, manualBodyFat, manualAt, photo]);
 
   // Pull the real signed-in user's name from the server BEFORE any push below is
   // allowed to run. This guards against a stale/cross-account name that was
@@ -564,7 +583,18 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           // for an unknown diet are empty and which then reads `.n` off null —
           // a TypeError out of render that takes the whole nutrition screen.
           if (typeof r.diet === 'string' && r.diet) setDiet(readDiet(r.diet));
-          if (Array.isArray(r.avoid)) setAvoid(r.avoid);
+          if (Array.isArray(r.avoid)) setOwnAvoid(r.avoid);
+          // The coach's half of the exclusion list, and the dislikes, off the
+          // same row. A row that came back WITHOUT a readable `coach_avoid` is
+          // a read that did not give the whole list: it fails this attempt
+          // (status 'error' after the retries, push disarmed) rather than
+          // leaving `coachAvoid` at an empty default that reads as "the coach
+          // noted nothing". SQL null is read, and is nothing noted.
+          const ca = readAllergenColumn(r.coach_avoid);
+          const dl = readDislikes(r.dislikes);
+          if (ca) setCoachAvoid(ca);
+          if (dl) setDislikesState(dl);
+          if (!ca || !dl) { reportError('clientData.hydrate.coachAvoid', new Error('coach_avoid or dislikes unreadable')); failed = true; }
           // Reconcile the server's two-value answer with the four-value one
           // the client actually gave (src/lib/coachingModeStore.ts). The device is read
           // inline rather than from state because this effect is keyed on the
@@ -743,7 +773,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
             supabase.from('clients').update({
               dob: dob || null,
               height_cm: heightCm,
-              goal, diet, avoid,
+              // The member's OWN list only. `coach_avoid` is their coach's and
+              // `dislikes` is written on its own (setDislikes below), so this
+              // whole-row push can never overwrite either with a stale copy.
+              goal, diet, avoid: ownAvoid,
               meals_per_day: mealsPerDay,
               step_goal: stepGoal,
               sleep_goal_hours: sleepGoalHours,
@@ -782,7 +815,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       })();
     }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, dob, heightCm, goal, diet, avoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced, pushTick]);
+  }, [name, photo, dob, heightCm, goal, diet, ownAvoid, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, coachingMode, injuries, focusAreas, manualWeight, manualBodyFat, manualAt, sbUid, hydrated, nameSynced, pushTick]);
 
   // Try the profile write again when the app can reach the server again.
   //
@@ -1253,10 +1286,35 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   // over an unknown fraction of the record.
   const status = worstStatus(publishedProfileStatus, publishedScansStatus);
 
+  // Both halves are always arrays in state; whether they are the WHOLE list
+  // is `profileStatus`'s to say, and every consumer already asks it.
+  const avoid = useMemo(() => excludedAllergens(ownAvoid, coachAvoid) ?? ownAvoid, [ownAvoid, coachAvoid]);
+
+  /** Dislikes are written on their own, not through the debounced whole-row
+   *  push: a coach may edit them too, and a stale whole-row copy from this
+   *  handset would overwrite what the coach added. Refused until the row has
+   *  been read, because writing over a list nobody has seen is how a real
+   *  list gets replaced by a default. */
+  const setDislikes = useCallback(async (next: string[]): Promise<string | null> => {
+    if (!USE_SUPABASE) { setDislikesState(next); return null; }
+    if (!sbUid || !nameSynced) return 'Your dislikes have not been read yet, so they cannot be changed. Pull down to try again.';
+    try {
+      const res = await supabase.from('clients').update({ dislikes: next }, { count: 'exact' }).eq('id', sbUid);
+      const why = writeFailure('Your dislikes', res);
+      if (why) { reportError('clientData.dislikes', res.error ?? new Error(why)); return why; }
+    } catch (e) {
+      reportError('clientData.dislikes', e);
+      return 'Your dislikes could not be saved. Check your connection and try again.';
+    }
+    setDislikesState(next);
+    forgetMyRows(sbUid);
+    return null;
+  }, [sbUid, nameSynced]);
+
   const value = useMemo<Value>(() => ({
     id: sbUid ?? 'unknown', name, init: initials(name), setName,
     dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex,
-    goal, setGoal, diet, setDiet, avoid, setAvoid,
+    goal, setGoal, diet, setDiet, avoid, ownAvoid, setOwnAvoid, coachAvoid, dislikes, setDislikes,
     injuries,
     focusAreas, setFocusAreas,
     addInjury: addInjuryStable, updateInjury: updateInjuryStable, removeInjury: removeInjuryStable,
@@ -1273,7 +1331,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     status,
   }), [
     sbUid, name, setName, dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex,
-    goal, setGoal, diet, setDiet, avoid, setAvoid, injuries, focusAreas, setFocusAreas,
+    goal, setGoal, diet, setDiet, avoid, ownAvoid, setOwnAvoid, coachAvoid, dislikes, setDislikes, injuries, focusAreas, setFocusAreas,
     addInjuryStable, updateInjuryStable, removeInjuryStable,
     coachingMode, setCoachingMode, coachLinked, trainerId, mealsPerDay, setMealsPerDay,
     stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,

@@ -82,7 +82,7 @@ ok(copyCoachRecipeDay(pinned, 2, 2) === pinned, 'copying a day onto itself chang
 
 const asked = {
   open: true, profileStatus: 'ready' as LoadStatus, slot: 'Dinner' as const, diet: 'vegetarian' as const,
-  avoid: ['nuts' as const], query: 'pasta', targetKcal: 712, number: 8,
+  avoid: ['nuts' as const], coachAvoid: [] as ('nuts' | 'shellfish' | 'dairy')[], query: 'pasta', targetKcal: 712, number: 8,
 };
 const params = coachRecipeSearch(asked);
 ok(!!params, 'a coach who taps Recipes on a client whose profile was read gets a search');
@@ -101,6 +101,19 @@ eq(coachRecipeSearch({ ...asked, profileStatus: 'loading' }), null, 'so does one
 eq(coachRecipeSearch({ ...asked, profileStatus: 'partial' }), null, 'and so does one that came back short');
 eq(coachRecipeSearch({ ...asked, avoid: null, profileStatus: 'error' }), null, 'both at once, still nothing');
 same(coachRecipeSearch({ ...asked, avoid: [] })?.avoid, [], 'but a client who was read and avoids nothing IS searched for');
+
+// ── the coach's notes: added to the member's list, never instead of it ──────
+// Spoonacular is sent the UNION. A note the coach took reaches the recipe
+// filter; a coach with no notes cannot take the member's own entry out of it.
+same(coachRecipeSearch({ ...asked, coachAvoid: ['shellfish'] })?.avoid, ['nuts', 'shellfish'],
+  'a coach-noted allergen is excluded ALONGSIDE the member’s own');
+same(coachRecipeSearch({ ...asked, avoid: [], coachAvoid: ['dairy'] })?.avoid, ['dairy'],
+  'a member who declared nothing still has what they told their coach excluded');
+same(coachRecipeSearch({ ...asked, coachAvoid: ['nuts'] })?.avoid, ['nuts'],
+  'the same allergen from both lists is sent once');
+// An unread note list is UNKNOWN, not empty: the same refusal as an unread avoid.
+eq(coachRecipeSearch({ ...asked, coachAvoid: null }), null,
+  'a client whose coach notes did not come back is NOT searched for, even with their own list read');
 
 // Points are billed now, so nothing is asked until the coach asks for it.
 eq(coachRecipeSearch({ ...asked, open: false }), null, 'mounting the screen or opening the meal sheet spends nothing');

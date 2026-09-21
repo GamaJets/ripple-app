@@ -82,6 +82,9 @@ export interface RosterClient {
   metrics?: import('./inbodyMetrics').ScanMetrics;
   diet?: string;
   mealsPerDay?: number;
+  /** Everything kept out of their meals: their own `avoid` UNION their
+   *  coach's `coach_avoid` (`excludedAllergens`). Undefined is unread, never
+   *  "none": a row missing either half leaves it undefined. */
   avoid?: import('./meals').Allergen[];
 }
 export interface ExVideo { id: string; name: string; group: string; dur: string; uploaded: boolean; url?: string; }

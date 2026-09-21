@@ -72,6 +72,10 @@ export interface MyClientRow {
   goal: unknown;
   diet: unknown;
   avoid: unknown;
+  /** What the member told their coach, recorded by the coach. Excluded with
+   *  `avoid`, never instead of it. */
+  coach_avoid: unknown;
+  dislikes: unknown;
   mode: unknown;
   trainer_id: unknown;
   injuries: unknown;
@@ -121,7 +125,7 @@ export function readMyClientRow(uid: string): Promise<ReadOutcome<MyClientRow | 
   return clients.read(uid, async () => {
     const { data, error } = await supabase
       .from('clients')
-      .select('dob, sex, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours, water_goal_glasses, weight_unit, length_unit')
+      .select('dob, sex, height_cm, goal, diet, avoid, coach_avoid, dislikes, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours, water_goal_glasses, weight_unit, length_unit')
       .eq('id', uid).maybeSingle();
     if (error) return { ok: false, error };
     return { ok: true, value: (data as MyClientRow | null) ?? null };

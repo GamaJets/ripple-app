@@ -11,7 +11,7 @@ import {
   planDayOverride, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
   type CoachMealPlan,
 } from './mealPlan';
-import { buildPlan, catalogSize, mealAt, planWeek, searchMeals, slotsFor, swapIndex, type Allergen, type PlanInput } from './meals';
+import { buildPlan, catalogSize, excludedAllergens, mealAt, mealDislikes, planWeek, searchMeals, slotsFor, swapIndex, type Allergen, type PlanInput } from './meals';
 import { WEEK_DAYS, jsDayForIndex } from './weekStart';
 
 const errors: string[] = [];
@@ -448,6 +448,39 @@ ok(searchMeals('meat', 'Dinner', 'pemmican', 40, []).length === 0,
   const dairyFree = searchMeals('vegetarian', 'Dinner', 'halloumi', 40, ['dairy']);
   ok(dairyFree.every((m) => !m.ing.some(([item]) => /halloumi/i.test(item))),
     'a dairy-free search does not compose a meal out of halloumi');
+}
+
+/* ── a coach's note is a disclosure too ─────────────────────────────────── */
+{
+  // A plan written against the member's own list, then the coach records a
+  // shellfish allergy the client mentioned in person. The union moved, so the
+  // plan is stale and cannot be sent until it is rewritten.
+  const own: Allergen[] = ['nuts'];
+  const written = seedPlan(client({ avoid: excludedAllergens(own, [])! }), WRITTEN);
+  const after = planStale(written, 'meat', excludedAllergens(own, ['shellfish'])!, 4);
+  ok(after.stale && after.addedAvoid.includes('shellfish'), 'a coach-noted allergen stales a plan written without it');
+  // And a coach who has no notes cannot make the member's own entry vanish.
+  eq(planStale(written, 'meat', excludedAllergens(own, [])!, 4).droppedAvoid.length, 0,
+    'the union with an empty coach list still carries the member’s nuts');
+  // Unread coach notes: no union, so nothing to judge the plan against, and the
+  // screen holds the send on its profile status.
+  eq(excludedAllergens(own, null), null, 'an unread coach list yields no exclusion list to plan against');
+}
+
+/* ── dislikes steer the generated week, and the coach's seed is that week ── */
+{
+  const dis = client({ dislikes: ['salmon', 'chicken'] });
+  const week = planWeek(dis);
+  for (const day of week) for (const m of day) {
+    ok(!mealDislikes(m, ['salmon', 'chicken']).length, `the generated week honours dislikes: ${m.n}`);
+  }
+  const seed = seedPlan(dis, WRITTEN);
+  seed.days.forEach((day, d) => day.meals.forEach((m, i) =>
+    eq(m.n, week[d][i].n, `the coach's seed day ${d} slot ${i} is the week the client sees`)));
+  const sw = swapIndex('meat', 'Dinner', week[0][3].idx, [], ['salmon', 'chicken']);
+  ok(!mealDislikes(mealAt('meat', 'Dinner', sw, []), ['salmon', 'chicken']).length, 'a swap lands on a meal they do not dislike');
+  ok(searchMeals('meat', 'Dinner', '', 20, [], ['salmon']).every((m) => !/salmon/i.test(m.n)), 'the picker leaves disliked meals out');
+  ok(searchMeals('meat', 'Dinner', 'salmon', 20, [], ['salmon']).length > 0, 'unless that is what they searched for');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

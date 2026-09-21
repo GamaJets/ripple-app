@@ -85,7 +85,11 @@ import { num } from '../../src/lib/format';
 import { readGoals, seriesFrom, type GoalRow, type ScanRow, type WeighInRow } from '../../src/lib/clientGoals';
 import { energyPlanFor } from '../../src/lib/goalEnergy';
 import { maintenanceFor, DIET_LABEL } from '../../src/lib/nutrition';
-import { buildPlan, catalogSize, searchMeals, swapIndex, ALLERGENS, type Allergen, type PlanInput, type Slot } from '../../src/lib/meals';
+import {
+  buildPlan, catalogSize, searchMeals, swapIndex, ALLERGENS, excludedAllergens, normaliseDislike, preferNotDisliked,
+  readAllergenColumn, readDislikes, type Allergen, type PlanInput, type Slot,
+} from '../../src/lib/meals';
+import { writeFailure } from '../../src/lib/wroteRows';
 import {
   PLAN_DAYS, PLAN_WEEKDAYS, copyPlanDay, guardPlan, planDayBaseKcal, planDayIndex,
   planDayOverride, planProteinNote, planServingNote, planStale, planStaleLine, seedPlan, setPlanMeal,
@@ -105,7 +109,7 @@ import type { Diet, Goal } from '../../src/lib/types';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { FORWARD_ARROW, FORWARD_ICON } from '../../src/ui/direction';
 
-const CLIENT_COLS = 'diet, meals_per_day, avoid, goal, activity, manual_weight_kg, manual_body_fat_pct';
+const CLIENT_COLS = 'diet, meals_per_day, avoid, coach_avoid, dislikes, goal, activity, manual_weight_kg, manual_body_fat_pct';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
 const CHECKIN_COLS = 'at, weight_kg';
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
@@ -125,7 +129,16 @@ const openLink = (where: string, url: string) => { Linking.openURL(url).catch((e
 interface Profile {
   diet: Diet | null;
   mealsPerDay: 3 | 4 | 5 | null;
+  /** EVERYTHING kept out of their meals: `excludedAllergens(ownAvoid,
+   *  coachAvoid)`. Every filter on this screen reads this, never `ownAvoid`. */
   avoid: Allergen[];
+  /** The member's own list. Theirs alone: the database refuses a coach's
+   *  change to it (clients_avoid_is_the_clients). Shown, never edited here. */
+  ownAvoid: Allergen[];
+  /** What the client told this coach, `clients.coach_avoid`. The coach's. */
+  coachAvoid: Allergen[];
+  /** Ingredient words they would rather not eat. Either of them may edit. */
+  dislikes: string[];
   goal: Goal | null;
   activity: number | null;
   weightKg: number | null;
@@ -220,6 +233,12 @@ export default function ClientNutrition() {
   const [recipesOpen, setRecipesOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [sending, setSending] = useState(false);
+  // The coach's two writes to the client's row: their own allergen notes and
+  // the client's dislikes. `noteError` is why the last one did not land, drawn
+  // until the next one does; the chips move only on a write that landed.
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [dislikeDraft, setDislikeDraft] = useState('');
 
   // Tapping through a book of clients starts a read per tap and they do not
   // come back in order. Without this a slow answer for the person tapped first
@@ -344,12 +363,25 @@ export default function ClientNutrition() {
     const lastScan = [...scans].reverse().find((s) => asNum(s.weight_kg) != null) ?? null;
     const lastBf = [...scans].reverse().find((s) => asNum(s.body_fat_pct) != null) ?? null;
     const mpd = asNum(row.meals_per_day);
+    // Both allergen lists and the dislikes, or no profile. A row that came back
+    // without a readable `coach_avoid` has not told us the whole exclusion
+    // list, so it is the same as a row that did not come back: an unread coach
+    // list is unknown, never "the coach noted nothing", and guardPlan holds
+    // the send on the 'error' this sets.
+    const ownAvoid = readAllergenColumn(row.avoid);
+    const coachAvoid = readAllergenColumn(row.coach_avoid);
+    const avoid = excludedAllergens(ownAvoid, coachAvoid);
+    const dislikes = readDislikes(row.dislikes);
+    if (!ownAvoid || !coachAvoid || !avoid || !dislikes) {
+      reportError('clientNutrition.profile', new Error('allergen or dislike columns unreadable'), { clientId: id });
+      setProfile(null);
+      setProfileStatus('error');
+      return;
+    }
     setProfile({
       diet: DIETS.includes(row.diet as Diet) ? (row.diet as Diet) : null,
       mealsPerDay: mpd === 3 || mpd === 4 || mpd === 5 ? mpd : null,
-      avoid: Array.isArray(row.avoid)
-        ? (row.avoid as unknown[]).filter((a): a is Allergen => typeof a === 'string' && ALLERGEN_LABEL.has(a as Allergen))
-        : [],
+      avoid, ownAvoid, coachAvoid, dislikes,
       goal: GOALS.includes(row.goal as Goal) ? (row.goal as Goal) : null,
       activity: asNum(row.activity),
       weightKg: lastScan ? asNum(lastScan.weight_kg) : asNum(row.manual_weight_kg),
@@ -441,6 +473,7 @@ export default function ClientNutrition() {
       mealOverride: adjust?.mealOverride ?? {},
       coachAdjust: adjust ?? undefined,
       avoid: profile.avoid,
+      dislikes: profile.dislikes,
       energyPlan,
     };
   }, [picked, profile, goals, series, adjust, nowMs]);
@@ -489,7 +522,7 @@ export default function ClientNutrition() {
 
   const results = useMemo(() => {
     if (!pick || !profile?.diet) return [];
-    return searchMeals(profile.diet, pick.slot, query, 30, profile.avoid);
+    return searchMeals(profile.diet, pick.slot, query, 30, profile.avoid, profile.dislikes);
   }, [pick, query, profile]);
 
   /** The row the sheet is about to replace. Its `K` is the slot's share, so it
@@ -519,8 +552,11 @@ export default function ClientNutrition() {
     slot: pick?.slot ?? null,
     diet: profile?.diet ?? null,
     // Null is UNREAD. An empty array is a client who was read and avoids
-    // nothing, and only that one may be searched against.
-    avoid: profile ? profile.avoid : null,
+    // nothing, and only that one may be searched against. The two lists go in
+    // separately and `coachRecipeSearch` sends their union, so neither can be
+    // left out of the Spoonacular exclusions by a caller.
+    avoid: profile ? profile.ownAvoid : null,
+    coachAvoid: profile ? profile.coachAvoid : null,
     query,
     targetKcal: picking?.K ?? null,
     number: 8,
@@ -528,7 +564,7 @@ export default function ClientNutrition() {
   const recipes = useRecipeSearch(recipeParams);
   const found = recipes.result;
   const recipeRows = found && (found.status === 'ready' || found.status === 'partial')
-    ? found.meals.map((m) => portionRecipe(m, picking?.K ?? null, pick?.pos ?? 0))
+    ? preferNotDisliked(found.meals, profile?.dislikes ?? []).rows.map((m) => portionRecipe(m, picking?.K ?? null, pick?.pos ?? 0))
     : [];
   /** What the coach pinned at this day's slot, drawn instead of the generated
    *  meal's name. The ref carries a title and an image and no figures — that
@@ -536,6 +572,47 @@ export default function ClientNutrition() {
   const refAt = (pos: number) => coachRecipeRefAt(refs ?? {}, dayIdx, pos);
   const dayRecipes = Object.keys(refs?.[dayIdx] ?? {}).length;
   const weekHasRecipes = hasCoachRecipes(refs ?? {});
+
+  /** Write the coach's note or the dislikes, and move the screen only when the
+   *  row actually changed. Never `avoid`: that column is the member's, and
+   *  the database refuses it from here. */
+  const writeRow = async (patch: { coach_avoid: Allergen[] } | { dislikes: string[] }, what: string) => {
+    if (!picked || !profile || noteBusy) return;
+    setNoteBusy(true);
+    try {
+      const res = await supabase.from('clients').update(patch, { count: 'exact' }).eq('id', picked);
+      const why = writeFailure(what, res);
+      if (why) {
+        reportError('clientNutrition.note', res.error ?? new Error(why), { clientId: picked });
+        // A refusal from the database carries its own reason, and it is the
+        // one worth reading (the allergen trigger says whose list it is).
+        setNoteError(res.error?.code === '42501' && res.error.message ? `${why} ${res.error.message}` : why);
+      } else {
+        setNoteError(null);
+        setProfile((p) => {
+          if (!p) return p;
+          const next = { ...p, ...('coach_avoid' in patch ? { coachAvoid: patch.coach_avoid } : { dislikes: patch.dislikes }) };
+          return { ...next, avoid: excludedAllergens(next.ownAvoid, next.coachAvoid) ?? next.avoid };
+        });
+      }
+    } catch (e) {
+      reportError('clientNutrition.note', e, { clientId: picked });
+      setNoteError(`${what} could not be saved. Check your connection and try again.`);
+    } finally {
+      setNoteBusy(false);
+    }
+  };
+  const toggleCoachAvoid = (a: Allergen) => {
+    if (!profile) return;
+    const on = profile.coachAvoid.includes(a);
+    void writeRow({ coach_avoid: on ? profile.coachAvoid.filter((x) => x !== a) : [...profile.coachAvoid, a] }, 'Your note');
+  };
+  const addDislike = () => {
+    const w = normaliseDislike(dislikeDraft);
+    if (!w || !profile) return;
+    setDislikeDraft('');
+    if (!profile.dislikes.includes(w)) void writeRow({ dislikes: [...profile.dislikes, w] }, 'Their dislikes');
+  };
 
   const send = async () => {
     if (!picked || !draft || !guard.allowed || sending) return;
@@ -633,7 +710,7 @@ export default function ClientNutrition() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── the board's head: back, and the title on the centre line ────
             The client's name sits under it because this is one person's plan
@@ -1033,33 +1110,86 @@ export default function ClientNutrition() {
                       <Section>
                         <SectionHead
                           title="What They Avoid"
-                          note={profile.avoid.length ? `${profile.avoid.length} recorded` : 'none recorded'}
+                          note={profile.avoid.length ? `${profile.avoid.length} kept out` : 'none recorded'}
                         />
-                        {profile.avoid.length ? (
-                          <>
-                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xs }}>
-                              {profile.avoid.map((a) => (
-                                <View key={a} style={{ paddingHorizontal: sp.md, paddingVertical: sp.xs, borderRadius: radius.pill, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.warn }}>
-                                  {/* The chip's warn border is the mark and clears 3:1;
-                                      warn as micro ink did not clear 4.5:1 on the three
-                                      light palettes, which made the allergen name the
-                                      hardest word in the chip to read. */}
-                                  <Text style={{ ...ty.micro, color: t.ink }}>{ALLERGEN_LABEL.get(a) ?? a}</Text>
-                                </View>
-                              ))}
-                            </View>
-                            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
-                              Every meal offered on this screen is drawn from a catalogue with these already
-                              taken out. They are what they told their own app, not a medical record.
-                            </Text>
-                          </>
+                        <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Their Own List</Text>
+                        {profile.ownAvoid.length ? (
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                            {profile.ownAvoid.map((a) => (
+                              <View key={a} style={{ paddingHorizontal: sp.md, paddingVertical: sp.xs, borderRadius: radius.pill, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.warn }}>
+                                {/* The chip's warn border is the mark and clears 3:1;
+                                    warn as micro ink did not clear 4.5:1 on the three
+                                    light palettes. */}
+                                <Text style={{ ...ty.micro, color: t.ink }}>{ALLERGEN_LABEL.get(a) ?? a}</Text>
+                              </View>
+                            ))}
+                          </View>
                         ) : (
                           <Text style={{ ...ty.body, color: t.ink2 }}>
-                            {who} has recorded nothing they avoid. The read came back and it was empty,
-                            so this is about them rather than about the connection. It is worth asking anyway
-                            before you write a week around it.
+                            {who} has declared nothing. The read came back and it was empty, so this is about
+                            them rather than the connection. It is worth asking before you write a week around it.
                           </Text>
                         )}
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                          Only {who} can change this list, from their own Meals tab. A coach cannot remove an
+                          allergen a member declared, so a note taken in passing can never put it back on their plate.
+                        </Text>
+
+                        {/* The coach's own column. Tapping adds or removes THEIR
+                            note; an allergen the member declared is shown as
+                            theirs and is not a button, because removing the
+                            coach's note would not remove it anyway. */}
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>What They Told You</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                          {ALLERGENS.map((al) => {
+                            const theirs = profile.ownAvoid.includes(al.id);
+                            const on = theirs || profile.coachAvoid.includes(al.id);
+                            return (
+                              <Pressable key={al.id} disabled={theirs || noteBusy} onPress={() => toggleCoachAvoid(al.id)}
+                                accessibilityRole="button" accessibilityState={{ selected: on, disabled: theirs || noteBusy }}
+                                accessibilityLabel={theirs ? `${al.label}, on their own list` : al.label}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.surface3 : t.surface2, opacity: theirs ? 0.6 : 1 }}>
+                                {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
+                                <Text style={{ ...ty.label, ...font(on ? '500' : '400'), color: on ? t.ink : t.ink2 }}>{al.label}</Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                          Record an allergy {who} mentioned to you. It is kept out of every meal and recipe along
+                          with their own list, and they see it on their Meals tab as noted by you. You can correct
+                          your own notes; greyed ones are theirs.
+                        </Text>
+
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.sm }}>Dislikes</Text>
+                        {profile.dislikes.length ? (
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.sm }}>
+                            {profile.dislikes.map((w) => (
+                              <Pressable key={w} disabled={noteBusy} onPress={() => { void writeRow({ dislikes: profile.dislikes.filter((x) => x !== w) }, 'Their dislikes'); }}
+                                accessibilityRole="button" accessibilityLabel={`Remove ${w}`}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                                <Text style={{ ...ty.label, color: t.ink }}>{w}</Text>
+                                <Icon name="minus" size={12} color={t.ink3} />
+                              </Pressable>
+                            ))}
+                          </View>
+                        ) : null}
+                        <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+                          <TextInput value={dislikeDraft} onChangeText={setDislikeDraft} placeholder="e.g. mushrooms" placeholderTextColor={t.ink3}
+                            accessibilityLabel={`Add a food ${who} dislikes`} returnKeyType="done" autoCorrect={false} autoCapitalize="none"
+                            onSubmitEditing={addDislike}
+                            style={{ ...ty.body, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+                          <Pressable onPress={addDislike} disabled={noteBusy || !normaliseDislike(dislikeDraft)}
+                            accessibilityRole="button" accessibilityLabel="Add dislike"
+                            style={{ paddingHorizontal: sp.lg, paddingVertical: 10, borderRadius: radius.pill, backgroundColor: normaliseDislike(dislikeDraft) ? t.brand : t.surface2 }}>
+                            <Text style={{ ...ty.label, ...font('600'), color: normaliseDislike(dislikeDraft) ? t.brandInk : t.ink3 }}>Add</Text>
+                          </Pressable>
+                        </View>
+                        <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
+                          A preference, not an allergy. Left out where there is another option, and kept in when a
+                          meal cannot be made without it.
+                        </Text>
+                        {noteError ? <Flag tone={t.crit} style={{ marginTop: sp.md }}>{noteError}</Flag> : null}
                         <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>
                           Diet: {profile.diet ? DIET_LABEL[profile.diet] : 'not set'} ·{' '}
                           {profile.mealsPerDay ? `${profile.mealsPerDay} meals a day` : 'meals a day not set'} ·{' '}
@@ -1107,7 +1237,7 @@ export default function ClientNutrition() {
               <Ghost label="Swap" icon="swap" onPress={() => {
                 const cur = pick && built ? built.plan[pick.pos] : null;
                 if (!draft || !pick || !cur || !profile?.diet) return;
-                setDraft(setPlanMeal(draft, dayIdx, pick.pos, swapIndex(profile.diet, cur.slot, cur.idx, profile.avoid)));
+                setDraft(setPlanMeal(draft, dayIdx, pick.pos, swapIndex(profile.diet, cur.slot, cur.idx, profile.avoid, profile.dislikes)));
                 // Stepping to the next catalogue dish means this slot is a
                 // catalogue dish again. Leaving the pin on would show the
                 // recipe and send the swap, which is two different dinners.

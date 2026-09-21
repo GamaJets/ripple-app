@@ -14,6 +14,8 @@
 import {
   ALLERGENS, allergenGapNote, mealAllergens, mealRowSpoken, planGaps, poolGaps,
   catalogSize, mealAt,
+  dislikeFreeIndex, dislikeGapNote, dislikeGaps, excludedAllergens, mealDislikes, preferNotDisliked,
+  readAllergenColumn, readDislikes, textDislikes, variantStep,
   type Allergen, type Slot,
 } from './meals';
 import { readDiet, type Diet } from './types';
@@ -257,6 +259,85 @@ eq(mealRowSpoken({ name: 'Trail mix', kcal: null }), 'Trail mix', 'and neither i
     ok(said.includes(a === 'nuts' ? 'nuts' : a),
       `and every allergen the engine found on ${meal.n} is NAMED in the sentence, not merely implied by the word "Contains"`);
   }
+}
+
+// ── the member's list and their coach's notes ────────────────────────────
+//
+// supabase/parts/3240: `avoid` is the member's own and only they may change
+// it; `coach_avoid` is what they told their coach. What is excluded is the
+// UNION, so a coach can add a restriction and has no way to subtract one.
+{
+  const same = (a: unknown, b: unknown, msg: string) => eq(JSON.stringify(a), JSON.stringify(b), msg);
+  same(excludedAllergens(['nuts'], ['dairy']), ['dairy', 'nuts'], 'the union of the two lists is what is excluded');
+  same(excludedAllergens(['nuts'], []), ['nuts'], 'a coach with no notes cannot take the member’s nut allergy out');
+  same(excludedAllergens([], ['shellfish']), ['shellfish'], 'a coach note is excluded even when the member declared nothing');
+  same(excludedAllergens(['nuts'], ['nuts']), ['nuts'], 'the same allergen on both lists is one exclusion');
+  // Unread is UNKNOWN, never empty. A coach list that failed to load leaves
+  // the full list unknown, and every consumer refuses on null.
+  eq(excludedAllergens(['nuts'], null), null, 'an unread coach list makes the whole exclusion list unknown');
+  eq(excludedAllergens(null, ['nuts']), null, 'and so does an unread member list');
+  eq(readAllergenColumn(undefined), null, 'a column the read never returned is unread, not empty');
+  same(readAllergenColumn(null), [], 'a column read back as SQL null is read, and holds nothing');
+  eq(readAllergenColumn('nuts'), null, 'a column that is not a list is unreadable, so unknown');
+  same(readAllergenColumn(['nuts', 'kryptonite', 'dairy']), ['dairy', 'nuts'], 'an unknown word is dropped, the known ones kept');
+  eq(excludedAllergens(readAllergenColumn(['nuts']), readAllergenColumn(undefined)), null,
+    'a row read WITHOUT coach_avoid does not become "the coach noted nothing"');
+
+  // And through the planner: an allergen only the coach recorded is kept out
+  // of the member's catalogue exactly as their own would be.
+  const union = excludedAllergens([], ['nuts'])!;
+  for (const slot of ['Breakfast', 'Lunch', 'Dinner', 'Snack'] as Slot[]) {
+    const size = catalogSize('vegan', slot, union);
+    for (let i = 0; i < 60; i++) {
+      const m = mealAt('vegan', slot, (i * 97) % size, union);
+      ok(!mealAllergens(m, ['nuts']).length || poolGaps('vegan', slot, union).includes('nuts'),
+        `a coach-noted nut allergy keeps nuts out of ${slot} ${m.n}`);
+    }
+  }
+}
+
+// ── dislikes: relaxed when nothing is left; an allergen never is ────────────
+{
+  const same = (a: unknown, b: unknown, msg: string) => eq(JSON.stringify(a), JSON.stringify(b), msg);
+  same(textDislikes('Mushroom risotto', ['mushrooms']), ['mushrooms'], 'a plural dislike finds the singular');
+  same(textDislikes('Kalamata olive salad', ['olives']), ['olives'], '"olives" finds "olive"');
+  same(textDislikes('Roast tomatoes', ['tomato']), ['tomato'], 'a singular dislike finds the plural');
+  same(textDislikes('Beetroot hummus', ['ham']), [], 'a whole word only: "ham" is not in "hummus"');
+  same(readDislikes([' Mushrooms ', 'mushrooms', '', 7]), ['mushrooms'], 'dislikes are trimmed, lower-cased and de-duplicated');
+  eq(readDislikes(undefined), null, 'an unread dislike list is unknown');
+
+  // Honoured where it can be: a spread of dinners, none with salmon in.
+  const size = catalogSize('meat', 'Dinner', []);
+  const step = variantStep('meat', 'Dinner', []);
+  for (let d = 0; d < 40; d++) {
+    const m = mealAt('meat', 'Dinner', dislikeFreeIndex('meat', 'Dinner', d * step, [], ['salmon']), []);
+    ok(!mealDislikes(m, ['salmon']).length, `a salmon dislike is honoured: ${m.n}`);
+  }
+  eq(dislikeFreeIndex('meat', 'Dinner', 5, [], []), 5 % size, 'no dislikes, no change to the index');
+  same(dislikeGaps('meat', ['Dinner'], [], ['salmon']), [], 'a dislike that could be honoured is not reported');
+
+  // Keto breakfasts without egg leave two bases: chia pudding and cottage
+  // cheese. Disliking both empties that pool. The DISLIKE gives way, and the
+  // eggs the allergen took out do not come back.
+  const avoid: Allergen[] = ['egg'];
+  const both = ['chia', 'cottage'];
+  const ksize = catalogSize('keto', 'Breakfast', avoid);
+  for (let i = 0; i < ksize; i += 7) {
+    const m = mealAt('keto', 'Breakfast', dislikeFreeIndex('keto', 'Breakfast', i, avoid, both), avoid);
+    ok(m.n.length > 0, 'a relaxed dislike still serves a meal rather than nothing');
+    same(mealAllergens(m, avoid), [], `relaxing a dislike never brings back an excluded allergen: ${m.n}`);
+  }
+  same(dislikeGaps('keto', ['Breakfast'], avoid, both), both, 'and the relaxed dislikes are named');
+  ok(!!dislikeGapNote(both) && !/[\u2014]/.test(dislikeGapNote(both)!), 'said in a sentence, with no em dash');
+  eq(dislikeGapNote([]), null, 'nothing to say when every dislike was honoured');
+
+  const rows = [
+    { n: 'Mushroom omelette', ing: [['Mushrooms', 50, 'g']] as [string, number, string][] },
+    { n: 'Plain omelette', ing: [['Eggs', 2, '']] as [string, number, string][] },
+  ];
+  same(preferNotDisliked(rows, ['mushroom']).rows.map((r) => r.n), ['Plain omelette'], 'a disliked row is left out while there is another');
+  const only = preferNotDisliked([rows[0]], ['mushroom']);
+  ok(only.relaxed && only.rows.length === 1, 'and handed back, flagged as relaxed, when it is all there is');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

@@ -314,6 +314,173 @@ export function allergenGapNote(gaps: Allergen[]): string | null {
   return `Your plan still contains ${list}. There are not enough ${list.includes('and') ? 'suitable components' : `${list}-free components`} in this diet to build every meal without ${names.length === 1 ? 'it' : 'them'}, so the meals below have been built anyway and are marked where ${names.length === 1 ? 'it appears' : 'they appear'}. Check every dish before you cook it.`;
 }
 
+// ── whose exclusions, and how many of them were read ────────────────────────
+//
+// `clients.avoid` is the member's own list and only the member may change it
+// (supabase/parts/3240-a-members-allergens-are-theirs-and-a-coach-can-add-not-erase.sql).
+// `clients.coach_avoid` is what the member told their coach, recorded by the
+// coach. What is kept away from the member is the UNION of the two, in every
+// place that decides what food reaches them. A coach can add a restriction
+// this way and has no way to subtract one.
+
+/**
+ * One allergen column off a row that was read, or null when it was not.
+ *
+ * `undefined` is a column the read never returned (not selected, not there):
+ * unknown. A SQL `null` is a column that was read and holds nothing: nobody has
+ * recorded anything, which is an answer. Anything else is unreadable, and an
+ * unreadable list is unknown, never empty.
+ */
+export function readAllergenColumn(v: unknown): Allergen[] | null {
+  if (v === undefined) return null;
+  if (v === null) return [];
+  if (!Array.isArray(v)) return null;
+  return ALLERGENS.map((a) => a.id).filter((id) => v.includes(id));
+}
+
+/**
+ * Everything kept away from a member: their own list and their coach's notes.
+ *
+ * Null when EITHER list is unread. The coach's notes failing to load is not a
+ * coach who noted nothing, and a union with an unread half is not the whole
+ * list. Every caller already refuses to plan, search or mark against an unread
+ * `avoid`; this makes the same refusal cover an unread `coach_avoid`.
+ */
+export function excludedAllergens(
+  own: readonly Allergen[] | null, coach: readonly Allergen[] | null,
+): Allergen[] | null {
+  if (own == null || coach == null) return null;
+  return ALLERGENS.map((a) => a.id).filter((id) => own.includes(id) || coach.includes(id));
+}
+
+// ── dislikes: a preference, never a safety fact ─────────────────────────────
+//
+// `clients.dislikes` is ingredient words. An ALLERGEN filters the component
+// pools themselves (`poolFilter`), which defines the catalogue's index space.
+// A DISLIKE never touches that space: it only steers which index is picked
+// (`dislikeFreeIndex`) and which rows are listed (`preferNotDisliked`), inside
+// pools the allergens have already filtered. So relaxing a dislike can only
+// ever hand back something the allergen filter already allowed, and when a
+// dislike cannot be honoured it is relaxed and said so (`dislikeGapNote`)
+// rather than leaving a slot with nothing to serve.
+
+/** The longest word kept. A dislike is an ingredient, not a paragraph. */
+export const DISLIKE_MAX = 40;
+
+/** A typed dislike as it is stored and matched: trimmed, lower case, or null
+ *  when there is nothing left of it. */
+export function normaliseDislike(word: string): string | null {
+  const w = word.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, DISLIKE_MAX);
+  return w ? w : null;
+}
+
+/** The `dislikes` column off a row that was read. Same null rule as
+ *  `readAllergenColumn`: missing is unknown, SQL null is none. */
+export function readDislikes(v: unknown): string[] | null {
+  if (v === undefined) return null;
+  if (v === null) return [];
+  if (!Array.isArray(v)) return null;
+  const out: string[] = [];
+  for (const x of v) {
+    const w = typeof x === 'string' ? normaliseDislike(x) : null;
+    if (w && !out.includes(w)) out.push(w);
+  }
+  return out;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** "mushrooms" finds "mushroom", "olives" finds "olive", "tomato" finds
+ *  "tomatoes". Whole words only, so "ham" is not found in "hummus". */
+function dislikeRe(word: string): RegExp {
+  const stems = new Set([word, word.replace(/s$/, ''), word.replace(/es$/, '')].filter((s) => s.length > 1));
+  return new RegExp(`\\b(${[...stems].map(escapeRe).join('|')})(s|es)?\\b`);
+}
+
+/** Which of `dislikes` a piece of text names. */
+export function textDislikes(text: string, dislikes: readonly string[]): string[] {
+  if (!dislikes.length) return [];
+  const t = text.toLowerCase();
+  return dislikes.filter((w) => dislikeRe(w).test(t));
+}
+
+const compText = (cp: { n: string; ing: readonly (readonly [string, ...unknown[]])[] }) =>
+  cp.n + ' ' + cp.ing.map((i) => i[0]).join(' ');
+
+/** Which of `dislikes` a meal or recipe contains, by name and ingredients
+ *  (a recipe's unmeasured ones too). */
+export function mealDislikes(
+  meal: { n: string; ing: readonly (readonly [string, ...unknown[]])[]; unmeasured?: readonly string[] },
+  dislikes: readonly string[],
+): string[] {
+  if (!dislikes.length) return [];
+  return textDislikes(compText(meal) + ' ' + (meal.unmeasured ?? []).join(' '), dislikes);
+}
+
+/**
+ * The nearest index to `idx` whose meal contains none of `dislikes`, moving
+ * each component to the next one in ITS OWN allergen-filtered pool that is not
+ * disliked. A pool in which every option is disliked keeps its component: the
+ * dislike is relaxed there (and `dislikeGaps` says so). It can never reach a
+ * component `poolFilter` removed, because it only walks what `dims` returned.
+ */
+export function dislikeFreeIndex(
+  diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = [], dislikes: readonly string[] = [],
+): number {
+  const pools = dims(diet, slot, avoid);
+  const sizes = pools.map((p) => Math.max(1, p.length));
+  const total = sizes.reduce((a, b) => a * b, 1);
+  let r = ((idx % total) + total) % total;
+  if (!dislikes.length) return r;
+  const digits: number[] = [];
+  for (let i = sizes.length - 1; i >= 0; i--) { digits[i] = r % sizes[i]; r = Math.floor(r / sizes[i]); }
+  for (let i = 0; i < pools.length; i++) {
+    const pool = pools[i];
+    if (!pool.length || !textDislikes(compText(pool[digits[i]]), dislikes).length) continue;
+    for (let k = 1; k < pool.length; k++) {
+      const j = (digits[i] + k) % pool.length;
+      if (!textDislikes(compText(pool[j]), dislikes).length) { digits[i] = j; break; }
+    }
+  }
+  return digits.reduce((acc, d, i) => acc * sizes[i] + d, 0);
+}
+
+/** The dislikes this diet and these slots cannot honour, because every option
+ *  in some required pool (after the allergens) contains one. Asked alone and
+ *  together, the way `poolGaps` asks it. */
+export function dislikeGaps(diet: Diet, slots: Slot[], avoid: Allergen[] = [], dislikes: readonly string[] = []): string[] {
+  if (!dislikes.length) return [];
+  const out = new Set<string>();
+  for (const slot of new Set(slots)) {
+    for (const pool of dims(diet, slot, avoid)) {
+      if (!pool.length) continue;
+      for (const w of dislikes) if (pool.every((cp) => textDislikes(compText(cp), [w]).length)) out.add(w);
+      if (pool.every((cp) => textDislikes(compText(cp), dislikes).length)) for (const w of dislikes) out.add(w);
+    }
+  }
+  return dislikes.filter((w) => out.has(w));
+}
+
+/** What to say when a dislike had to be relaxed, or null when none was. Plain,
+ *  and plainly a preference: it is not the allergen warning. */
+export function dislikeGapNote(gaps: readonly string[]): string | null {
+  if (!gaps.length) return null;
+  const list = gaps.length === 1 ? gaps[0] : `${gaps.slice(0, -1).join(', ')} and ${gaps[gaps.length - 1]}`;
+  return `Some meals still have ${list} in them. Every option for part of those meals has ${gaps.length === 1 ? 'it' : 'one of them'}, so rather than leave a meal empty we kept it in. Swap any you do not want.`;
+}
+
+/**
+ * Rows without a disliked ingredient, or every row when that would leave none.
+ * `relaxed` is true when it had to hand the disliked ones back. Allergens are
+ * never decided here: the rows passed in have already been filtered for them.
+ */
+export function preferNotDisliked<T extends { n: string; ing: readonly (readonly [string, ...unknown[]])[]; unmeasured?: readonly string[] }>(
+  rows: readonly T[], dislikes: readonly string[],
+): { rows: T[]; relaxed: boolean } {
+  if (!dislikes.length) return { rows: [...rows], relaxed: false };
+  const kept = rows.filter((m) => !mealDislikes(m, dislikes).length);
+  return kept.length || !rows.length ? { rows: kept, relaxed: false } : { rows: [...rows], relaxed: true };
+}
+
 // ── LUNCH / DINNER components ──
 const PROTEINS: Comp[] = [
   { n: 'grilled chicken', ico: '🍗', k: 220, p: 40, c: 0, f: 6,  ing: [['Chicken breast', 180, 'g', 'Meat & Seafood']], d: ['meat', 'paleo', 'keto'] },
@@ -548,7 +715,13 @@ export interface PlanInput extends BodyStats {
   mealsPerDay: 3 | 4 | 5;
   mealOverride?: Record<number, number>;
   coachAdjust?: CoachAdjust;
+  /** Everything kept away from them: `excludedAllergens(avoid, coach_avoid)`,
+   *  never the member's own list alone. */
   avoid?: Allergen[];
+  /** Ingredient words they would rather not eat. Steers the seeded meals and
+   *  the synthetic week; an explicit pick (their swap, their coach's written
+   *  day) is served as chosen. See `dislikeFreeIndex`. */
+  dislikes?: readonly string[];
   /**
    * The goal-date energy plan, when the member has a target weight and a date.
    *
@@ -585,7 +758,7 @@ export function buildPlan(c: PlanInput): { plan: PlannedMeal[]; target: ReturnTy
     // spaces the slots by 7, which is a FINE dimension, so Lunch and Dinner —
     // which draw from the same pools — came out as the same protein twice a
     // day with a different sauce on it.
-    const seeded = mealSeed(c, i) + i * variantStep(c.diet, slot, avoid);
+    const seeded = dislikeFreeIndex(c.diet, slot, mealSeed(c, i) + i * variantStep(c.diet, slot, avoid), avoid, c.dislikes);
     const idx = (override[i] != null ? override[i] : seeded) % size;
     const meal = mealAt(c.diet, slot, idx, avoid);
     return { ...meal, pos: i, servings: 1, K: meal.k, P: meal.p, C: meal.c, F: meal.f };
@@ -679,7 +852,7 @@ export function snackIdeas(c: PlanInput, count = 3): PlannedMeal[] {
   const seed = mealSeed(c, SNACK_SEED_SLOT);
   const out: PlannedMeal[] = [];
   for (let i = 0; i < Math.min(count, size); i++) {
-    const meal = mealAt(c.diet, 'Snack', (seed + i * 37) % size, avoid);
+    const meal = mealAt(c.diet, 'Snack', dislikeFreeIndex(c.diet, 'Snack', (seed + i * 37) % size, avoid, c.dislikes), avoid);
     const servings = Math.max(0.5, Math.round((want / Math.max(1, meal.k)) * 4) / 4);
     out.push({
       ...meal,
@@ -756,9 +929,17 @@ export function catalogRepeatDay(diet: Diet, slot: Slot, avoid: Allergen[] = [])
 }
 
 /** Next meal in the catalog for a slot (the "swap" action). */
-export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = []): number {
+export function swapIndex(diet: Diet, slot: Slot, currentIdx: number, avoid: Allergen[] = [], dislikes: readonly string[] = []): number {
   const size = catalogSize(diet, slot, avoid);
-  const next = currentIdx + variantStep(diet, slot, avoid);
+  const step = variantStep(diet, slot, avoid);
+  // The next step whose dislike-free meal is not the one being swapped away
+  // from. Bounded: a slot whose every option collapses to one meal swaps to
+  // the plain next step, which is the dislike relaxed rather than a dead tap.
+  for (let k = 1; k <= 16 && dislikes.length; k++) {
+    const idx = dislikeFreeIndex(diet, slot, currentIdx + k * step, avoid, dislikes);
+    if (idx !== ((currentIdx % size) + size) % size) return idx;
+  }
+  const next = currentIdx + step;
   return ((next % size) + size) % size;
 }
 
@@ -785,7 +966,11 @@ const SEARCH_VARIANTS = 6;
  * The composed name is still the final filter, so a row that comes back really
  * does contain what was typed.
  */
-export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, avoid: Allergen[] = []): GeneratedMeal[] {
+export function searchMeals(diet: Diet, slot: Slot, query: string, limit = 40, avoid: Allergen[] = [], dislikes: readonly string[] = []): GeneratedMeal[] {
+  // Dislikes filter the finished list and give way when nothing is left, so a
+  // member who searches for the very thing they said they dislike still finds
+  // it. Allergens were settled by `dims` before any row existed.
+  if (dislikes.length) return preferNotDisliked(searchMeals(diet, slot, query, limit * 3, avoid), dislikes).rows.slice(0, limit);
   const pools = dims(diet, slot, avoid);
   const sizes = pools.map((p) => Math.max(1, p.length));
   const total = sizes.reduce((a, b) => a * b, 1);
@@ -883,7 +1068,10 @@ export function planWeek(
     const ov: Record<number, number> = {};
     // `variantStep`, not `+ d` — see its comment. Day 3 is a different protein,
     // not the same chicken under a different sauce.
-    today.forEach((m) => { ov[m.pos] = m.idx + d * variantStep(c.diet, m.slot, c.avoid ?? []); });
+    // Through `dislikeFreeIndex`, because a step along the catalogue can land
+    // on a component they do not want even where today's meal had none. Day
+    // zero is left alone: it is today, including a meal they picked by hand.
+    today.forEach((m) => { ov[m.pos] = d === 0 ? m.idx : dislikeFreeIndex(c.diet, m.slot, m.idx + d * variantStep(c.diet, m.slot, c.avoid ?? []), c.avoid ?? [], c.dislikes); });
     out.push(buildPlan({ ...c, mealOverride: ov }).plan);
   }
   return out;

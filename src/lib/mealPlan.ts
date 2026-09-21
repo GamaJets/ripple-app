@@ -51,7 +51,7 @@
 // exists for. It is the same shape as the injury acknowledgement in
 // ./injuryGate.ts and is answered the same way: the coach is stopped by news.
 import type { Diet } from './types';
-import { buildPlan, catalogSize, mealAt, slotsFor, variantStep, type Allergen, type PlanInput, type Slot } from './meals';
+import { buildPlan, catalogSize, dislikeFreeIndex, mealAt, slotsFor, variantStep, type Allergen, type PlanInput, type Slot } from './meals';
 import { weekdayOfIso } from './dayPlan';
 import { WEEK_DAYS, dayIndexInWeek, jsDayForIndex } from './weekStart';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -158,7 +158,10 @@ export function seedPlan(input: PlanInput, writtenAtISO: string): CoachMealPlan 
   for (let d = 0; d < PLAN_DAYS; d++) {
     days.push({
       meals: slots.map((slot, i) =>
-        capturePlanMeal(input.diet, slot, (day0[i]?.idx ?? 0) + d * variantStep(input.diet, slot, avoid), avoid)),
+        // Day zero as drawn; every later day through `dislikeFreeIndex`, the
+        // same as `planWeek` steps the client's own preview.
+        capturePlanMeal(input.diet, slot, d === 0 ? (day0[i]?.idx ?? 0)
+          : dislikeFreeIndex(input.diet, slot, (day0[i]?.idx ?? 0) + d * variantStep(input.diet, slot, avoid), avoid, input.dislikes), avoid)),
     });
   }
   return { v: PLAN_VERSION, diet: input.diet, avoid, mealsPerDay: input.mealsPerDay, days, writtenAt: writtenAtISO };

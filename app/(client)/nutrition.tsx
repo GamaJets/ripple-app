@@ -22,6 +22,7 @@ import { useTheme } from '../../src/ui/components';
 import {
   buildPlan, snackIdeas, SNACK_SHARE, swapIndex, searchMeals, mealAt, catalogSize, groceryFromWeek, planWeek, slotsFor, catalogRepeatDay,
   planGaps, mealAllergens, allergenGapNote, allergenLabel, mealRowSpoken,
+  dislikeFreeIndex, dislikeGaps, dislikeGapNote, normaliseDislike, preferNotDisliked,
   DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen, type Slot,
 } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
@@ -589,6 +590,17 @@ export default function Nutrition() {
   // query about dinner.
   const [mealQuery, setMealQuery] = useState('');
   const [showAvoid, setShowAvoid] = useState(false);
+  const [dislikeDraft, setDislikeDraft] = useState('');
+  // Why the last dislike change did not save, drawn until the next one does.
+  // A refused write is never drawn as done: the chips only move on success.
+  const [dislikeError, setDislikeError] = useState<string | null>(null);
+  const saveDislikes = async (next: string[]) => { setDislikeError(await c.setDislikes(next)); };
+  const addDislike = () => {
+    const w = normaliseDislike(dislikeDraft);
+    if (!w) return;
+    setDislikeDraft('');
+    if (!c.dislikes.includes(w)) void saveDislikes([...c.dislikes, w]);
+  };
   const [dayType, setDayType] = useState<'training' | 'rest' | 'off'>('off');
   const [dayInfo, setDayInfo] = useState(false);
   // The head's info control. See the SCREEN_HELP import.
@@ -901,8 +913,8 @@ export default function Nutrition() {
   const coachOverride = useMemo(() => (coachPlanCurrent && coachDay != null
     ? planDayOverride(coachPlan!, coachDay)
     : (coachAdjust?.mealOverride ?? {})), [coachPlanCurrent, coachDay, coachPlan, coachAdjust]);
-  const input = useMemo(() => ({ id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...coachOverride, ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, energyPlan }),
-    [c.id, w, bf, c.activity, c.goal, diet, c.mealsPerDay, coachOverride, override, cyclingAdjust, c.avoid, energyPlan]);
+  const input = useMemo(() => ({ id: c.id, weightKg: w, bodyFatPct: bf, activity: c.activity, goal: c.goal, diet, mealsPerDay: c.mealsPerDay, mealOverride: { ...coachOverride, ...override }, coachAdjust: cyclingAdjust, avoid: c.avoid, dislikes: c.dislikes, energyPlan }),
+    [c.id, w, bf, c.activity, c.goal, diet, c.mealsPerDay, coachOverride, override, cyclingAdjust, c.avoid, c.dislikes, energyPlan]);
   const { plan, target, tot } = useMemo(() => buildPlan(input), [input]);
   // Snacks are ideas, not plan slots: they do not move the targets or the
   // macro split above, because a snack nobody has eaten yet is not a
@@ -1059,15 +1071,15 @@ export default function Nutrition() {
     const size = catalogSize(diet, slotSel, c.avoid);
     const stride = Math.max(1, Math.floor(size / 8));
     const raw = q
-      ? searchMeals(diet, slotSel, q, 60, c.avoid)
-      : Array.from({ length: 8 }, (_, i) => mealAt(diet, slotSel, (lead.idx + stride * (i + 1) + i * 7) % size, c.avoid));
+      ? searchMeals(diet, slotSel, q, 60, c.avoid, c.dislikes)
+      : Array.from({ length: 8 }, (_, i) => mealAt(diet, slotSel, dislikeFreeIndex(diet, slotSel, (lead.idx + stride * (i + 1) + i * 7) % size, c.avoid, c.dislikes), c.avoid));
     const seen = new Set<string>([lead.n.split(' — ')[0]]);
     return raw
       .filter((m) => { const base = m.n.split(' — ')[0]; if (m.idx === lead.idx || seen.has(base)) return false; seen.add(base); return true; })
       .slice(0, 12)
       .map((m) => ({ ...m, pos: lead.pos, servings: lead.servings,
         K: Math.round(m.k * lead.servings), P: Math.round(m.p * lead.servings), C: Math.round(m.c * lead.servings), F: Math.round(m.f * lead.servings) }));
-  }, [genSlotMeals, slotSel, mealQuery, diet, c.avoid]);
+  }, [genSlotMeals, slotSel, mealQuery, diet, c.avoid, c.dislikes]);
   // A position the member has put a recipe in is not showing the coach's pick,
   // whatever the override maps say: the row under the label would be the
   // member's own choice with the coach's name on it.
@@ -1086,7 +1098,7 @@ export default function Nutrition() {
     // already gated above: nothing on this board draws until `c.avoid` is
     // known, so this is the member's real list and never an empty stand-in.
     if (!Number.isInteger(idx) || idx < 0) return;
-    setOverride({ ...override, [pos]: swapIndex(diet, slot, idx, c.avoid) });
+    setOverride({ ...override, [pos]: swapIndex(diet, slot, idx, c.avoid, c.dislikes) });
   };
   // ── the recipe search, and only when asked ─────────────────────────────
   //
@@ -1110,8 +1122,10 @@ export default function Nutrition() {
     ? { slot: slotSel, diet, avoid: c.avoid, query: mealQuery, targetKcal: Math.round(recipeLead.K / 50) * 50, number: 8 }
     : null);
   const found = recipeSearchOpen ? recipes.result : null;
+  // Spoonacular is sent the allergens (`c.avoid`, the union); dislikes are
+  // applied here, to what came back, and give way when nothing would be left.
   const recipeRows: PlannedRecipe[] = recipeLead && found && (found.status === 'ready' || found.status === 'partial')
-    ? found.meals
+    ? preferNotDisliked(found.meals, c.dislikes).rows
       // The hook keeps its last answer while the next one is out, so the rows
       // dim rather than flash away. Across a change of SLOT that answer is for
       // another meal of the day, and is not drawn under this one at all.
@@ -1197,6 +1211,12 @@ export default function Nutrition() {
   const gapNote = useMemo(
     () => allergenGapNote(planGaps(diet, slotsFor(c.mealsPerDay), c.avoid)),
     [diet, c.mealsPerDay, c.avoid],
+  );
+  // The dislikes that had to be relaxed. A preference, so it is said in the
+  // ordinary warning tone and never in the allergen one.
+  const dislikeNote = useMemo(
+    () => dislikeGapNote(dislikeGaps(diet, slotsFor(c.mealsPerDay), c.avoid, c.dislikes)),
+    [diet, c.mealsPerDay, c.avoid, c.dislikes],
   );
   // Which of the excluded things are actually in the week the list is built
   // from. `gapNote` says the filter could not be honoured; this says what ended
@@ -1778,6 +1798,11 @@ export default function Nutrition() {
               <Flag tone={t.crit}>{gapNote}</Flag>
             </View>
           ) : null}
+          {dislikeNote ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Flag tone={t.warn}>{dislikeNote}</Flag>
+            </View>
+          ) : null}
           {/* The catalogue wraps. Said here rather than letting the same dinner
               arrive twice unannounced — see `horizonRepeats`. */}
           {horizonRepeats ? (
@@ -2277,8 +2302,8 @@ export default function Nutrition() {
               </View>
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Anything to Avoid</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-              {ALLERGENS.map((al) => { const on = c.avoid.includes(al.id); return (
-                <Pressable key={al.id} onPress={() => c.setAvoid(on ? c.avoid.filter((x) => x !== al.id) : [...c.avoid, al.id])}
+              {ALLERGENS.map((al) => { const on = c.ownAvoid.includes(al.id); return (
+                <Pressable key={al.id} onPress={() => c.setOwnAvoid(on ? c.ownAvoid.filter((x) => x !== al.id) : [...c.ownAvoid, al.id])}
                   accessibilityRole="button" accessibilityState={{ selected: on }}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.surface3 : t.surface2 }}>
                   {on ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} /> : null}
@@ -2286,6 +2311,50 @@ export default function Nutrition() {
                 </Pressable>
               ); })}
             </View>
+            {/* What their coach recorded for them, shown so nothing is kept
+                out of their meals on their behalf without them seeing it. Not
+                tappable: it is the coach's note, and the coach's to correct. */}
+            {c.coachAvoid.length ? (
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Noted by Your Coach</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                  {c.coachAvoid.map((a) => (
+                    <View key={a} accessible accessibilityLabel={`${ALLERGENS.find((x) => x.id === a)?.label ?? a}, noted by your coach`}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: t.surface3 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                      <Text style={{ ...ty.label, ...font('500'), color: t.ink }}>{ALLERGENS.find((x) => x.id === a)?.label ?? a}</Text>
+                    </View>
+                  ))}
+                </View>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Your coach added these from what you told them. They are kept out of your meals along with your own. Ask your coach if one is wrong.</Text>
+              </View>
+            ) : null}
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: sp.sm }}>Foods You Dislike</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Left out of your meals where there is another option. Not an allergy: if a meal can only be made with one, it stays in and we tell you.</Text>
+            {c.dislikes.length ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.sm }}>
+                {c.dislikes.map((w) => (
+                  <Pressable key={w} onPress={() => { void saveDislikes(c.dislikes.filter((x) => x !== w)); }}
+                    accessibilityRole="button" accessibilityLabel={`Remove ${w}`}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
+                    <Text style={{ ...ty.label, color: t.ink }}>{w}</Text>
+                    <Icon name="minus" size={12} color={t.ink3} />
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'center' }}>
+              <TextInput value={dislikeDraft} onChangeText={setDislikeDraft} placeholder="e.g. mushrooms" placeholderTextColor={t.ink3}
+                accessibilityLabel="Add a food you dislike" returnKeyType="done" autoCorrect={false} autoCapitalize="none"
+                onSubmitEditing={addDislike}
+                style={{ ...ty.body, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
+              <Pressable onPress={addDislike} disabled={!normaliseDislike(dislikeDraft)}
+                accessibilityRole="button" accessibilityLabel="Add dislike"
+                style={{ paddingHorizontal: sp.lg, paddingVertical: 10, borderRadius: radius.pill, backgroundColor: normaliseDislike(dislikeDraft) ? t.brand : t.surface2 }}>
+                <Text style={{ ...ty.label, ...font('600'), color: normaliseDislike(dislikeDraft) ? t.brandInk : t.ink3 }}>Add</Text>
+              </Pressable>
+            </View>
+            {dislikeError ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{dislikeError}</Flag> : null}
             </View>
           ) : null}
           {/* ── the one write on this screen that can fail in silence ────────
