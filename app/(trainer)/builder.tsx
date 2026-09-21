@@ -50,7 +50,7 @@ import { addSetRow, expandSets, hasSetRows, patchSetRow, removeSetRow, setCount,
 import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
-import { Rule, Section, SectionHead, ListRow, PageHead, ChipGrid, Cta, Ghost, Flag, Notice, PartialRead, Meter, Segmented, type Segment, type Tone } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ListRow, PageHead, ChipGrid, Cta, Ghost, Flag, Notice, PartialRead, Meter, Segmented, HeroCard, HeroRing, type Segment, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, fontScale, type as ty, font, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
@@ -2621,6 +2621,50 @@ export default function Builder() {
           subtitle={client ? `Building for ${client.name}` : 'Your own draft, nobody chosen yet'}
           leading={cameFrom ? undefined : null} onBack={goBack}
           trailing={<Ghost icon="search" onPress={() => router.push('/(trainer)/explore')} a11yLabel="Search every screen" />} />
+
+        {/* ── the hero: the program on the bench, and who is on one ───────
+            The words are the builder's own state, so they are always true.
+            The ring is a READ: coach-assigned programs over the roster. It is
+            a figure only when both reads are whole; under 'partial' the roster
+            is the page that came back and the count would be a share of a
+            guess, so the ring shows a dash and the line under says why. The
+            one action is the next thing that keeps work: save a draft that has
+            exercises, or start from a template when the builder is empty. */}
+        {(() => {
+          const whole = rosterStatus === 'ready' && programStatus === 'ready';
+          const reading = rosterStatus === 'loading' || programStatus === 'loading';
+          const onCount = whole ? roster.filter((c) => !!getProgram(c.id)).length : null;
+          const ringFor = whole && roster.length > 0;
+          const readLine = whole
+            ? (roster.length ? null : 'No clients on your book yet, so nobody is on a program.')
+            : reading
+              ? 'Reading who is on a program…'
+              : 'Who is on a program could not be read, so no count is shown.';
+          return (
+            <HeroCard
+              eyebrow="PROGRAM BUILDER"
+              title={title.trim() || (hasDraft ? 'Untitled Program' : 'New Program')}
+              meta={blockExercises
+                ? `${num(blockWeeks.length)} week${s(blockWeeks.length)} · ${num(blockExercises)} exercise${s(blockExercises)}${client ? ` · for ${client.name.split(' ')[0]}` : ''}`
+                : 'Nothing in the builder yet'}
+              ring={ringFor || !whole ? (
+                <HeroRing
+                  value={ringFor && onCount != null ? onCount / roster.length : null}
+                  figure={ringFor && onCount != null ? num(onCount) : null}
+                  sub={ringFor ? `of ${num(roster.length)} on a program` : reading ? 'reading' : 'not read'}
+                  spoken={ringFor && onCount != null
+                    ? `${num(onCount)} of ${num(roster.length)} clients on a program you assigned`
+                    : reading ? 'Reading who is on a program' : 'Who is on a program could not be read'} />
+              ) : undefined}
+              cta={blockExercises
+                ? { label: 'Save as Template', onPress: () => { setTplName(tplName || title); setSaveOpen(true); } }
+                : { label: 'Start From a Template', onPress: () => setTplPick(true) }}>
+              {readLine ? (
+                <Text style={{ ...ty.caption, color: t.nightInk2, marginTop: sp.md }}>{readLine}</Text>
+              ) : null}
+            </HeroCard>
+          );
+        })()}
 
         {/* ── everything else that is "building" ───────────────────────────
             Programs led to three destinations while Videos held a whole tab

@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import type { Theme, DataHue } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Flag, Field, Notice, AttentionRow, SyncBadge, TonedChip, IconPlate, DayBars, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, KpiRow, Cta, Ghost, Flag, Field, Notice, AttentionRow, SyncBadge, TonedChip, IconPlate, DayBars, HeroCard, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, font } from '../../src/theme/scale';
 import { insideNoticeWindow, feeAmountLine, unstatedCurrencyCoach, noticeLabel, openSlotWindow, slotWindowLine, weeklyFromSlots, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
 // "I work Tuesdays 7 to 7", said once instead of forty-eight times. See that
@@ -3009,6 +3009,42 @@ export default function TrainerSchedule() {
         <PageHead title="Calendar"
           leading={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />}
           trailing={<Ghost icon="plus" a11yLabel="Add a Session" onPress={() => { setAddClient(null); setAddOpen(true); }} />} />
+
+        {/* ── the hero: today, and the next session ───────────────────────
+            Counted only under a WHOLE read, for the reason at the top of this
+            component: `useSessions` returns an empty list for "nothing booked"
+            and for "not read" alike, and under 'partial' the rows are real but
+            not all of them. So 'ready' states a count, 'partial' says what was
+            seen and that there may be more, and 'loading' and 'error' say so
+            in words, never "No Sessions Today" over a diary this did not read.
+            The one action is the diary's own: add a session, or read again
+            when the read failed. */}
+        {(() => {
+          const nowMs = now.getTime();
+          const todays = booked.filter((x) => dayKey(x.startsAt) === todayKey)
+            .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+          const next = booked.filter((x) => Date.parse(x.startsAt) > nowMs)
+            .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
+          const n = todays.length;
+          const nextLine = next
+            ? `${countable ? 'Next' : 'Next seen'}: ${nameOf(next.clientId)} at ${timeLabel(next.startsAt)}${dayKey(next.startsAt) === todayKey ? '' : `, ${dateLabel(next.startsAt)}`}`
+            : null;
+          const title = sessionsStatus === 'loading' ? 'Reading Your Diary'
+            : sessionsStatus === 'error' ? 'Today Could Not Be Read'
+            : sessionsStatus === 'partial' ? 'Today Is Only Partly Read'
+            : n === 0 ? 'No Sessions Today' : `${num(n)} Session${n === 1 ? '' : 's'} Today`;
+          const meta = sessionsStatus === 'loading' ? 'Today’s sessions are still loading.'
+            : sessionsStatus === 'error' ? 'Your sessions did not come back. It does not mean the day is empty.'
+            : sessionsStatus === 'partial'
+              ? `${n ? `${num(n)} seen so far. ` : ''}Some sessions did not come back, so there may be more.${nextLine ? ` ${nextLine}` : ''}`
+              : nextLine ?? 'Nothing booked ahead.';
+          return (
+            <HeroCard eyebrow={`TODAY · ${dateOfLabel(now).toUpperCase()}`} title={title} meta={meta}
+              cta={sessionsStatus === 'error'
+                ? { label: 'Try Reading Again', onPress: () => { refresh(); } }
+                : { label: 'Add a Session', onPress: () => { setAddClient(null); setAddOpen(true); } }} />
+          );
+        })()}
         <View style={{ height: sp.md }} />
 
         {/* ── month grid ─────────────────────────────────────────────────── */}
