@@ -1863,7 +1863,7 @@ export default function Nutrition() {
               { key: 'month', label: 'This Month' },
             ]} />
           <View style={{ marginBottom: sp.md }}>
-            <Cta label="Build My Plan" wide onPress={() => setBuildOpen(true)} />
+            <Cta label="Build My Meal Plan" wide onPress={() => setBuildOpen(true)} />
           </View>
 
           {/* An exclusion the engine could not honour, said before the plan
@@ -2724,7 +2724,7 @@ export default function Nutrition() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '86%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30, gap: sp.xl }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <View>
-              <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink }}>Build My Plan</Text>
+              <Text accessibilityRole="header" style={{ ...ty.title, color: t.ink }}>Build My Meal Plan</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
                 Meals are made to your {num(target.kcal)} kcal target{coachAdjust ? ', as your coach set it' : ''}. Choose below; every change applies straight away.
               </Text>
