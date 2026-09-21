@@ -137,35 +137,31 @@ const YOGURT: FoodFacts = { name: 'Greek Yogurt', kcal: 133, protein: 10, carbs:
  * where a quiet failure is least acceptable.
  */
 {
-  // Soy on a vegan breakfast is the live one: every component of a required
-  // pool for that diet carries soy, so the exclusion cannot be honoured. The
-  // slot is served EMPTY and the member is told which and why, rather than
-  // quietly (or loudly) served soy.
-  const soyGaps = poolGaps('vegan', 'Breakfast', ['soy']);
-  ok(soyGaps.length > 0, 'an exclusion that empties a required pool is reported');
-  const note = allergenGapNote([{ slot: 'Breakfast', allergens: soyGaps }])!;
-  ok(/no breakfast in your plan/i.test(note) && /soy/.test(note), 'and the sentence names the empty slot and the allergen');
+  // Soy on a vegan breakfast WAS the live one: every vegan breakfast base is
+  // tofu or soy milk. Since 21 Sep 2026 a soy-free fallback base fills it, so
+  // no diet and exclusion leaves a slot empty. The empty-slot path is still
+  // the safety net should one ever reappear, so its sentence is still pinned.
+  eq(poolGaps('vegan', 'Breakfast', ['soy']).length, 0, 'a vegan avoiding soy now has breakfasts');
+  const note = allergenGapNote([{ slot: 'Breakfast', allergens: ['soy'] }])!;
+  ok(/no breakfast in your plan/i.test(note) && /soy/.test(note), 'an empty slot, if one ever appears, is named with its allergen');
   ok(!/still contains/.test(note), 'and never says the plan contains it');
 
   eq(allergenGapNote([]), null, 'a filter that was honoured says nothing at all');
   eq(poolGaps('meat', 'Lunch', []).length, 0, 'excluding nothing cannot fail');
   eq(poolGaps('meat', 'Lunch', ['shellfish']).length, 0,
     'and an exclusion the pools can absorb is not reported — there is plenty of meat that is not a prawn');
-  eq(poolGaps('vegan', 'Lunch', ['soy']).length, 0,
-    'nor is the same exclusion in a slot that CAN honour it: the report is per slot, not per diet');
+  eq(emptySlots('vegan', slotsFor(3), ['soy']).length, 0, 'and the day has no empty slot');
 
-  const day = emptySlots('vegan', slotsFor(3), ['soy']);
-  eq(day.map((e) => e.slot).join(), 'Breakfast', 'the day-level check names the slot that could not be made');
-
-  // The per-meal half: no breakfast is generated with soy in it, at any index.
-  let flagged = 0, empty = 0;
+  // The per-meal half: no breakfast is generated with soy in it, at any index,
+  // and every one is a real, filled meal.
+  let flagged = 0, filled = 0;
   for (let i = 0; i < 40; i++) {
     const m = mealAt('vegan', 'Breakfast', i, ['soy']);
     if (mealAllergens(m, ['soy']).length) flagged++;
-    if (m.unfillable?.length && !m.ing.length) empty++;
+    if (!m.unfillable?.length && m.ing.length) filled++;
   }
   eq(flagged, 0, 'no generated breakfast contains the excluded allergen');
-  eq(empty, 40, 'every one of them is the empty, named slot instead');
+  eq(filled, 40, 'every one of them is a real breakfast from the soy-free bases');
   eq(mealAllergens({ n: 'Grilled chicken with rice', ing: [['Chicken breast', 180, 'g', 'Meat & Seafood']] }, ['dairy']).length, 0,
     'a dish without it is not marked');
   eq(allergenLabel('dairy'), 'dairy', 'and the label reads as prose mid-sentence');

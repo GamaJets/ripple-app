@@ -57,6 +57,11 @@ const PHOTOS: Record<string, ImageSourcePropType> = {
   'chickpeas': require('../../assets/meals/chickpeas.jpg'),
   'lentils': require('../../assets/meals/lentils.jpg'),
   'edamame': require('../../assets/meals/edamame.jpg'),
+  // The soy-free breakfast fallbacks, on their nearest dish type's photo.
+  'oat-milk overnight oats': require('../../assets/meals/overnight-oats.jpg'),
+  'coconut chia pudding': require('../../assets/meals/chia-pudding.jpg'),
+  'fruit & seed bowl': require('../../assets/meals/greek-yogurt-bowl.jpg'),
+  'chickpea-flour scramble': require('../../assets/meals/tofu-scramble.jpg'),
 };
 
 /** The dish type's photo, or null to keep the emoji. */

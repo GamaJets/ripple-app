@@ -483,36 +483,30 @@ ok(searchMeals('meat', 'Dinner', 'pemmican', 40, []).length === 0,
   ok(searchMeals('meat', 'Dinner', 'salmon', 20, [], ['salmon']).length > 0, 'unless that is what they searched for');
 }
 
-/* ── a slot their allergens leave empty ──────────────────────────────────── */
+/* ── a vegan avoiding soy gets a full week ─────────────────────────────── */
 //
-// A vegan client avoiding soy has no breakfast the catalogue can make (every
-// vegan breakfast base is tofu or soy milk). The coach's week sends that slot
-// EMPTY, the coach is told which slot and why beside Send, and the plan still
-// round-trips and still sends: the empty slot is safe, the rest is worth having.
+// Until 21 Sep 2026 this client had no breakfast the catalogue could make
+// (every vegan base was tofu or soy milk) and the slot went out EMPTY. The
+// soy-free fallback bases fill it now, so the week is whole and nobody is told
+// about an empty slot. The empty-slot sentence itself is still pinned in
+// src/lib/foodLogging.test.ts, as the net should a gap ever reappear.
 {
   const soyFree = client({ diet: 'vegan', avoid: ['soy'] });
   const plan = seedPlan(soyFree, WRITTEN);
-  ok(plan.days.every((d) => d.meals[0].slot === 'Breakfast' && d.meals[0].k === 0 && /without soy/.test(d.meals[0].n)),
-    'every day of the seeded week carries the empty, named breakfast');
-  ok(plan.days.every((d) => d.meals.slice(1).every((m) => m.k > 0)), 'and a real meal in every other slot');
-  ok(parsePlan(JSON.parse(JSON.stringify(plan))) !== null, 'a plan with an empty slot survives being stored and read back');
+  ok(plan.days.every((d) => d.meals.every((m) => m.k > 0 && !/without soy/.test(m.n))), 'every slot of every day carries a real meal');
+  ok(plan.days.every((d) => !/tofu|soy/i.test(d.meals[0].n)), 'and no breakfast is made of soy');
+  ok(parsePlan(JSON.parse(JSON.stringify(plan))) !== null, 'the plan survives being stored and read back');
   eq(planStale(plan, 'vegan', ['soy'], 4).stale, false, 'and is current against the client it was written for');
-  const line = planEmptySlotsLine('vegan', 4, ['soy'], 'Sam');
-  ok(!!line && /Sam's breakfast reaches them empty/.test(line) && /soy/.test(line) && /Pin a recipe/.test(line),
-    'the coach is told which slot, which allergen, and what to do');
-  ok(!/\u2014/.test(line ?? ''), 'with no em dash');
-  eq(planEmptySlotsLine('vegan', 4, ['dairy'], 'Sam'), null, 'and told nothing when every slot has a meal');
-  eq(guardPlan('ready', 'ready', planStale(plan, 'vegan', ['soy'], 4), 'Sam').allowed, true, 'sending is not withheld over it');
-  // Written before the soy was disclosed: the breakfast they chose now
-  // resolves to the empty slot, and the coach is told the plan has moved.
+  eq(planEmptySlotsLine('vegan', 4, ['soy'], 'Sam'), null, 'the coach is told of no empty slot, because there is none');
+  eq(guardPlan('ready', 'ready', planStale(plan, 'vegan', ['soy'], 4), 'Sam').allowed, true, 'sending is allowed');
+  // Written before the soy was disclosed: the tofu breakfasts are now soy-free
+  // ones, and the coach is told the plan has moved.
   const before = seedPlan(client({ diet: 'vegan', avoid: [] }), WRITTEN);
   const after = planStale(before, 'vegan', ['soy'], 4);
   ok(after.stale && after.addedAvoid.includes('soy'), 'a soy disclosure after the plan was written makes it stale');
-  ok(after.diverged.some((d) => d.slot === 'Breakfast' && /without soy/.test(d.now)), 'and names the breakfast that is now empty');
-  // The coach's builder, on this client: the served plates aim at their share.
+  ok(after.diverged.some((d) => d.slot === 'Breakfast'), 'and names the breakfasts that changed');
   const built = buildPlan({ ...soyFree, mealOverride: planDayOverride(plan, 0) });
-  ok(built.plan[0].unfillable?.includes('soy') === true, 'the builder draws the empty breakfast');
-  ok(built.aim < built.target.kcal && built.tot.K < built.target.kcal, 'and does not total the day as if it were full');
+  ok(!built.plan[0].unfillable?.length && built.plan[0].k > 0, 'the builder draws a real breakfast');
 }
 
 /* ── protein is chosen, not only disclosed ─────────────────────────────── */
@@ -618,11 +612,10 @@ ok(searchMeals('meat', 'Dinner', 'pemmican', 40, []).length === 0,
   const soyFree = client({ diet: 'vegan', avoid: ['soy'], mealsPerDay: 4 });
   const built = buildPlan(soyFree);
   const share = built.aim / built.target.kcal;
-  ok(share < 1, 'a vegan avoiding soy serves three of four slots');
+  eq(share, 1, 'a vegan avoiding soy is served every slot now');
   const note = planProteinNote(built.tot.P, built.target.protein, share);
   const vsServed = Math.abs(built.tot.P / (built.target.protein * share) - 1);
   eq(note === null, vsServed < 0.1, 'the note is judged against what the served meals should carry');
-  if (note) ok(/empty slot/.test(note), 'and says the empty slot is why the aim is lower');
   // The whole-day figure is what the old note read against: an empty
   // breakfast made every such day look short of protein, with "swap a meal"
   // as the advice.

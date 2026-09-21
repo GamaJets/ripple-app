@@ -12,7 +12,7 @@
 // NOT dairy, and everything that genuinely is dairy still is. A matcher that
 // stopped flagging butter would be a far worse bug than the one being fixed.
 import {
-  ALLERGENS, allergenGapNote, mealAllergens, mealRowSpoken, emptySlots, poolGaps,
+  ALLERGENS, usesFallback, allergenGapNote, mealAllergens, mealRowSpoken, emptySlots, poolGaps,
   catalogSize, mealAt, buildPlan, planWeek, groceryFromWeek, swapIndex, searchMeals, catalogRepeatDay, slotsFor,
   dislikeFreeIndex, dislikeGapNote, dislikeGaps, excludedAllergens, mealDislikes, preferNotDisliked,
   readAllergenColumn, readDislikes, textDislikes, variantStep,
@@ -182,16 +182,12 @@ eq(allergenGapNote(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack']
   }
   ok(served > 100000, 'the sweep actually generated meals');
   eq(unsafe, 0, 'no generated meal contains an excluded allergen, in any diet, slot or combination');
-  // Pork (added 21 Sep 2026) doubles the combinations and never empties a slot:
-  // every one of the 76 is simply counted twice, with and without it.
-  eq(empty, 152, 'and 152 of the 2,560 combinations have no safe meal to serve');
-  eq([...emptyAt].sort().join(','), 'keto/Breakfast,meat/Breakfast,paleo/Breakfast,vegan/Breakfast,vegetarian/Breakfast',
-    'every one of them a breakfast');
-  // The member's own sentence for the common one.
-  eq(mealAt('vegan', 'Breakfast', 0, ['soy']).n, 'No breakfast we can make without soy', 'a vegan avoiding soy is told why');
-  eq(poolGaps('vegan', 'Breakfast', ['dairy', 'soy']).join(), 'soy', 'and dairy is not blamed for what soy did');
-  eq(poolGaps('meat', 'Breakfast', ['dairy', 'gluten', 'shellfish', 'egg']).join(), 'dairy,gluten,egg',
-    'a combination names the ones that fail together and not the bystander');
+  // There were 76 empty combinations here (152 with pork), every one a
+  // breakfast. The soy-free fallback bases (21 Sep 2026) fill all of them.
+  eq(empty, 0, 'no combination of diet and exclusions leaves a slot with no safe meal');
+  eq(emptyAt.size, 0, 'not even a breakfast');
+  ok(!/^No breakfast/.test(mealAt('vegan', 'Breakfast', 0, ['soy']).n), 'a vegan avoiding soy is served a real breakfast');
+  eq(poolGaps('meat', 'Breakfast', ['dairy', 'gluten', 'shellfish', 'egg']).length, 0, 'and so is a meat-eater avoiding dairy, gluten and egg');
 }
 
 /* ── no stored index changes meaning ──────────────────────────────────────── */
@@ -212,7 +208,9 @@ eq(allergenGapNote(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack']
   const mix = (str: string) => { for (let j = 0; j < str.length; j++) { h ^= str.charCodeAt(j); h = Math.imul(h, 16777619) >>> 0; } };
   for (const d of DIETS) for (const s of SLOTS) for (let m = 0; m < 64; m++) {
     const av = ids.filter((_, i) => (m >> i) & 1);
-    if (poolGaps(d, s, av).length) continue;
+    // A catalogue that only exists thanks to a fallback pool held no stored
+    // meals before, so it is outside what this digest pins.
+    if (poolGaps(d, s, av).length || usesFallback(d, s, av)) continue;
     combos++;
     const size = catalogSize(d, s, av);
     mix(`${d}/${s}/${m}:${size};`);
@@ -237,55 +235,35 @@ eq(allergenGapNote(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack']
   eq(h.toString(16), '7f2e797c', 'and every one of them decodes its indices exactly as before');
 }
 
-/* ── an empty slot, all the way down ──────────────────────────────────────── */
+/* ── the slot that used to be empty, all the way down ──────────────────── */
+//
+// A vegan avoiding soy had an EMPTY breakfast through the builder, the week,
+// the shopping list and the swap sheet. It is filled now, by the fallback
+// bases, and every one of those places serves a real, soy-free breakfast.
 {
-  const same = (a: unknown, b: unknown, msg: string) => eq(JSON.stringify(a), JSON.stringify(b), msg);
   const input = {
     id: 'u-vegan-soy', weightKg: 64, bodyFatPct: 26, activity: 1.5, goal: 'fatloss' as const,
     diet: 'vegan' as Diet, mealsPerDay: 4 as const, avoid: ['soy'] as Allergen[],
   };
-  const full = buildPlan({ ...input, avoid: [] });
   const built = buildPlan(input);
-  const empty = built.plan.filter((m) => m.unfillable);
-  eq(empty.length, 1, 'a vegan avoiding soy has one empty slot');
-  eq(empty[0].slot, 'Breakfast', 'and it is breakfast');
-  eq(empty[0].K, 0, 'which carries no calories');
-  eq(empty[0].servings, 0, 'and no servings');
-  ok((empty[0].slotKcal ?? 0) > 0, 'but knows its share, for a recipe put in it');
-  eq(built.tot.K, built.plan.reduce((a, m) => a + m.K, 0), 'the day total is the meals actually served');
-  ok(built.aim < built.target.kcal, 'and the served meals aim at their share, not the whole day');
-  ok(Math.abs(built.tot.K - built.aim) < Math.abs(built.tot.K - built.target.kcal), 'so the total does not read as a full day');
-  eq(full.aim, full.target.kcal, 'a full day still aims at the whole target');
-  same(built.plan.filter((m) => !m.unfillable).map((m) => mealAllergens(m, ['soy']).length), [0, 0, 0], 'and nothing served has soy in it');
-  same(emptySlots('vegan', slotsFor(4), ['soy']), [{ slot: 'Breakfast', allergens: ['soy'] }], 'the screen is told which slot and why');
-
-  // A week, a month, and the shopping for them.
+  eq(built.plan.filter((m) => m.unfillable).length, 0, 'a vegan avoiding soy has no empty slot');
+  eq(built.aim, built.target.kcal, 'so the day aims at the whole target');
+  ok(built.plan.every((m) => mealAllergens(m, ['soy']).length === 0), 'and nothing served has soy in it');
+  eq(emptySlots('vegan', slotsFor(4), ['soy']).length, 0, 'the screen is told of no empty slot');
   const week = planWeek(input, undefined, 7);
-  ok(week.every((day) => day[0].unfillable && day[0].ing.length === 0), 'every day of the week has the same empty breakfast');
+  ok(week.every((day) => !day[0].unfillable && day[0].ing.length > 0), 'every day of the week has a real breakfast');
   const groc = groceryFromWeek(week);
   const items = [...Object.values(groc.byDept).flat(), ...groc.cupboard].map((g) => g!.item.toLowerCase());
-  ok(!items.some((i) => /^no /.test(i)) && [...Object.values(groc.byDept).flat(), ...groc.cupboard].every((g) => g!.qty > 0),
-    'and the empty slot is not a line on it, nor a zero');
   ok(!items.some((i) => /tofu|soy/.test(i)), 'the grocery list buys no soy');
-  eq(groc.mealCount, new Set(week.flat().filter((m) => !m.unfillable).map((m) => m.n)).size, 'and counts only meals that are served');
-  eq(planWeek(input, undefined, 30).length, 30, 'a month plans through an empty slot without failing');
-  eq(catalogRepeatDay('vegan', 'Breakfast', ['soy']), Infinity, 'an empty slot never repeats');
-
-  // Swapping into and out of it.
-  eq(swapIndex('vegan', 'Breakfast', 12, ['soy']), 12, 'swapping an empty slot keeps its pick rather than crashing');
-  ok(Number.isInteger(swapIndex('vegan', 'Breakfast', 12, ['soy'], ['banana'])), 'with dislikes too');
-  same(searchMeals('vegan', 'Breakfast', '', 40, ['soy']), [], 'there is nothing to search in it');
-  same(searchMeals('vegan', 'Breakfast', 'oats', 40, ['soy'], ['banana']), [], 'nothing, with a query and dislikes');
-  // A pick stored before the member disclosed soy is served empty, and comes
-  // back as the same meal if the exclusion is ever lifted.
+  eq(planWeek(input, undefined, 30).length, 30, 'a month plans through');
+  ok(searchMeals('vegan', 'Breakfast', '', 40, ['soy']).length > 0, 'there are breakfasts to swap to');
+  // A breakfast stored before soy was disclosed is replaced by a soy-free one,
+  // and comes back as the same meal if the exclusion is ever lifted.
   const stored = buildPlan({ ...input, avoid: [], mealOverride: { 0: 123 } }).plan[0];
   const now = buildPlan({ ...input, mealOverride: { 0: 123 } }).plan[0];
-  ok(!!now.unfillable, 'a stored breakfast pick is not served over a soy exclusion');
-  eq(now.idx, 123, 'and the pick itself is untouched');
-  eq(buildPlan({ ...input, avoid: [], mealOverride: { 0: now.idx } }).plan[0].n, stored.n, 'so it means the same meal again without the exclusion');
+  ok(!now.unfillable && mealAllergens(now, ['soy']).length === 0, 'a stored breakfast pick is not served over a soy exclusion');
+  eq(buildPlan({ ...input, avoid: [], mealOverride: { 0: now.idx } }).plan[0].n, stored.n, 'and it means the same meal again without the exclusion');
 }
-
-
 
 /* ── a diet the union does not have ──────────────────────────────────────── */
 //

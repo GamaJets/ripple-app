@@ -52,8 +52,13 @@ eq(rows.filter((r) => /^eggs?$/i.test(r!.item)).length <= 1, true, 'eggs are one
 
 // An empty slot buys nothing: not a line, and not a zero.
 const soy: PlanInput = { id: 'v1', weightKg: 64, bodyFatPct: 26, activity: 1.5, goal: 'fatloss', diet: 'vegan', mealsPerDay: 4, avoid: ['soy'] };
-ok(buildPlan(soy).plan.some((m) => m.unfillable), 'the fixture has an empty slot');
-const soyList = groceryFromWeek(planWeek(soy));
+// No real plan has one since the soy-free breakfasts (21 Sep 2026), so the
+// empty slot is made here, shaped exactly as mealAt serves one.
+const emptied = planWeek(soy).map((day) => day.map((m, i) => (i === 0
+  ? { ...m, n: 'No breakfast we can make without soy', ing: [], steps: [], k: 0, p: 0, c: 0, f: 0, K: 0, P: 0, C: 0, F: 0, servings: 0, unfillable: ['soy' as const] }
+  : m)));
+ok(emptied.every((d) => d[0].unfillable), 'the fixture has an empty slot');
+const soyList = groceryFromWeek(emptied);
 const soyRows = [...Object.values(soyList.byDept).flat(), ...soyList.cupboard];
 ok(soyRows.every((r) => r!.qty > 0 && !/^no /i.test(r!.item)), 'an empty slot contributes no line and no zero');
 

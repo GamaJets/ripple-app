@@ -146,6 +146,12 @@ function poolFilter(pool: Comp[], avoid: Allergen[]): Comp[] {
   return pool.filter((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
 }
 
+/** Per slot, per dimension: the pool used only when the ordinary one is
+ *  emptied by the exclusions. See BREK_BASE_FALLBACK for why it is separate. */
+function fallbackPools(slot: Slot): (Comp[] | null)[] {
+  return slot === 'Breakfast' ? [BREK_BASE_FALLBACK, null, null, null] : [];
+}
+
 /** The component pools a slot draws one of each from, before any diet. */
 function slotPools(slot: Slot): Comp[][] {
   return slot === 'Breakfast' ? [BREK_BASE, BREK_TOP, BREK_BOOST, BREK_STYLE]
@@ -170,7 +176,10 @@ function slotPools(slot: Slot): Comp[][] {
  */
 export function poolGaps(diet: Diet, slot: Slot, avoid: Allergen[] = []): Allergen[] {
   if (!avoid.length) return [];
-  const pools = slotPools(slot).map((pool) => forDiet(pool, diet)).filter((pool) => pool.length);
+  // A dimension with a fallback is blocked only if its fallback is blocked too.
+  const fb = fallbackPools(slot);
+  const pools = slotPools(slot).map((pool, i) => forDiet(pool, diet).concat(fb[i] ? forDiet(fb[i]!, diet) : []))
+    .filter((pool) => pool.length);
   const blocks = (list: Allergen[]) => list.length > 0
     && pools.some((pool) => pool.every((cp) => componentAllergens(cp).some((a) => list.includes(a))));
   if (!blocks(avoid)) return [];
@@ -559,6 +568,20 @@ const BREK_BASE: Comp[] = [
   { n: 'avocado & eggs', ico: '🥑', k: 320, p: 15, c: 8, f: 26, ing: [['Avocado', 1, '', 'Fruits'], ['Eggs', 2, '', 'Dairy & Eggs']], step: 'Serve sliced avocado with the eggs.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
   { n: 'shakshuka', ico: '🍳', k: 260, p: 16, c: 12, f: 16, ing: [['Eggs', 2, '', 'Dairy & Eggs'], ['Tomato passata', 150, 'g', 'Pantry & Other']], step: 'Poach the eggs in spiced tomato sauce.', d: ['vegetarian', 'paleo', 'keto', 'meat'] },
 ];
+/**
+ * Breakfast bases used ONLY when every ordinary base is excluded for this
+ * diet: a vegan avoiding soy had no breakfast at all (every vegan base is tofu
+ * or soy milk). Never mixed into BREK_BASE, because a meal is a stored index
+ * into the filtered pools and a longer base pool would move every stored
+ * breakfast. A catalogue that could be built before draws nothing from here,
+ * so nothing stored changes (see `usesFallback` and the digest test).
+ */
+const BREK_BASE_FALLBACK: Comp[] = [
+  { n: 'oat-milk overnight oats', ico: '🥣', k: 250, p: 7, c: 46, f: 5, ing: [['Rolled oats', 60, 'g', 'Grains & Bread'], ['Oat milk', 200, 'ml', 'Pantry & Other']], step: 'Soak the oats in oat milk overnight.', d: ['vegan', 'vegetarian', 'meat'] },
+  { n: 'coconut chia pudding', ico: '🍮', k: 260, p: 6, c: 12, f: 21, ing: [['Chia seeds', 30, 'g', 'Nuts & Seeds'], ['Coconut milk', 200, 'ml', 'Pantry & Other']], step: 'Set the chia in coconut milk overnight.', d: ['vegan', 'vegetarian', 'keto', 'paleo', 'meat'] },
+  { n: 'fruit & seed bowl', ico: '🍓', k: 250, p: 9, c: 30, f: 12, ing: [['Mixed fruit', 200, 'g', 'Fruits'], ['Pumpkin seeds', 25, 'g', 'Nuts & Seeds']], step: 'Chop the fruit into a bowl and scatter the seeds.', d: ['vegan', 'vegetarian', 'paleo', 'meat'] },
+  { n: 'chickpea-flour scramble', ico: '🍳', k: 240, p: 13, c: 34, f: 4, ing: [['Chickpea flour', 60, 'g', 'Pantry & Other'], ['Spinach', 50, 'g', 'Vegetables']], step: 'Whisk the chickpea flour with water and scramble it with the spinach.', d: ['vegan', 'vegetarian', 'meat'] },
+];
 const BREK_TOP: Comp[] = [
   { n: 'berry',   ing: [['Mixed berries', 80, 'g', 'Fruits']], k: 45, p: 1, c: 10, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] },
   { n: 'banana',  ing: [['Banana', 1, '', 'Fruits']], k: 90, p: 1, c: 23, f: 0, d: ['meat', 'vegetarian', 'vegan', 'paleo'] },
@@ -648,7 +671,23 @@ export interface PlannedMeal extends GeneratedMeal {
 
 /** Component pools for a given diet + slot (mixed-radix dimensions). */
 function dims(diet: Diet, slot: Slot, avoid: Allergen[] = []): Comp[][] {
-  return slotPools(slot).map((arr) => poolFilter(forDiet(arr, diet), avoid));
+  const fb = fallbackPools(slot);
+  return slotPools(slot).map((arr, i) => {
+    const own = forDiet(arr, diet);
+    const kept = poolFilter(own, avoid);
+    // Only when exclusions emptied a pool the diet has: see BREK_BASE_FALLBACK.
+    return !kept.length && own.length && fb[i] ? poolFilter(forDiet(fb[i]!, diet), avoid) : kept;
+  });
+}
+
+/** Whether this catalogue draws on a fallback pool, i.e. it could not be built
+ *  before the fallbacks existed. Such catalogues hold no stored meals. */
+export function usesFallback(diet: Diet, slot: Slot, avoid: Allergen[] = []): boolean {
+  const fb = fallbackPools(slot);
+  return slotPools(slot).some((arr, i) => {
+    const own = forDiet(arr, diet);
+    return !!fb[i] && own.length > 0 && poolFilter(own, avoid).length === 0;
+  });
 }
 
 /** Number of distinct meals available for a diet + slot. Zero when the slot
