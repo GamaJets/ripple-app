@@ -1763,7 +1763,7 @@ export default function Nutrition() {
   );
   const dietPills = (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
-      {DIETS.map((d) => { const on = diet === d; return (
+      {[...DIETS].sort((x, y) => DIET_LABEL[x].localeCompare(DIET_LABEL[y])).map((d) => { const on = diet === d; return (
         <Pressable key={d} onPress={() => c.setDiet(d)}
           accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={DIET_LABEL[d]}
           style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
@@ -2903,23 +2903,23 @@ export default function Nutrition() {
               {dietPills}
             </View>
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>Cuisine</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>3 · Cuisine</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>For the real recipes in today’s plan and in Swap or Search. Pick any number.</Text>
               {cuisinePills}
             </View>
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>3 · Never Include</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>4 · Never Include</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Allergies, and anything you never eat, such as pork. Never in any meal, not even as a last resort.</Text>
               {avoidPills}
             </View>
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>4 · Rather Not Have</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: 2 }}>5 · Rather Not Have</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>Foods you just don’t like. Type any food. Left out when there is another choice, but may appear if nothing else fits.</Text>
               {dislikeEditor}
               {dislikeError ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{dislikeError}</Flag> : null}
             </View>
             <View>
-              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>5 · How Far Ahead</Text>
+              <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>6 · How Far Ahead</Text>
               <Segmented value={view} onChange={(v) => setView(v)}
                 options={[
                   { key: 'today', label: 'Today' },
