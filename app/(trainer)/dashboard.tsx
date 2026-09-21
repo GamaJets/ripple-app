@@ -2990,16 +2990,29 @@ export default function TrainerClients() {
               Every count is still a count OF THE ROSTER (`segN`) and dashes
               under anything but a whole read; a chip still selects then, it
               just cannot say how many. */}
-          <Segmented scroll style={{ marginBottom: sp.md }}
-            value={seg} onChange={setSeg}
-            options={[
+          {/* Chips that wrap, not a segment bar: there are up to six of these
+              plus a chip per tag, and squeezed into one bar they shrank to
+              unreadable or scrolled off the edge looking cut (seen 21 Sep 2026).
+              Same shape and selected fill as the status chips under them. */}
+          <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
+            {[
               ...AUTO_SEGS.filter((sg) => !sg.band).map((sg) => ({
                 key: sg.key,
                 label: `${sg.key === 'all' ? 'Active' : sg.label} · ${fig(sg.n)}`,
                 a11yLabel: `${sg.key === 'all' ? 'Active' : sg.label}, ${sg.n == null ? 'count not available' : num(sg.n)}`,
               })),
               ...allTags.map((tg) => ({ key: tg, label: `#${tg}`, a11yLabel: `Tag ${tg}` })),
-            ]} />
+            ].map((o) => {
+              const on = seg === o.key;
+              return (
+                <Pressable key={o.key} onPress={() => setSeg(o.key)} hitSlop={hitSlopFor(32)}
+                  accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={o.a11yLabel}
+                  style={{ minHeight: grown(32), paddingHorizontal: 14, borderRadius: grown(32) / 2, justifyContent: 'center', backgroundColor: on ? t.ink : t.surface3 }}>
+                  <Text style={{ ...ty.label, ...font('600'), ...numeric, color: on ? t.surface : t.ink2 }}>{o.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
           {bands ? (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.md }}>
               {[AUTO_SEGS[0], ...AUTO_SEGS.filter((sg) => sg.band)].map((sg) => {
