@@ -31,7 +31,7 @@ import { View, Text, ScrollView, Pressable, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, QuickRow, Notice, Card, Flag, HeroCard, HeroRing, Ring, MiniRing, DayBars, TonedChip, ChartShell, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, ScreenHeader, ListRow, Cta, Ghost, Notice, Card, Flag, HeroCard, HeroRing, Ring, MiniRing, DayBars, TonedChip, ChartShell, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, font, grown } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { num, fmtTime } from '../../src/lib/format';
@@ -1379,6 +1379,23 @@ export default function Home() {
               onPress={() => router.push('/(client)/trainers')} />
           ) : null}
 
+          {/* Sleep and the one booking action, as rows. They were a row of
+              four tiles under this card beside Meals and Progress, which are
+              tabs already (owner, 21 Sep 2026); the approved Home has no tile
+              row. The third goes to whichever this client actually has: a
+              session to book, a check-in to send, or their own report. */}
+          <ListRow icon="moon" tone="purple" title="Sleep" note="Last night and how recovered you are"
+            onPress={() => router.push('/(client)/recovery')} />
+          {booksSessions ? (
+            <ListRow icon="calendar" tone="blue" title="Book" note="Classes and sessions you can book"
+              onPress={() => router.push('/(client)/calendar')} />
+          ) : remoteCoached ? (
+            <ListRow icon="message" tone="blue" title="Check-In" note="Send your coach this week's update"
+              onPress={() => router.push('/(client)/checkin')} />
+          ) : (
+            <ListRow icon="chart" tone="blue" title="Report" note="Your training and body, on one page"
+              onPress={() => router.push('/(client)/report')} />
+          )}
           {/* The search control that was in the header, as a row: the mockup's
               header is the bell and the face. Same route. */}
           <ListRow icon="search" tone="neutral" title="Explore" note="Find anything in the app"
@@ -1386,27 +1403,6 @@ export default function Home() {
         </Section>
 
 
-
-        {/* ── the four things to do from here ──────────────────────────────
-            Below the first viewport, deliberately: the implementation brief
-            says no row of equal feature tiles above the fold — Meals and
-            Progress are tabs already, and the one action up there is the
-            goal card's. These are the quiet way to the rest. */}
-        <View style={{ marginTop: sp.md }}>
-          <QuickRow items={[
-            { icon: 'meals', label: 'Meals', onPress: () => router.push('/(client)/nutrition') },
-            { icon: 'moon', label: 'Sleep', onPress: () => router.push('/(client)/recovery') },
-            { icon: 'progress', label: 'Progress', onPress: () => router.push('/(client)/scans') },
-            // One slot, so it goes to whichever of the three this client
-            // actually has: a session to book, a check-in to send, or — with
-            // nobody to send it to — their own report.
-            booksSessions
-              ? { icon: 'calendar' as const, label: 'Book', onPress: () => router.push('/(client)/calendar') }
-              : remoteCoached
-                ? { icon: 'message' as const, label: 'Check-in', onPress: () => router.push('/(client)/checkin') }
-                : { icon: 'chart' as const, label: 'Report', onPress: () => router.push('/(client)/report') },
-          ]} />
-        </View>
 
       </ScrollView>
     </SafeAreaView>

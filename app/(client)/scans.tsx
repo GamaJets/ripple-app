@@ -1922,7 +1922,7 @@ export default function Scans() {
           {/* Named, so a reader knows which figure and which span the line is
               before touching it (owner, 21 Sep 2026). */}
           <Text accessibilityRole="header" style={{ ...ty.head, color: t.ink }}>
-            {progressMetric === 'weight' ? 'Weight' : 'Body Fat'} · {progressRange === '1M' ? 'Last Month' : progressRange === '3M' ? 'Last 3 Months' : progressRange === '6M' ? 'Last 6 Months' : 'Last Year'}
+            {progressMetric === 'weight' ? 'Weight' : 'Body Fat'} · {progressRange === '1M' ? 'Last 1 Month' : progressRange === '3M' ? 'Last 3 Months' : progressRange === '6M' ? 'Last 6 Months' : 'Last 1 Year'}
           </Text>
           <View style={{ marginTop: sp.sm }}>
             {progressTrendReads.length > 1 ? (
