@@ -79,11 +79,11 @@ export default function OwnerLayout() {
         sceneStyle: { backgroundColor: t.bg },
       }}
     >
-      <Tabs.Screen name="dashboard" options={{ title: 'Overview', tabBarIcon: ({ color, size }) => <Icon name="grid" size={size} color={color} /> }} />
-      <Tabs.Screen name="trainers" options={{ title: 'Trainers', tabBarIcon: ({ color, size }) => <Icon name="people" size={size} color={color} /> }} />
-      <Tabs.Screen name="brand" options={{ title: 'Brand', tabBarIcon: ({ color, size }) => <Icon name="palette" size={size} color={color} /> }} />
-      <Tabs.Screen name="growth" options={{ title: 'Growth', tabBarIcon: ({ color, size }) => <Icon name="trending" size={size} color={color} /> }} />
-      <Tabs.Screen name="ops" options={{ title: 'Ops', tabBarIcon: ({ color, size }) => <Icon name="wrench" size={size} color={color} /> }} />
+      <Tabs.Screen name="dashboard" options={{ title: 'Overview', tabBarIcon: ({ color, size }) => <Icon name="grid" size={size} color={color} duo /> }} />
+      <Tabs.Screen name="trainers" options={{ title: 'Trainers', tabBarIcon: ({ color, size }) => <Icon name="people" size={size} color={color} duo /> }} />
+      <Tabs.Screen name="brand" options={{ title: 'Brand', tabBarIcon: ({ color, size }) => <Icon name="palette" size={size} color={color} duo /> }} />
+      <Tabs.Screen name="growth" options={{ title: 'Growth', tabBarIcon: ({ color, size }) => <Icon name="trending" size={size} color={color} duo /> }} />
+      <Tabs.Screen name="ops" options={{ title: 'Ops', tabBarIcon: ({ color, size }) => <Icon name="wrench" size={size} color={color} duo /> }} />
       <Tabs.Screen name="members" options={{ href: null, title: 'Members' }} />
       <Tabs.Screen name="equipment" options={{ href: null, title: 'Equipment' }} />
       <Tabs.Screen name="library" options={{ href: null, title: 'Exercise Library' }} />

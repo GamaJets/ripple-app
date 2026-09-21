@@ -156,11 +156,11 @@ export default function ClientLayout() {
         sceneStyle: { backgroundColor: t.bg },
       }}
     >
-      <Tabs.Screen name="dashboard" options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Icon name="home" size={size} color={color} /> }} />
-      <Tabs.Screen name="workouts" options={{ title: 'Train', tabBarIcon: ({ color, size }) => <Icon name="train" size={size} color={color} /> }} />
-      <Tabs.Screen name="nutrition" options={{ title: 'Meals', tabBarIcon: ({ color, size }) => <Icon name="meals" size={size} color={color} /> }} />
-      <Tabs.Screen name="scans" options={{ title: 'Progress', tabBarIcon: ({ color, size }) => <Icon name="progress" size={size} color={color} /> }} />
-      <Tabs.Screen name="profile" options={{ title: 'Me', tabBarIcon: ({ color, size }) => <Icon name="me" size={size} color={color} /> }} />
+      <Tabs.Screen name="dashboard" options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Icon name="home" size={size} color={color} duo /> }} />
+      <Tabs.Screen name="workouts" options={{ title: 'Train', tabBarIcon: ({ color, size }) => <Icon name="train" size={size} color={color} duo /> }} />
+      <Tabs.Screen name="nutrition" options={{ title: 'Meals', tabBarIcon: ({ color, size }) => <Icon name="meals" size={size} color={color} duo /> }} />
+      <Tabs.Screen name="scans" options={{ title: 'Progress', tabBarIcon: ({ color, size }) => <Icon name="progress" size={size} color={color} duo /> }} />
+      <Tabs.Screen name="profile" options={{ title: 'Me', tabBarIcon: ({ color, size }) => <Icon name="me" size={size} color={color} duo /> }} />
       <Tabs.Screen name="messages" options={{ href: null, title: "Messages" }} />
       <Tabs.Screen name="devices" options={{ href: null, title: "Watch & Devices" }} />
       <Tabs.Screen name="foodlog" options={{ href: null, title: "Food Log" }} />

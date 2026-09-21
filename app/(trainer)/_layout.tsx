@@ -77,10 +77,10 @@ export default function TrainerLayout() {
           sceneStyle: { backgroundColor: t.bg },
         }}
       >
-        <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color, size }) => <Icon name="people" size={size} color={color} /> }} />
-        <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color, size }) => <Icon name="train" size={size} color={color} /> }} />
-        <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color, size }) => <Icon name="calendar" size={size} color={color} /> }} />
-        <Tabs.Screen name="money" options={{ title: 'Business', tabBarIcon: ({ color, size }) => <Icon name="trending" size={size} color={color} /> }} />
+        <Tabs.Screen name="dashboard" options={{ title: 'Clients', tabBarIcon: ({ color, size }) => <Icon name="people" size={size} color={color} duo /> }} />
+        <Tabs.Screen name="builder" options={{ title: 'Programs', tabBarIcon: ({ color, size }) => <Icon name="train" size={size} color={color} duo /> }} />
+        <Tabs.Screen name="calendar" options={{ title: 'Schedule', tabBarIcon: ({ color, size }) => <Icon name="calendar" size={size} color={color} duo /> }} />
+        <Tabs.Screen name="money" options={{ title: 'Business', tabBarIcon: ({ color, size }) => <Icon name="trending" size={size} color={color} duo /> }} />
         {/* Part of the Business tab (src/ui/BusinessSwitch.tsx): no button of
             its own, and the bar lights Business while it is open. */}
         <Tabs.Screen name="analytics" options={{ href: null, title: 'Analytics' }} />
@@ -138,7 +138,7 @@ export default function TrainerLayout() {
         <Tabs.Screen name="account" options={{ href: null, title: 'Account & Sign-in' }} />
         <Tabs.Screen name="join-code" options={{ href: null, title: 'Your Code' }} />
         <Tabs.Screen name="devices" options={{ href: null, title: 'Watch & Devices' }} />
-        <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color, size }) => <Icon name="me" size={size} color={color} /> }} />
+        <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ color, size }) => <Icon name="me" size={size} color={color} duo /> }} />
       </Tabs>
       <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
       {/* Renders nothing. Reads this coach's unsent floor queue — attendance

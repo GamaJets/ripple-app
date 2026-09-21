@@ -118,7 +118,9 @@ export function FloatingTabBar({ state, descriptors, navigation, partOf }: TabBa
                 flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: focused ? 8 : 0,
                 backgroundColor: focused ? t.night : 'transparent',
               }}>
-              {options.tabBarIcon?.({ focused, color: focused ? t.brandBright : t.ink3, size: focused ? 22 : 24 })}
+              {/* Duotone, the owner's pick (option C): every icon a soft fill under
+                  its line, green throughout; the current one bright on night. */}
+              {options.tabBarIcon?.({ focused, color: focused ? t.brandBright : t.brand, size: focused ? 22 : 24 })}
               {focused ? (
                 <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={CAP}
                   style={{ ...ty.tab, ...HERO_FIT, color: t.nightInk, flexShrink: 1 }}>{name}</Text>

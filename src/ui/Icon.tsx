@@ -1,7 +1,7 @@
 // Repple icon set — clean line/solid icons built on react-native-svg (already a
 // dependency). Replaces emoji app-wide. Usage: <Icon name="home" size={22}
 // color={t.brand} />. `filled` swaps stroke for fill on icons that support it.
-import type { ColorValue } from 'react-native';
+import { View, type ColorValue } from 'react-native';
 import Svg, { Path, Circle, Rect, Polyline, Line } from 'react-native-svg';
 
 export type IconName =
@@ -13,7 +13,13 @@ export type IconName =
   | 'ruler' | 'scale' | 'heart' | 'share' | 'settings' | 'sparkle' | 'dumbbell' | 'chat'
   | 'eye' | 'eye-off' | 'info';
 
-export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWidth = 2 }: {
+/**
+ * `duo`: the approved tab bar style (option C, owner 21 Sep 2026). The same
+ * glyph drawn twice, a soft fill of its closed shapes at 22% under the line, so
+ * every tab icon carries colour rather than a bare outline. `layer` is internal:
+ * it is how `duo` draws that fill pass.
+ */
+export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWidth = 2, duo = false, layer }: {
   // ColorValue, not string: expo-router's tabBarIcon hands its render callback a
   // ColorValue (string | OpaqueColorValue, the latter covering PlatformColor and
   // DynamicColorIOS). Narrowing to string here would push a cast onto all 16 tab
@@ -21,8 +27,21 @@ export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWi
   // react-native-svg's stroke and fill take ColorValue too, so nothing downstream
   // has to change.
   name: IconName; size?: number; color?: ColorValue; filled?: boolean; strokeWidth?: number;
+  duo?: boolean; layer?: 'fill';
 }) {
-  const common = { stroke: color, strokeWidth, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  if (duo && !layer) {
+    return (
+      <View style={{ width: size, height: size }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <View style={{ position: 'absolute' }}><Icon name={name} size={size} color={color} layer="fill" /></View>
+        <Icon name={name} size={size} color={color} strokeWidth={strokeWidth} filled={filled} />
+      </View>
+    );
+  }
+  // The fill pass paints every closed shape and no line; an open stroke (the
+  // bar of a dumbbell) has no area and simply draws nothing here.
+  const common = layer === 'fill'
+    ? { stroke: 'none', strokeWidth: 0, fill: color, fillOpacity: 0.22 }
+    : { stroke: color, strokeWidth, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   // An icon in this app is never the meaning on its own — it sits inside a
   // button, a row or a chip that carries the label. Left visible to the
   // accessibility tree it is one more unnamed stop between the reader and the
@@ -41,17 +60,20 @@ export function Icon({ name, size = 22, color = '#fff', filled = false, strokeWi
   );
   switch (name) {
     case 'home':
-      return S(<Path d="M12 3 3 10.5V21h6v-6h6v6h6V10.5z" fill={filled ? color : 'none'} stroke={filled ? 'none' : color} strokeWidth={strokeWidth} strokeLinejoin="round" />);
+      return S(<Path d="M4 10.3 12 3.8l8 6.5v8.7a1.5 1.5 0 0 1-1.5 1.5H15v-5.2a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v5.2H5.5A1.5 1.5 0 0 1 4 19z" {...common} {...(filled && layer !== 'fill' ? { fill: color, stroke: 'none' } : null)} />);
     case 'train':
     case 'dumbbell':
-      return S(<><Rect x="2" y="9" width="3" height="6" rx="1" {...common} /><Rect x="19" y="9" width="3" height="6" rx="1" {...common} /><Rect x="5.5" y="7.5" width="2.5" height="9" rx="1" {...common} /><Rect x="16" y="7.5" width="2.5" height="9" rx="1" {...common} /><Path d="M8 12h8" {...common} /></>);
+      return S(<><Rect x="2" y="8.8" width="3.2" height="6.4" rx="1.4" {...common} /><Rect x="18.8" y="8.8" width="3.2" height="6.4" rx="1.4" {...common} /><Rect x="5.9" y="6" width="3.4" height="12" rx="1.6" {...common} /><Rect x="14.7" y="6" width="3.4" height="12" rx="1.6" {...common} /><Path d="M9.3 12h5.4" {...common} /></>);
     case 'meals':
-      return S(<><Path d="M6 3v8M6 3a2 2 0 0 1 2 2v3a2 2 0 0 1-4 0V5a2 2 0 0 1 2-2M6 11v10" {...common} /><Path d="M17 3c-1.5 0-2.5 2-2.5 5s1 4 2.5 4 2.5-1 2.5-4-1-5-2.5-5M17 12v9" {...common} /></>);
+      return S(<><Path d="M3.5 11.5h17a8.5 7.5 0 0 1-17 0z" {...common} /><Path d="M9 3.5c-.9 1.1.9 2.1 0 3.2M12.5 3.5c-.9 1.1.9 2.1 0 3.2M16 3.5c-.9 1.1.9 2.1 0 3.2" {...common} {...(layer === 'fill' ? { fill: 'none' } : null)} /></>);
     case 'progress':
+      // A rising line, not a bar chart: `chart` keeps the bars for screens
+      // that mean a chart.
+      return S(<><Path d="M3.5 17.5 9 12l3.8 3.2L20 7.5" {...common} {...(layer === 'fill' ? { fill: 'none' } : null)} /><Path d="M15 7.5h5v5" {...common} {...(layer === 'fill' ? { fill: 'none' } : null)} /></>);
     case 'chart':
       return S(<Path d="M5 20V12M12 20V5M19 20v-6" {...common} />);
     case 'me':
-      return S(<><Circle cx="12" cy="8" r="4" {...common} /><Path d="M4 20c0-4 4-6 8-6s8 2 8 6" {...common} /></>);
+      return S(<><Circle cx="12" cy="8" r="3.8" {...common} /><Path d="M4.5 20.5c.8-3.9 3.8-6 7.5-6s6.7 2.1 7.5 6" {...common} /></>);
     case 'people':
       return S(<><Circle cx="9" cy="8" r="3.2" {...common} /><Path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5" {...common} /><Path d="M16 5.5a3 3 0 0 1 0 5.5M22 20c0-2.6-1.4-4.2-3.5-4.8" {...common} /></>);
     case 'grid':
