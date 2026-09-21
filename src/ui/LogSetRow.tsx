@@ -37,7 +37,7 @@ import { View, Text, TextInput, Pressable, Alert } from 'react-native';
 import { Icon } from './Icon';
 import { Field } from './kit';
 import { WeightUnitToggle } from './WeightUnitToggle';
-import { sp, radius, hairline, type as ty } from '../theme/scale';
+import { sp, radius, hairline, grown, font, type as ty } from '../theme/scale';
 import type { Theme } from '../theme/tokens';
 import { readLift, type WeightUnit } from '../lib/units';
 import { readHold } from '../lib/timedSets';
@@ -73,7 +73,12 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
   const [kg, setKg] = useState('');
   const [bwOn, setBwOn] = useState(false);
   const [timedOn, setTimedOn] = useState(timedDefault);
-  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, flex: 1, ...ty.body } as const;
+  // One height for the two boxes and the button (TF-21: "Log set button
+  // size"). The button had no height of its own, so it was as tall as its
+  // label and sat under the boxes' baseline like a caption. `grown` so the
+  // three still match when the reader's text size moves them.
+  const H = grown(46);
+  const inp = { color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 9, minHeight: H, flex: 1, ...ty.body } as const;
   return (
     <View style={{ marginTop: sp.md }}>
       <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
@@ -113,8 +118,8 @@ export function LogSetRow({ t, unit, timedDefault = false, onLog }: {
           // inferring it at read time would relabel every old zero as a pull-up.
           onLog({ value, kg: read.kg, bw: bwOn || read.kg == null, timed: timedOn });
           setFirst(''); setKg('');
-        }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
-          <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>Log Set</Text>
+        }} style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingHorizontal: sp.lg, minHeight: H, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ ...ty.label, ...font('700'), color: t.brandInk }}>Log Set</Text>
         </Pressable>
       </View>
       <View style={{ flexDirection: 'row', gap: sp.xl, flexWrap: 'wrap' }}>

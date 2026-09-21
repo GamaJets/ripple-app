@@ -1422,6 +1422,31 @@ export interface FigureItem {
 }
 
 /**
+ * Spread onto a hero figure that has `adjustsFontSizeToFit`, after its type
+ * step: `{ ...ty.hero, ...numeric, ...HERO_FIT }`.
+ *
+ * TF-23: a member's Progress screen drew body fat as a smudge the size of a
+ * full stop, next to a correctly placed "%", while the card under it read
+ * "19.5% BF". The number was known and was rendered, at 4pt. Two facts about
+ * React Native's new architecture on iOS (RCTTextLayoutManager.mm and
+ * NSTextStorage+FontScaling.m) make that possible:
+ *
+ *   - `minimumFontScale` is parsed and never read. The floor is
+ *     `minimumFontSize`, which defaults to 4pt. The 0.35 and 0.6 floors the
+ *     callers pass are not floors on iOS.
+ *   - The fit test asks whether the text fits the box in width AND height,
+ *     and a type step's `lineHeight` is a fixed line height that does not
+ *     shrink with the font. If the box comes out a hair shorter than that
+ *     line, no size fits, the search runs to the bottom and draws at 4pt.
+ *     The letter-spacing does not shrink either, so the digits pile up.
+ *
+ * Without a fixed line height the line shrinks with the font, so a box a
+ * hair short costs a hair of size, not the whole figure. A figure on one line
+ * has no use for a line height anyway.
+ */
+export const HERO_FIT = { lineHeight: undefined } as const;
+
+/**
  * The metric summary: a card that leads with ONE figure and says what it is,
  * what it is measured in, how it moved, over what period and on whose word.
  *
@@ -1511,7 +1536,7 @@ export function FigureCard({
             the floor is low because below it iOS ellipsises, and "AED 1,284,9…"
             is a different number. */}
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.35}
-          style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>{fig(f)}</Text>
+          style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>{fig(f)}</Text>
         {u ? <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{u}</Text> : null}
       </View>
       {/* UNDER the figure, not beside it. Beside it the two compete for one

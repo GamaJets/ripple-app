@@ -97,7 +97,7 @@ import { progressDoc, progressCsv, progressSummary, progressSpanLabel, shareDoc,
 import { bodyReadings, latestBodyReading, measuredNote, stalenessNote, mixedSourceNote, readingsLabel, dayLabel as bodyDayLabel, agoLabel, todayISO, type BodyReading } from '../../src/lib/bodyFigures';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
-import { Rule, Section, SectionHead, PageHead, Segmented, TonedChip, IconPlate, KpiRow, ActionCard, Cta, Ghost, Spark, Expandable, Field, fig, Flag, ChipGrid } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, PageHead, Segmented, TonedChip, IconPlate, KpiRow, ActionCard, Cta, Ghost, Spark, Expandable, Field, fig, Flag, ChipGrid, HERO_FIT } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, grown, font, type as ty, numeric, value } from '../../src/theme/scale';
 import { Icon } from '../../src/ui/Icon';
 import { analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
@@ -1860,7 +1860,9 @@ export default function Scans() {
               : 'no reading yet'}. Open body composition`}>
             <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', columnGap: 10, rowGap: sp.xs }}>
               <View style={{ flexDirection: 'row', alignItems: 'baseline', flexShrink: 1 }}>
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ ...ty.hero, ...numeric, color: t.ink, flexShrink: 1 }}>
+                {/* `lineHeight: undefined` is the fix for a blank figure (TF-23):
+                    see HERO_FIT in the kit. */}
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ ...ty.hero, ...numeric, ...HERO_FIT, color: t.ink, flexShrink: 1 }}>
                   {progressMetric === 'weight' ? fig(weightIn(wNow?.value, wu)) : fig(bfNow?.value)}
                 </Text>
                 {progressNow ? (

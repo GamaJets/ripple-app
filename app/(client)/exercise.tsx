@@ -347,6 +347,14 @@ export default function ExerciseScreen() {
      goes in a pocket comes back showing the truth rather than however many
      ticks JavaScript was allowed. */
   const [view, setView] = useState<ExerciseView>('ready');
+  // TF-22, "Scrolling issues": a blank page under the Library button. This
+  // screen is a hidden tab, so it stays mounted and its ScrollView keeps its
+  // offset when the next movement (or a shorter view of this one) loads.
+  // Scrolled deep into a long page, the member arrived past the end of a short
+  // one and saw nothing until they scrolled back. A new movement or a new view
+  // is a new page, and a new page opens at the top.
+  const pageScroll = useRef<ScrollView>(null);
+  useEffect(() => { pageScroll.current?.scrollTo({ y: 0, animated: false }); }, [raw, view]);
   const [setNo, setSetNo] = useState(1);
   const [repsText, setRepsText] = useState('');
   const [loadText, setLoadText] = useState('');
@@ -986,6 +994,7 @@ export default function ExerciseScreen() {
           wording", which was a real report. The hook gives the headroom only
           while a keyboard is actually up. */}
       <ScrollView
+        ref={pageScroll}
         contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 + pad }}
         showsVerticalScrollIndicator={false}
         refreshControl={pull}

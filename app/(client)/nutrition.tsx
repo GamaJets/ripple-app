@@ -2426,7 +2426,10 @@ export default function Nutrition() {
 
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRecipe(null)}
           accessibilityRole="button" accessibilityLabel="Close" />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
+        {/* TF-24, "Angles on the pop up screen": the corners are the card
+            radius the rest of the approved look uses, and the sheet clips what
+            scrolls inside it to them. */}
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, overflow: 'hidden', maxHeight: '82%', ...elevation.e2 }}>
           {recipe && (
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
               {/* A real recipe's photograph, where it has one. Over the slot's
@@ -2443,7 +2446,9 @@ export default function Nutrition() {
                 </View>
               ) : null}
               <Text style={{ ...ty.micro, color: t.ink3 }}>{recipe.slot}{sheetRecipe ? ' · Recipe' : ''}</Text>
-              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', marginTop: 4 }}>{recipe.n}</Text>
+              {/* A non-breaking hyphen, so "(Pre-Workout)" wraps as a word
+                  rather than leaving "(Pre-" at the end of a line (TF-24). */}
+              <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', marginTop: 4 }}>{recipe.n.replace(/-/g, '\u2011')}</Text>
               <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{Math.round(recipe.K * batch)} kcal · P{Math.round(recipe.P * batch)} / C{Math.round(recipe.C * batch)} / F{Math.round(recipe.F * batch)}{batch > 1 ? '  · ' + batch + ' servings' : ''}</Text>
               {/* What the recipe says of itself. The figures above are THIS
                   slot's portion of it; "makes 4" is the recipe as written, and
@@ -2560,7 +2565,7 @@ export default function Nutrition() {
               {recipe.ing.map((ing, i) => (
                 <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                   <Text style={{ ...ty.body, color: t.ink2 }}>{ing[0]}</Text>
-                  <Text style={{ ...ty.body, ...numeric, ...font('500'), color: t.ink }}>{Math.round(ing[1] * recipe.servings * batch * 100) / 100}{ing[2] ? ' ' + ing[2] : ''}</Text>
+                  <Text style={{ ...ty.body, ...numeric, ...font('500'), color: t.ink }}>{Math.round(ing[1] * recipe.servings * batch * 100) / 100} {ing[2] || 'whole'}</Text>
                 </View>
               ))}
               {/* Ingredients the recipe gives no amount for — "salt, to taste",
