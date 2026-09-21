@@ -12,6 +12,7 @@
 // California, and nobody at the keyboard can see it.
 import { dayKeyOf, dayKeyOfDate, sameLocalDay, instantForDay, readFoodEdit, foodChanged, readWorkoutEdit } from './entryEdit';
 import type { WorkoutEntry } from './mockData';
+import { coachMayAmend, coachAmendment, writeOutcome } from './coachAmend';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -227,6 +228,43 @@ ok(!readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: 'six', wa
   ok(blank.ok && blank.value.cardio?.unit === 'km', 'and so does a blank one');
   const same = readWorkoutEdit(row, { name: 'Rowing', sets: [], mins: '30', dist: '6', distUnit: 'km', watts: '', kcal: '' });
   ok(same.ok && same.value.cardio?.unit === 'km', 'and re-stating the same unit changes nothing');
+}
+
+/* ── a coach correcting a set they logged (src/lib/coachAmend.ts) ───────── */
+
+{
+  const mine: WorkoutEntry = { id: 'w1', t: '2026-09-15T10:00:00Z', exercise: 'Squat', sets: [[5, 100], [5, 100]], loggedBy: 'coach-1' };
+  ok(coachMayAmend(mine, 'coach-1'), 'a coach is offered a correction on a set they logged');
+  ok(!coachMayAmend({ ...mine, loggedBy: undefined }, 'coach-1'), 'never on a set the member logged');
+  ok(!coachMayAmend(mine, 'coach-2'), 'never on a set another coach logged');
+  ok(!coachMayAmend(mine, null), 'never while we do not know who the coach is');
+  ok(!coachMayAmend({ ...mine, id: undefined }, 'coach-1'), 'never on a row with no stored id');
+
+  const draft = { name: 'Squat', sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 100 }], mins: '', dist: '', watts: '', kcal: '' };
+  const same = coachAmendment(mine, draft);
+  ok(same.ok && same.value === null, 'an untouched sheet writes nothing and stamps nothing');
+
+  const now = new Date('2026-09-21T08:00:00Z');
+  const fixed = coachAmendment(mine, { ...draft, sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 80 }] }, now);
+  ok(fixed.ok && fixed.value != null && fixed.value.amended_at === now.toISOString(),
+     'a real correction carries amended_at so the member sees the record moved');
+  ok(fixed.ok && JSON.stringify(fixed.value?.sets) === '[[5,100],[5,80]]', 'and the corrected figures');
+  ok(fixed.ok && fixed.value != null && !('logged_by' in fixed.value) && !('performed_at' in fixed.value),
+     'and never who logged it or which day it was');
+
+  const emptied = coachAmendment(mine, { ...draft, sets: [{ reps: 0, kg: 0 }] });
+  ok(!emptied.ok, 'a correction that removes every set is refused, not written');
+
+  ok(writeOutcome('amend', { rows: 1 }) === null, 'one row back is done');
+  const lines = [
+    writeOutcome('amend', { rows: 0 }),
+    writeOutcome('withdraw', { rows: 0 }),
+    writeOutcome('amend', { rows: 0, error: { message: 'new row violates row-level security policy' } }),
+    writeOutcome('withdraw', 'threw'),
+  ];
+  ok(lines.every((l) => typeof l === 'string' && l.length > 0), 'zero rows, an error and no answer are all failures');
+  ok((lines[2] ?? '').includes('row-level security'), 'a refusal carries its reason');
+  ok(lines.every((l) => !(l ?? '').includes('\u2014')), 'no em-dash in anything a coach reads');
 }
 
 /* ── report ──────────────────────────────────────────────────────────────── */

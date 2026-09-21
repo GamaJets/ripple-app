@@ -2189,12 +2189,12 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     ok(attributionLine({ loggedBy: 'coach-1' }, 'Dave', false) === 'Logged by you',
        'the coach sees it as their own entry');
     const amended = attributionLine({ loggedBy: 'coach-1', amendedAt: '2026-08-27T09:00:00Z' }, 'Dave', false);
-    ok(amended !== null && amended.startsWith('Logged by you · amended by them'),
+    ok(amended !== null && amended.startsWith('Logged by you · changed after it was filed'),
        'a coach is told plainly that their account of the session was changed');
     const clientSide = attributionLine({ loggedBy: 'coach-1', amendedAt: '2026-08-27T09:00:00Z' }, 'Dave', true);
-    ok(clientSide !== null && clientSide.startsWith('Logged by Dave · amended by you'),
-       'and the client is told their change is visible, rather than it being silent');
-    ok(attributionLine({ loggedBy: 'coach-1', amendedAt: 'not-a-date' }, 'Dave', true) === 'Logged by Dave · amended by you',
+    ok(clientSide !== null && clientSide.startsWith('Logged by Dave · changed after it was filed'),
+       'and the client is told the record moved, without claiming who moved it: amended_at has no author');
+    ok(attributionLine({ loggedBy: 'coach-1', amendedAt: 'not-a-date' }, 'Dave', true) === 'Logged by Dave · changed after it was filed',
        'an unreadable timestamp drops the date rather than rendering Invalid Date');
   }
 

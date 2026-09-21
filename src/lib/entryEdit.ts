@@ -238,7 +238,7 @@ export function readWorkoutEdit(entry: WorkoutEntry, draft: WorkoutDraft): Edit<
   if (entry.cardio) {
     const mins = num(draft.mins);
     if (mins == null || mins <= 0) {
-      return { ok: false, reason: 'How long was it? A session with no minutes is not a session — delete it instead if it did not happen.' };
+      return { ok: false, reason: 'How long was it? A session with no minutes is not a session. Delete it instead if it did not happen.' };
     }
     const dist = draft.dist.trim() === '' ? 0 : num(draft.dist);
     if (dist == null || dist < 0) return { ok: false, reason: 'Distance is not a number. Leave it empty if you did not measure one.' };
@@ -262,7 +262,7 @@ export function readWorkoutEdit(entry: WorkoutEntry, draft: WorkoutDraft): Edit<
     // testimony below it onto a different set.
     const keptIdx = draft.sets.map((s, i) => (s.reps > 0 ? i : -1)).filter((i) => i >= 0);
     if (!keptIdx.length) {
-      return { ok: false, reason: 'Keep at least one set, or delete the entry instead — an entry with nothing in it still counts as a session.' };
+      return { ok: false, reason: 'Keep at least one set, or delete the entry instead. An entry with nothing in it still counts as a session.' };
     }
     const kept = keptIdx.map((i) => draft.sets[i]);
     patch.sets = kept.map((s) => [Math.round(s.reps), s.kg] as [number, number]);

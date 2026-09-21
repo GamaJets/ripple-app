@@ -21,7 +21,9 @@ export function attributionLine(
   const stamp = Number.isNaN(when.getTime())
     ? ''
     : ` on ${when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
-  // Said plainly on both sides. The coach needs to know their account of the
-  // session was changed; the client needs to know their change is visible.
-  return `${by} · amended by ${viewerIsTheClient ? 'you' : 'them'}${stamp}`;
+  // Said plainly on both sides, and without saying WHO. The member may amend a
+  // row their coach logged (part 53) and since part 3200 the coach may too, and
+  // `amended_at` records when, not by whom. "amended by you" on a coach's
+  // correction would tell the member they did something they did not.
+  return `${by} · changed after it was filed${stamp}`;
 }

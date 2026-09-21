@@ -173,7 +173,7 @@ export interface ReviewActions {
 export interface Review {
   /** True when there is nothing to render: the member logged this themselves. */
   own: boolean;
-  /** The caption — "Logged by Dave", "Logged by your coach · amended by you".
+  /** The caption — "Logged by Dave", "Logged by your coach · changed after it was filed".
    *  Null only when `own`. Produced by `attributionLine`, not here; this module
    *  decides the NAME that goes into it. */
   coachName: string | null;

@@ -147,6 +147,8 @@ import {
 // tempos with nothing to judge them against. See src/lib/performedTempo.ts.
 import { recordedTempo, tempoSummary, tempoVerdict } from '../../src/lib/performedTempo';
 import { dayKeyOf } from '../../src/lib/entryEdit';
+import { coachMayAmend } from '../../src/lib/coachAmend';
+import { CoachAmendSheet, confirmWithdraw } from '../../src/ui/CoachAmendSheet';
 // ── the program the client rewrote ──────────────────────────────────────
 //
 // The coach half of `client_plan_edits`. The READER is the member's own —
@@ -248,6 +250,13 @@ export default function ClientTraining() {
   /** How far back the read asks for. Null is everything, which is what this
    *  screen has always done and stays the default. */
   const [rangeDays, setRangeDays] = useState<number | null>(null);
+  /** The coach-logged entry open in the correction sheet. See src/lib/coachAmend.ts. */
+  const [amending, setAmending] = useState<WorkoutEntry | null>(null);
+  /** Swap or drop one entry in the log once the SERVER has confirmed it, so
+   *  every total over it follows the correction and nothing else is re-read. */
+  const replaceEntry = useCallback((id: string, next: WorkoutEntry | null) => {
+    setLog((prev) => prev && (next ? prev.map((x) => (x.id === id ? next : x)) : prev.filter((x) => x.id !== id)));
+  }, []);
 
   const load = useCallback(async (id: string, days: number | null, askable: boolean) => {
     wanted.current = id;
@@ -895,10 +904,32 @@ export default function ClientTraining() {
     // Still worth drawing: it is a fact about the session the coach has never
     // been shown, and it claims nothing about a plan.
     const tempoOnly = asked ? null : tempoSummary(e);
+    const coachId = auth.user?.id ?? null;
+    const mayAmend = coachMayAmend(e, coachId);
     return (
       <View key={`${e.id ?? e.exercise}-${i}`}
         style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-        <Text style={{ ...ty.body, ...font('500'), color: t.ink }}>{movement(e.exercise)}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+          <Text style={{ ...ty.body, ...font('500'), color: t.ink, flexShrink: 1 }}>{movement(e.exercise)}</Text>
+          {/* Only on a set THIS coach logged. A set the member logged is the
+              member's record and carries no coach control at all; the policy
+              in supabase/parts/3200 would refuse the write anyway. */}
+          {mayAmend ? (
+            <View style={{ flexDirection: 'row', gap: sp.lg }}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Correct ${movement(e.exercise)}`} hitSlop={8}
+                onPress={() => setAmending(e)}>
+                <Text style={{ ...ty.caption, ...font('600'), color: t.brandText }}>Correct</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Withdraw ${movement(e.exercise)}`} hitSlop={8}
+                onPress={() => confirmWithdraw({
+                  entry: e, coachId: coachId!, movement: movement(e.exercise), detail: lifted ?? cardio,
+                  day: day ? new Date(e.t).toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' }) : null, who, onGone: () => replaceEntry(e.id!, null),
+                })}>
+                <Text style={{ ...ty.caption, ...font('600'), color: t.ink2 }}>Withdraw</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
         {lifted ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{lifted}</Text> : null}
         {cardio ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{cardio}</Text> : null}
         {!lifted && !cardio ? (
@@ -952,7 +983,7 @@ export default function ClientTraining() {
         </View>
         {sn.amendedAt ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-            {who} has since changed part of this — the record keeps the mark, and neither app can remove it.
+            Part of this was changed after it was filed. The record keeps that mark.
           </Text>
         ) : null}
 
@@ -1954,6 +1985,11 @@ export default function ClientTraining() {
         </Text>
 
       </ScrollView>
+      {amending && auth.user?.id ? (
+        <CoachAmendSheet entry={amending} coachId={auth.user.id} unit={unit} who={who}
+          onClose={() => setAmending(null)}
+          onSaved={(next) => { replaceEntry(amending.id!, next); setAmending(null); }} />
+      ) : null}
     </SafeAreaView>
   );
 }

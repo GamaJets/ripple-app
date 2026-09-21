@@ -131,6 +131,29 @@ export const entryToRow = (uid: string, e: WorkoutEntry): WorkoutRow => ({
   logged_by: e.loggedBy ?? null,
 });
 
+/**
+ * An UPDATE body for the fields `next` names, and only those. Undefined goes
+ * out as null, so clearing the last bodyweight set, tempo or calorie figure
+ * really clears the column instead of leaving it describing sets that are gone.
+ * One mapping for both correction paths: the member's (src/ui/workoutLog.tsx)
+ * and the coach's (src/lib/coachAmend.ts).
+ */
+export function patchToRow(next: Partial<WorkoutEntry>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  if ('exercise' in next) patch.exercise = next.exercise;
+  if ('t' in next) patch.performed_at = next.t;
+  if ('sets' in next) patch.sets = next.sets ?? null;
+  if ('bw' in next) patch.bw = next.bw ?? null;
+  if ('timed' in next) patch.timed = next.timed ?? null;
+  if ('tempos' in next) patch.tempos = next.tempos ?? null;
+  if ('feel' in next) patch.feel = next.feel ?? null;
+  if ('cardio' in next) patch.cardio = next.cardio ?? null;
+  if ('kcal' in next) patch.kcal = next.kcal ?? null;
+  if ('zones' in next) patch.zones = next.zones ?? null;
+  if ('sessionMins' in next) patch.session_mins = next.sessionMins ?? null;
+  return patch;
+}
+
 /** Every field of an entry that is meant to survive a trip to the database.
  *  `id` is excluded: the server assigns it, so a new entry has none yet. */
 export const PERSISTED_FIELDS: (keyof WorkoutEntry)[] =

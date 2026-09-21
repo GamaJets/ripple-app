@@ -65,7 +65,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { WorkoutEntry } from '../lib/mockData';
-import { rowToEntry, entryToRow } from '../lib/workoutRow';
+import { rowToEntry, entryToRow, patchToRow } from '../lib/workoutRow';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -545,27 +545,11 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     // is the entire write — and still `false`, because it will not survive the
     // relaunch and the caller must not say "saved".
     if (!USE_SUPABASE || !uidRef.current) { apply(); return false; }
-    const patch: Record<string, unknown> = {};
-    if ('exercise' in next) patch.exercise = next.exercise;
-    if ('t' in next) patch.performed_at = next.t;
-    if ('sets' in next) patch.sets = next.sets ?? null;
-    // `bw` and `timed` are aligned to `sets` and had no key here at all, so an
-    // edit that changed the sets left the flags on the server describing the
-    // OLD ones — and an edit sheet that could not write them could not offer
-    // them either. Both columns exist (supabase/parts/162 and 204); undefined
-    // is sent as null so clearing the last bodyweight set really clears it.
-    if ('bw' in next) patch.bw = next.bw ?? null;
-    if ('timed' in next) patch.timed = next.timed ?? null;
-    // And `tempos` for the same reason (supabase/parts/3220): it is aligned to
-    // `sets`, so an edit that removes a set must be able to rewrite it, and an
-    // undefined must reach the server as null rather than leaving a tempo list
-    // describing sets that are no longer there.
-    if ('tempos' in next) patch.tempos = next.tempos ?? null;
-    if ('feel' in next) patch.feel = next.feel ?? null;
-    if ('cardio' in next) patch.cardio = next.cardio ?? null;
-    if ('kcal' in next) patch.kcal = next.kcal ?? null;
-    if ('zones' in next) patch.zones = next.zones ?? null;
-    if ('sessionMins' in next) patch.session_mins = next.sessionMins ?? null;
+    // `bw`, `timed` and `tempos` are aligned to `sets`, so an edit that changes
+    // the sets must rewrite them too, and undefined must reach the server as
+    // null. The mapping lives in src/lib/workoutRow.ts so the coach's
+    // correction path writes exactly the same columns.
+    const patch = patchToRow(next);
     // Nothing to send is not a failure — the row already says what was asked.
     if (!Object.keys(patch).length) return true;
     try {
