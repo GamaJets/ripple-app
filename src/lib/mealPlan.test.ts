@@ -576,6 +576,28 @@ ok(searchMeals('meat', 'Dinner', 'pemmican', 40, []).length === 0,
   eq(mealDish('Mango overnight oats + chia — chilled'), 'Mango overnight oats + chia', 'and so does a name stored in the old form');
   ok(sameMealName('Berry oats — warm', 'Berry oats (warm)'), 'an old stored name is the same meal as its new spelling');
   ok(!sameMealName('Berry oats — warm', 'Berry oats (chilled)'), 'and a different style is still a different meal');
+  ok(sameMealName('Apple & cinnamon oats (with cinnamon)', 'Apple & cinnamon oats'),
+     'a style that only repeats its dish is the same meal with or without it, so an older plan is not flagged stale');
+  ok(sameMealName('Apple & cinnamon oats — with cinnamon', 'Apple & cinnamon oats'),
+     'and the same holds for the old dashed spelling');
+  ok(!sameMealName('Apple & cinnamon oats (warm)', 'Apple & cinnamon oats'),
+     'but a style that says something new is still part of the meal');
+  {
+    // Every generated breakfast, across every diet: none prints a style that repeats its dish.
+    const diets = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'] as const;
+    let repeats = 0;
+    for (const d of diets) {
+      const size = catalogSize(d, 'Breakfast');
+      for (let i = 0; i < size; i++) {
+        const n = mealAt(d, 'Breakfast', i).n;
+        const m = n.match(/^(.*) \(([^()]*)\)$/);
+        if (!m) continue;
+        const key = m[2].trim().split(/\s+/).pop()!.toLowerCase();
+        if (key.length > 2 && m[1].toLowerCase().includes(key)) repeats++;
+      }
+    }
+    eq(repeats, 0, 'no generated breakfast prints a style that repeats its own dish');
+  }
   const empty = unfillableName('Breakfast', ['soy']);
   eq(mealDish(empty), empty, "an empty slot's name has no style to strip");
   ok(!empty.includes('—') && !empty.includes('('), 'and it reads as a sentence, with no joiner in it');

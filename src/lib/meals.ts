@@ -657,10 +657,28 @@ export function mealDish(name: string): string {
 }
 /** The em dash a breakfast's style was once joined with. Read, never written. */
 const LEGACY_STYLE = / \u2014 .*$/;
-/** Whether two names are the same generated meal, either side possibly
- *  written in the old dashed form. */
+/**
+ * Whether a style only repeats what the dish already says: "with cinnamon" on
+ * "Apple & cinnamon oats". Judged by the style's last word, the one that
+ * names a flavour. "warm" and "chilled" never repeat a dish, so they are kept.
+ */
+function redundantStyle(dish: string, style: string): boolean {
+  const key = style.trim().split(/\s+/).pop()?.toLowerCase() ?? '';
+  return key.length > 2 && dish.toLowerCase().includes(key);
+}
+
+/** Whether two names are the same generated meal. Either side may be in the
+ *  old dashed form, and either may carry a style that only repeats its dish,
+ *  which is printed today and was not always: "Apple & cinnamon oats (with
+ *  cinnamon)" and "Apple & cinnamon oats" are one meal, so a coach's plan
+ *  written before that change is not flagged stale over it. A style that says
+ *  something new still counts: "Berry oats (warm)" is not "(chilled)". */
 export function sameMealName(a: string, b: string): boolean {
-  const canon = (n: string) => n.replace(/ \u2014 (.*)$/, ' ($1)');
+  const canon = (n: string) => {
+    const bracketed = n.replace(/ \u2014 (.*)$/, ' ($1)');
+    const m = bracketed.match(/^(.*) \(([^()]*)\)$/);
+    return m && redundantStyle(m[1], m[2]) ? m[1] : bracketed;
+  };
   return canon(a) === canon(b);
 }
 
@@ -707,7 +725,11 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
     // The style in brackets, the way a snack's prep already is. It was joined
     // with an em dash, which a tester read as the app being written by a
     // machine. `mealDish` strips either form.
-    n = `${cap(top.n)} ${base.n}${boost.n ? ' ' + boost.n : ''}${style.n ? ' (' + style.n + ')' : ''}`;
+    const dish = `${cap(top.n)} ${base.n}${boost.n ? ' ' + boost.n : ''}`;
+    // A style that only repeats the dish is left off: "Apple & cinnamon oats
+    // (with cinnamon)" says cinnamon twice. The style is still part of the
+    // index, so nothing stored moves; only the words printed change.
+    n = `${dish}${style.n && !redundantStyle(dish, style.n) ? ' (' + style.n + ')' : ''}`;
     ico = base.ico ?? '🍽️';
     steps = [
       base.step ?? `Prepare the ${base.n}.`,

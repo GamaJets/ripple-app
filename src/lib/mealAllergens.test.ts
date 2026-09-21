@@ -214,10 +214,22 @@ eq(allergenGapNote(emptySlots('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack']
     combos++;
     const size = catalogSize(d, s, av);
     mix(`${d}/${s}/${m}:${size};`);
-    // A breakfast's style is bracketed now where it was dashed; the digest
-    // reads it back in the old form, so a pass here says the MEAL is the same
-    // and only its punctuation moved. Anything else that moved still fails.
-    for (let k = 0; k < 32; k++) { const x = mealAt(d, s, Math.floor((k * size) / 32), av); mix((s === 'Breakfast' ? x.n.replace(/ \(([^()]*)\)$/, ' \u2014 $1') : x.n) + '|' + x.k + ';'); }
+    // A breakfast's name is rebuilt in the exact form it had at d16a966 before
+    // it is hashed, so a pass here still says the MEAL at every index is the
+    // same and only how its name is printed moved. Two things moved: the style
+    // is bracketed where it was dashed, and a style that only repeats its dish
+    // ("Apple & cinnamon oats", with cinnamon) is no longer printed at all.
+    // That second one leaves no trace in the name, so the style is read back
+    // from the method's last step, which has always named it and still does.
+    // Anything else that moved, a dish, a style, a calorie, still fails.
+    const oldForm = (x: { n: string; steps: string[] }): string => {
+      if (s !== 'Breakfast') return x.n;
+      const bracketed = x.n.match(/^(.*) \(([^()]*)\)$/);
+      if (bracketed) return `${bracketed[1]} \u2014 ${bracketed[2]}`;
+      const finish = (x.steps[x.steps.length - 1] ?? '').match(/^Finish, (.*), then serve\.$/);
+      return finish ? `${x.n} \u2014 ${finish[1]}` : x.n;
+    };
+    for (let k = 0; k < 32; k++) { const x = mealAt(d, s, Math.floor((k * size) / 32), av); mix(oldForm(x) + '|' + x.k + ';'); }
   }
   eq(combos, 1204, 'the same 1,204 combinations can be built');
   eq(h.toString(16), '7f2e797c', 'and every one of them decodes its indices exactly as before');
