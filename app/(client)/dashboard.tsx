@@ -1390,7 +1390,7 @@ export default function Home() {
             <ListRow icon="calendar" tone="blue" title="Book" note="Classes and sessions you can book"
               onPress={() => router.push('/(client)/calendar')} />
           ) : remoteCoached ? (
-            <ListRow icon="message" tone="blue" title="Check-In" note="Send your coach this week's update"
+            <ListRow icon="message" tone="blue" title="Check-in" note="Send your coach this week's update"
               onPress={() => router.push('/(client)/checkin')} />
           ) : (
             <ListRow icon="chart" tone="blue" title="Report" note="Your training and body, on one page"
