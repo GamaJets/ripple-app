@@ -37,7 +37,7 @@ import { useNow } from '../../src/ui/today';
 // the app does — 1,248 sessions, not 1248.
 import { num } from '../../src/lib/format';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, ScreenHeader, FigureCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead, TonedChip, Donut, Legend, Meter, Expandable, type Slice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, ScreenHeader, HeroCard, Segmented, KpiRow, ListRow, Card, Cta, Ghost, Spark, fig, Flag, Notice, PartialRead, TonedChip, Donut, Legend, Meter, Expandable, Scrim, type Slice } from '../../src/ui/kit';
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { sharePercent } from '../../src/lib/sharePercent';
@@ -1076,6 +1076,57 @@ export default function TrainerAnalytics() {
         <ScreenHeader eyebrow="Your coaching business" title="Analytics"
           actions={<Ghost icon="search" a11yLabel="Search every screen" onPress={() => router.push('/(trainer)/explore')} />} />
 
+        {/* ── the hero: the month so far, and the one thing to do about it ──
+            The approved night card, first on the screen. WHICH figure leads is
+            the one thing `delivery` decides: a coach who trains people in the
+            room leads on the sessions they delivered, a remote coach on what
+            was taken, and every unknown resolves to the in-person layout. The
+            other figure is under "the other figure, always present" below, and
+            the two are never added.
+
+            The eyebrow says "so far": `monthToDate` runs from the first to
+            now, and a hero that said "this month" on the 9th would be read as
+            the month. Under any read that is not whole the title is words,
+            never a 0: `sessionMonth` and `ledger()` both return null for a
+            short read, and the meta line carries their reason. Takings are one
+            line per currency, never a sum, as Money draws them. */}
+        {sessionsLead ? (
+          <HeroCard
+            eyebrow="SESSIONS DELIVERED · THIS MONTH SO FAR"
+            title={sessionsMo == null
+              ? (sessionsStatus === 'loading' ? 'Counting Your Sessions' : 'Not Counted')
+              : `${num(sessionsMo)} ${sessionsMo === 1 ? 'Session' : 'Sessions'}`}
+            meta={sessionsMo == null
+              ? sessionsUnknownLine(sessionsStatus)
+              : revenue != null && sessionFee != null
+                ? (myCur
+                    ? `${fig(priced(revenue))} at your ${fig(priced(sessionFee))} session rate. Your own arithmetic from the outcomes you marked, not a payout.`
+                    : noCur('there is no unit to price these sessions in'))
+                : `Counted from the outcomes you marked. Set a session rate in your profile to see what that is worth.`}
+            cta={unmarkedMo != null && unmarkedMo > 0
+              ? { label: `Mark ${num(unmarkedMo)} ${unmarkedMo === 1 ? 'Session' : 'Sessions'}`, onPress: () => router.push('/(trainer)/sessions') }
+              : { label: 'Open Payments', onPress: () => router.push('/(trainer)/payments') }}
+          />
+        ) : (
+          <HeroCard
+            eyebrow="TAKEN · THIS MONTH SO FAR"
+            title={takenMonth.total == null
+              ? (takenMonth.status === 'loading' ? 'Reading Your Payments' : 'Not Stated')
+              : takenPots.length === 0
+                ? 'Nothing Taken Yet'
+                // One line per currency. They share a headline and are not a sum.
+                : takenPots.map((x) => minorMoney(x.minorUnits, x.currency) ?? `${x.currency} Not Denominated`).join('\n')}
+            meta={[
+              takenMonth.reason
+                ?? (takenPots.length === 0
+                  ? 'Packages, subscription renewals and the payments you record yourself all count here.'
+                  : `Gross, before fees${takenPots.length > 1 ? ` · ${takenPots.length} currencies, never added` : ''}`),
+              takenHoles > 0 ? `${num(takenHoles)} ${takenHoles === 1 ? 'payment' : 'payments'} with no currency or amount ${takenHoles === 1 ? 'is' : 'are'} not in it.` : null,
+            ].filter(Boolean).join(' ')}
+            cta={{ label: 'Open Money', onPress: () => router.push('/(trainer)/money') }}
+          />
+        )}
+
         {/* ── the window ────────────────────────────────────────────────────
             The board's chip row, in the segmented-bar idiom the kit already
             uses: one pill, equal segments, the chosen one in ink. 30D leads,
@@ -1513,52 +1564,6 @@ export default function TrainerAnalytics() {
             targets they set against both, and the trend. Third in the review's
             order, under the clients' outcomes and under who is at risk. */}
 
-        {/* ── the hero ─────────────────────────────────────────────────────
-            WHICH figure leads is the one thing `delivery` decides here. A coach
-            who trains people in the room leads on the sessions they delivered;
-            a coach who works remotely sells no sessions at all, so leading on a
-            session count would open their business analytics on a nought. Both
-            figures are on the screen either way and neither is ever removed —
-            the order is what changes.
-
-            Every unknown resolves to the in-person layout, so a coach whose
-            roster failed to load, or who has not answered how they coach, gets
-            the screen they have always had.
-
-            A kit FigureCard now, not the retired `Hero`: the same figure and
-            the same sentence under it, with the period and whose word it is
-            on the card's last line. The ring Hero drew for the revenue goal is
-            not carried over — Your Goals, below, draws that same progress as a
-            bar beside its target, and one goal drawn twice in two shapes is
-            two things to reconcile. */}
-        {sessionsLead ? (
-          <FigureCard
-            title="Sessions Delivered"
-            note="Payments"
-            onPress={() => router.push('/(trainer)/payments')}
-            figure={sessionsMo == null ? null : num(sessionsMo)}
-            period="This month"
-            source={sessionsMo == null ? undefined : 'From the outcomes you marked'}
-            detail={sessionsMo == null
-              ? sessionsUnknownLine(sessionsStatus)
-              : revenue != null && sessionFee != null
-                ? (myCur
-                    ? `${fig(priced(revenue))} at your ${fig(priced(sessionFee))} session rate. ${DELIVERED_IS_MARKED} Repple does not process this, so it is your own arithmetic and not a payout.`
-                    : noCur('there is no unit to price these sessions in'))
-                : `Set a session rate in your profile to see what that is worth. ${DELIVERED_IS_MARKED}`}
-          />
-        ) : (
-          <FigureCard
-            title="Taken This Month"
-            note="Money"
-            onPress={() => router.push('/(trainer)/money')}
-            figure={takenOne}
-            period="This month"
-            source={takenOne == null ? undefined : 'Recorded payments, gross'}
-            detail={takenNote}
-          />
-        )}
-
         {/* Sessions nobody has said anything about, on whichever layout. This
             is the money that used to be swept silently INTO the figure above:
             the old count was "booked and in the past", which is every one of
@@ -1952,8 +1957,7 @@ export default function TrainerAnalytics() {
       {/* ── goal editor ──────────────────────────────────────────────────── */}
       <Modal visible={goalOpen} transparent animationType="slide" onRequestClose={() => setGoalOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)}
-          accessibilityRole="button" accessibilityLabel="Close" />
+        <Scrim onPress={() => setGoalOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Set Your Goals</Text>
           {/* The parenthetical names the unit the coach is typing in, so with

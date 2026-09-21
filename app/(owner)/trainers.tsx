@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { num } from '../../src/lib/format';
-import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, Donut, Legend, TonedChip, fig } from '../../src/ui/kit';
+import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, Notice, Donut, Legend, TonedChip, HeroCard, HeroRing, Scrim, fig } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
 import { FORWARD_ICON } from '../../src/ui/direction';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, font, grown } from '../../src/theme/scale';
@@ -169,16 +169,6 @@ export default function OwnerTrainers() {
   // list under it (scripts/check-remount.mjs).
   const invitesBlock = (
     <>
-      <Section>
-        <SectionHead title={onboarding ? 'Start Your Roster' : 'Add to the Roster'} />
-        <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-          {onboarding
-            ? 'Nobody coaches at your gym in this app yet. Invite a trainer by email and they join when they accept in their own app. Their clients and sessions start counting here from then.'
-            : 'Invite a trainer by email. They join your gym when they accept in their own app.'}
-        </Text>
-        <Cta label="Invite a Trainer by Email" wide onPress={() => { setInvEmail(''); setInvErr(null); setInvOpen(true); }} />
-      </Section>
-
       {/* The section used to appear only when `pending.length > 0`, so a
           REFUSED invite read — which leaves the list empty — removed it from
           the screen without a word. An owner concludes nobody is waiting on
@@ -230,10 +220,9 @@ export default function OwnerTrainers() {
 
         {/* The board's tab-root opening: eyebrow, title, and the one global
             action as a round control. Inviting is that action — it is the only
-            write on this screen — and it stays as a full-width button too,
-            in its own card under the roster (or leading the screen for a gym
-            with nobody on it yet), because a plus in the corner is not where a
-            first-time owner looks for "add somebody". */}
+            write on this screen — and it is also the hero's full-width
+            button whenever the roster read is whole, because a plus in the
+            corner is not where a first-time owner looks for "add somebody". */}
         <ScreenHeader
           eyebrow="Your Coaching Staff"
           title="Trainers"
@@ -249,18 +238,51 @@ export default function OwnerTrainers() {
           </>}
         />
 
-        {/* The whole screen is one list and the figures over it, so the reason
-            they are all dashes is worth one sentence rather than seven. */}
-        {trainersUnread ? (
-          <Notice tone={t.warn} kicker="Roster Unread"
-            title="Your Trainers Could Not Be Read"
-            note="Nothing below is a statement about your staff. An empty roster here means the read failed, not that nobody works for you.">
-            <View style={{ marginTop: sp.lg }}>
-              <Cta label="Try Again" wide onPress={refresh} />
-            </View>
-          </Notice>
-        ) : null}
+        {/* ── the hero: the staff at a glance, and the one action ──────────
+            The approved night card, first on the screen. It absorbed the
+            "Roster Unread" notice that stood here: under an unread roster the
+            hero says so in words and its one action is to read again, because
+            every figure below is a dash for that one reason. Under a loading
+            roster it says it is reading, and under a short one (neither read
+            emits 'partial' today) that it is not a count. Only a WHOLE read
+            gets a number, a ring, or the invite button; an owner is never
+            told to invite anybody on the strength of a read that failed.
 
+            The ring is the share of the staff `trainerHealth` puts On Track,
+            over the same thirty days as everything else here. No ring for a
+            gym with nobody on it: nought of nought is not a share. */}
+        {(() => {
+          const openInvite = () => { setInvEmail(''); setInvErr(null); setInvOpen(true); };
+          if (trainersUnknown) {
+            return (
+              <HeroCard eyebrow="YOUR COACHING STAFF"
+                title={loading || rosterStatus === 'loading' ? 'Reading Your Roster' : trainersUnread ? 'Your Trainers Could Not Be Read' : 'Only Part of Your Roster Came Back'}
+                meta={loading || rosterStatus === 'loading'
+                  ? 'Nothing is counted until the whole roster is here.'
+                  : trainersUnread
+                    ? 'Nothing below is a statement about your staff. An empty roster here means the read failed, not that nobody works for you.'
+                    : 'So there is no count of your staff and no total of their sessions.'}
+                cta={loading || rosterStatus === 'loading' ? undefined : { label: 'Try Again', onPress: refreshAll }} />
+            );
+          }
+          if (onboarding) {
+            return (
+              <HeroCard eyebrow="YOUR COACHING STAFF" title="No Trainers Yet"
+                meta="Invite a trainer by email. They join your gym when they accept in their own app, and their clients and sessions start counting here."
+                cta={{ label: 'Invite a Trainer', onPress: openInvite }} />
+            );
+          }
+          const n = roll.trainers;
+          const good = ranked.filter((r) => r.h.risk === 'ok').length;
+          return (
+            <HeroCard eyebrow="YOUR COACHING STAFF · LAST 30 DAYS"
+              title={`${num(n)} ${n === 1 ? 'Trainer' : 'Trainers'}`}
+              meta={`${num(roll.clients)} ${roll.clients === 1 ? 'client' : 'clients'} · ${num(roll.atRiskCount)} ${roll.atRiskCount === 1 ? 'needs' : 'need'} a look`}
+              ring={<HeroRing value={n > 0 ? good / n : null} figure={num(good)} sub={`of ${num(n)} ${riskLabel('ok').toLowerCase()}`}
+                spoken={`${num(good)} of ${num(n)} trainers ${riskLabel('ok').toLowerCase()} over the last 30 days`} />}
+              cta={{ label: 'Invite a Trainer', onPress: openInvite }} />
+          );
+        })()}
 
         {onboarding ? invitesBlock : null}
 
@@ -419,20 +441,16 @@ export default function OwnerTrainers() {
           );
         })()}
 
-        {/* ── inviting: below the operating roster, unless there is no roster ──
-            The invite button used to sit inside the KPI card at the top, so the
-            first thing on a staffed gym's Trainers screen was a form for
-            adding somebody else. It follows the roster now. The exception is
-            the gym that has nobody yet — a whole read with no trainers in it —
-            where inviting IS the next action and this block leads instead.
-            Never on an unread roster: that is the state in which this screen
-            tells an owner not to invite anyone on the strength of it. */}
+        {/* ── pending invitations: below the operating roster, unless there
+            is no roster yet, where they follow the hero directly. The invite
+            button that sat in this block is the hero's action now. */}
         {onboarding ? null : invitesBlock}
       </ScrollView>
 
       {/* ── invite ─────────────────────────────────────────────────────── */}
       <Modal visible={invOpen} transparent animationType="slide" onRequestClose={() => setInvOpen(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <Scrim opacity={0.4} label="Cancel" onPress={() => { setInvErr(null); setInvOpen(false); }} />
           <View style={sheet}>
             <Text style={{ ...ty.head, color: t.ink, marginBottom: sp.sm }}>Invite a Trainer</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
@@ -454,7 +472,8 @@ export default function OwnerTrainers() {
 
       {/* ── one trainer ────────────────────────────────────────────────── */}
       <Modal visible={!!current} transparent animationType="slide" onRequestClose={() => setSel(null)}>
-        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: '#0006' }}>
+        <View style={{ flex: 1 }}>
+          <Scrim opacity={0.4} onPress={() => setSel(null)} />
           <View style={sheet}>
             {current ? (() => { const h = trainerHealth(current); return (
               <>

@@ -21,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, PageHead, KpiTile, TonedChip, fig, type Tone } from '../../src/ui/kit';
+import { Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, PageHead, KpiTile, TonedChip, HeroCard, HeroRing, fig, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value, fontScale, font } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 // The three figures under the name — board page 19's "Clients · Rating ·
@@ -399,6 +399,28 @@ export default function CoachProfile() {
   ];
   if (p.photo) photoActions.push({ icon: 'minus', label: 'Remove', onPress: () => p.setPhoto(null) });
 
+  /* ── the hero: how far a client can see this coach ─────────────────────
+   *
+   * The listing state is `publicPageState`, the same word the web-page card
+   * below says, and the ring counts the six things a client reads on the
+   * profile that the coach fills in themselves. Stated ONLY under access
+   * 'ok': before that every field is the provider's frozen blank, and a
+   * ring of 0 of 6 over a profile that has not arrived would tell a coach
+   * who wrote an evening's bio that it is empty. A failed read also stays
+   * 'loading' (src/ui/coachProfile.tsx keeps `synced` false rather than
+   * guess), so the loading words say how to ask again. */
+  const filled = [
+    { what: 'a photo', done: !!avatarSource(p.photo) },
+    { what: 'a tagline', done: !!p.tagline.trim() },
+    { what: 'a bio', done: !!p.bio.trim() },
+    { what: 'specialties', done: p.specialties.length > 0 },
+    { what: 'what you offer', done: p.offers.length > 0 },
+    { what: 'a session rate', done: p.sessionFee != null },
+  ];
+  const filledN = filled.filter((f) => f.done).length;
+  const missing = filled.filter((f) => !f.done).map((f) => f.what);
+  const PAGE_TITLE = { live: 'Your Page Is Live', ready: 'Your Page Is Off', 'no-address': 'Listed, With No Page Address', 'off-directory': 'Not Listed in Find a Trainer' } as const;
+
   const G = layout.gutter;
 
   return (
@@ -455,6 +477,34 @@ export default function CoachProfile() {
             {p.access === 'loading' ? 'Reading your profile' : (p.tagline || 'No tagline yet')}
           </Text>
         </View>
+
+        {/* ── the hero ────────────────────────────────────────────────────────
+            Under the identity, which is this screen's header. See `filled`
+            above for what the ring counts and why it waits for 'ok'. The one
+            action is the next thing that would get a client further: finish
+            the profile, then copy the live page's link, otherwise open the
+            editor where the page is switched on. */}
+        {p.access === 'loading' ? (
+          <HeroCard eyebrow="YOUR PUBLIC PROFILE" title="Reading Your Profile"
+            meta="Your listing is not stated until your profile arrives. If it does not, pull down to read it again." />
+        ) : p.access !== 'ok' ? (
+          <HeroCard eyebrow="YOUR PUBLIC PROFILE" title="Profile Not Opened"
+            meta={p.accessNote ?? trainerAccessNote(p.access) ?? 'We could not confirm this is your own coaching profile, so nothing about your listing is stated.'}
+            cta={{ label: 'Try Again', onPress: () => { void p.reload(); } }} />
+        ) : (
+          <HeroCard eyebrow="YOUR PUBLIC PROFILE" title={PAGE_TITLE[pageState]}
+            meta={missing.length
+              ? `Still to add: ${missing.join(', ')}.`
+              : pageState === 'live' ? 'Everything a client reads is filled in, and your page is being served.' : 'Everything a client reads is filled in.'}
+            ring={<HeroRing value={filledN / filled.length} figure={`${filledN}/${filled.length}`} sub="filled in"
+              spoken={`${filledN} of ${filled.length} profile details filled in`} />}
+            cta={missing.length
+              ? { label: 'Finish Your Profile', onPress: () => setEditing(true) }
+              : pageState === 'live' && pageUrl
+                ? { label: 'Copy Page Link', onPress: () => { void copyPageUrl(); } }
+                : { label: 'Edit Profile', onPress: () => setEditing(true) }}
+          />
+        )}
 
         {/* ── Clients · Rating · Years ────────────────────────────────────────
             See the note on the three reads above. Each slot is spoken with
