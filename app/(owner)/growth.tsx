@@ -62,6 +62,7 @@ import { useTheme } from '../../src/ui/components';
 import { Section, SectionHead, ScreenHeader, KpiRow, Cta, Ghost, Flag, fig, HeroCard, Ring, Meter, Donut, Legend, Expandable, type Tone } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value, font } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
+import { GymPosts } from '../../src/ui/owner/GymPosts';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 // Not for anything this screen draws — for the STATUS. The roster provider
@@ -597,6 +598,8 @@ export default function OwnerGrowth() {
           { label: 'Used, All Time', value: fig(promosWhole && promos.every((p) => p.redeemed >= 0) ? num(promos.reduce((a, p) => a + p.redeemed, 0)) : null), tone: 'orange' },
         ]} />
 
+
+        <GymPosts />
 
         {/* ── promo / referral codes ─────────────────────────────────────── */}
         <Section>
